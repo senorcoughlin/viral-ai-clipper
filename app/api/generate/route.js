@@ -103,31 +103,27 @@ async function transcribe(audioPath) {
 
 async function downloadSource(url, dir) {
   const key = process.env.TUNELIO_API_KEY;
-  if (!key) return null;
+  if (!key) return { path: null, error: 'TUNELIO_API_KEY missing' };
   try {
     const create = await fetch(
       'https://tunelio.dev/create?' + new URLSearchParams({ url, quality: '360p' }),
       { headers: { Authorization: 'Bearer ' + key } }
     );
     if (!create.ok) {
-      console.error('tunelio status', create.status);
-      return null;
+      const body = await create.text();
+      return { path: null, error: 'tunelio ' + create.status + ' ' + body.slice(0, 180) };
     }
     const data = await create.json();
     const fileUrl = data.url || data.downloadUrl;
-    if (!fileUrl) {
-      console.error('tunelio no url', JSON.stringify(data).slice(0, 200));
-      return null;
-    }
+    if (!fileUrl) return { path: null, error: 'tunelio no url: ' + JSON.stringify(data).slice(0, 180) };
     const file = await fetch(fileUrl);
-    if (!file.ok) return null;
+    if (!file.ok) return { path: null, error: 'file download ' + file.status };
     const buf = Buffer.from(await file.arrayBuffer());
     const out = path.join(dir, 'source.mp4');
     await fs.writeFile(out, buf);
-    return out;
+    return { path: out, error: null };
   } catch (e) {
-    console.error('download failed', e?.message || e);
-    return null;
+    return { path: null, error: e?.message || String(e) };
   }
 }
 
@@ -156,8 +152,11 @@ export async function POST(request) {
   let source = null;
   let transcript = await fetchTranscript(videoUrl);
 
+  let downloadError = null;
   try {
-    source = await downloadSource(videoUrl, dir);
+    const dl = await downloadSource(videoUrl, dir);
+    source = dl?.path || null;
+    downloadError = dl?.error || null;
     if (source) {
       const audio = path.join(dir, 'audio.mp3');
       const ffmpeg = require('ffmpeg-static');
@@ -235,8 +234,10 @@ export async function POST(request) {
       simulated: clips.every(c => c.preview),
       note: clips.some(c => !c.preview)
         ? 'Cut from your source video.'
-        : (transcript ? 'AI scored from the real transcript. Preview videos until download succeeds.' : 'Preview clips. Real cutting runs when download succeeds.'),
+        : (downloadError || (transcript ? 'AI scored from the real transcript. Preview videos until download succeeds.' : 'Preview clips. Real cutting runs when download succeeds.')),
       hasTranscript: !!transcript,
+      downloadError: downloadError || null,
+      hasTunelio: !!process.env.TUNELIO_API_KEY,
     },
   });
 }
