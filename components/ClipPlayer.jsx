@@ -196,10 +196,14 @@ export default function ClipPlayer({ clip, compact = false }) {
         <Bar label="Hook" pct={hookPct} color={color} />
         <Bar label="Pacing" pct={pacePct} color={color} />
 
-        <div className="flex gap-2 pt-1">
+        <div className="flex flex-wrap gap-2 pt-1">
           <button type="button" onClick={() => copy(socialCaption, 'cap')} className="btn-lime h-10 flex-1 text-sm">
             {copied === 'cap' ? 'Copied!' : 'Copy caption'}
           </button>
+          <button type="button" onClick={() => { copy(socialCaption, 'tiktok'); window.open('https://www.tiktok.com/upload', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">TikTok</button>
+          <button type="button" onClick={() => { copy(socialCaption, 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
+          <button type="button" onClick={() => { copy(socialCaption, 'shorts'); window.open('https://studio.youtube.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Shorts</button>
+          <button type="button" onClick={() => { copy(socialCaption, 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
           <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}
           </a>

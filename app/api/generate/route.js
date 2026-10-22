@@ -110,12 +110,24 @@ function captionText(s) {
     .slice(0, 52) || 'Watch this';
 }
 
+function wordFilters(caption, length) {
+  const words = captionText(caption).split(' ').filter(Boolean).slice(0, 12);
+  if (!words.length) return '';
+  const dur = Math.max(Number(length) || 15, 5);
+  const step = dur / words.length;
+  return words.map((w, i) => {
+    const a = (i * step).toFixed(2);
+    const b = ((i + 1) * step).toFixed(2);
+    return `drawtext=text='${w}':fontsize=48:fontcolor=white:borderw=5:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='between(t,${a},${b})'`;
+  }).join(',');
+}
+
 async function renderioCut(url, start, length, key, caption, vertical) {
-  const text = captionText(caption);
   const frame = vertical
     ? 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280'
     : 'scale=1280:-2';
-  const vf = `${frame},drawtext=text='${text}':fontsize=42:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-160`;
+  const words = wordFilters(caption, length);
+  const vf = words ? `${frame},${words}` : frame;
   const broll = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   const body = {
     input_urls: { in_video: url, in_broll: broll },
