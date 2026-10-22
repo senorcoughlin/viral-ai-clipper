@@ -35,7 +35,7 @@ export async function POST(request) {
         generationConfig: { temperature: 0.7, maxOutputTokens: 1200 },
       }),
     });
-    if (!res.ok) return NextResponse.json({ success: false, message: 'AI request failed' }, { status: 502 });
+    if (!res.ok) { const err = await res.text(); return NextResponse.json({ success: false, message: 'AI request failed', detail: err.slice(0, 400) }, { status: 502 }); }
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
