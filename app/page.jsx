@@ -68,7 +68,7 @@ export default function Home() {
       let allGeneratedClips = [];
 
       for (const url of urls) {
-        const response = await fetch('/api/clip', {
+        const response = await fetch('/api/clip/handler', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle }),
@@ -87,4 +87,45 @@ export default function Home() {
 
       setClips(allGeneratedClips);
       setHistory((prev) => [
-        { id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: allGeneratedClips
+        { id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: allGeneratedClips },
+        ...prev.filter(item => item.url !== videoUrl)
+      ].slice(0, 5));
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error processing video batch. Please try again.');
+    } finally {
+      setIsProcessing(false);
+      setStatusMessage('');
+    }
+  };
+
+  const handleUpgrade = async (planType) => {
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType })
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.open(data.data.checkoutUrl, '_blank');
+      }
+    } catch (err) {
+      console.error('Checkout error', err);
+    }
+  };
+
+  const handleReset = () => {
+    setVideoUrl('');
+    setClips([]);
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem('viral_clipper_history');
+  };
+
+  const loadHistoryItem = (item) => {
+    setVideoUrl(item.url);
+    setClipFormat(item.format);
+    if (item.aiStyle) setAiStyle(item.aiStyle);
