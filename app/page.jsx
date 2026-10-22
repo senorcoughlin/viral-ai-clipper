@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ClipPlayer from '../components/ClipPlayer';
 import ViralScoreMeter from '../components/ViralScoreMeter';
@@ -41,7 +41,7 @@ const Download = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="#FF4D6D" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
-export default function Home() {
+function HomeInner() {
   const [videoUrl, setVideoUrl] = useState('');
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [aiStyle, setAiStyle] = useState('character_swap');
@@ -559,5 +559,14 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-ink text-muted">Loading…</div>}>
+      <HomeInner />
+    </Suspense>
   );
 }
