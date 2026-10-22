@@ -23,13 +23,26 @@ export async function POST(request) {
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      // For now we just log. Later you can store customer/email → pro status in a DB.
-      console.log('Payment succeeded for session:', session.id, session.customer_email);
+      const email = session.customer_details?.email || session.customer_email;
+      console.log('Payment succeeded:', session.id, email);
+
+      // Mark as pro (in-memory for now — replace with real store)
+      if (email) {
+        try {
+          await fetch(`${process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : 'http://localhost:3000'}/api/pro`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, customerId: session.customer }),
+          });
+        } catch (e) {
+          console.error('Failed to mark pro:', e);
+        }
+      }
     }
 
     return NextResponse.json({ received: true });
-  } catch (error) {
-    console.error(error);
+  } catch (e) {
+    console.error(e);
     return NextResponse.json({ error: 'Webhook error' }, { status: 500 });
   }
 }
