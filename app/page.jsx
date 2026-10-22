@@ -13,7 +13,6 @@ export default function Home() {
   const [clips, setClips] = useState([]);
   const [history, setHistory] = useState([]);
 
-  // Load saved history from localStorage on mount
   useEffect(() => {
     const savedHistory = localStorage.getItem('viral_clipper_history');
     if (savedHistory) {
@@ -25,7 +24,6 @@ export default function Home() {
     }
   }, []);
 
-  // Save history to localStorage whenever it updates
   useEffect(() => {
     if (history.length > 0) {
       localStorage.setItem('viral_clipper_history', JSON.stringify(history));
@@ -81,8 +79,8 @@ export default function Home() {
       setHistory((prev) => {
         const updated = [
           { id: Date.now(), url: videoUrl, format: clipFormat, clips: newClips },
-          ...prev.filter(item => item.url !== videoUrl) // Prevent duplicates
-        ].slice(0, 5); // Keep last 5 entries
+          ...prev.filter(item => item.url !== videoUrl)
+        ].slice(0, 5);
         return updated;
       });
     } catch (error) {
@@ -111,17 +109,7 @@ export default function Home() {
   };
 
   return (
-    <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '650px', margin: '0 auto' }}>
-      <h1>Viral AI Clipper</h1>
-      <p>Paste your long-form video link below to generate short clips instantly.</p>
-      
-      <form onSubmit={handleClipping} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
-        <input 
-          type="text" 
-          placeholder="Paste video URL here..." 
-          value={videoUrl}
-          onChange={(e) => setVideoUrl(e.target.value)}
-          style={{ padding: '12px', fontSize: '16px', borderRadius: '6px', border: '1px solid #ccc' }}
-          required
-        />
-
+    <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '650px', margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+      <div>
+        <h1>Viral AI Clipper</h1>
+        <p>Paste your long-form video link below to generate short clips
