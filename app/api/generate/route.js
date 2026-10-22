@@ -20,7 +20,7 @@ function youtubeId(url) {
     if (u.searchParams.get('v')) return u.searchParams.get('v');
     const m = u.pathname.match(/\/(shorts|embed)\/([^/?]+)/);
     if (m) return m[2];
-  } catch {}
+  } catch (e) { downloadError = e?.message || String(e); }
   return null;
 }
 
@@ -129,18 +129,21 @@ async function downloadSource(url, dir) {
 
 async function cutClip(src, start, length, outPath) {
   const ffmpeg = require('ffmpeg-static');
-  if (!ffmpeg) return false;
-  try {
-    await exec(ffmpeg, [
-      '-y', '-ss', String(start), '-i', src, '-t', String(length),
-      '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart',
-      '-preset', 'veryfast', outPath,
-    ]);
-    return true;
-  } catch (e) {
-    console.error('cut failed', e?.message);
-    return false;
+  if (!ffmpeg) return { ok: false, error: 'ffmpeg missing' };
+  const attempts = [
+    ['-y', '-ss', String(start), '-i', src, '-t', String(length), '-c', 'copy', '-movflags', '+faststart', outPath],
+    ['-y', '-ss', String(start), '-i', src, '-t', String(length), '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'ultrafast', '-movflags', '+faststart', outPath],
+  ];
+  let last = 'ffmpeg failed';
+  for (const args of attempts) {
+    try {
+      await exec(ffmpeg, args);
+      return { ok: true, error: null };
+    } catch (e) {
+      last = e?.message || String(e);
+    }
   }
+  return { ok: false, error: last.slice(0, 180) };
 }
 
 export async function POST(request) {
@@ -188,7 +191,9 @@ export async function POST(request) {
 
     if (source) {
       const out = path.join(dir, `clip_${i}.mp4`);
-      const ok = await cutClip(source, start, len, out);
+      const cut = await cutClip(source, start, len, out);
+    const ok = cut.ok;
+    if (!cut.ok) downloadError = cut.error;
       if (ok && process.env.BLOB_READ_WRITE_TOKEN) {
         try {
           const buf = await fs.readFile(out);
