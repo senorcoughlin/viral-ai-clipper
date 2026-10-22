@@ -19,14 +19,14 @@ async function readAccount(email) {
   const { blobs } = await list({ prefix: path });
   const hit = blobs.find(b => b.pathname === path) || blobs[0];
   if (!hit?.url) return null;
-  const res = await fetch(hit.url, { cache: 'no-store' });
+  const res = await fetch(hit.url, { cache: 'no-store', headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` } });
   if (!res.ok) return null;
   return res.json();
 }
 
 async function writeAccount(email, data) {
   await put(accountPath(email), JSON.stringify(data), {
-    access: 'public',
+    access: 'private',
     contentType: 'application/json',
     addRandomSuffix: false,
     allowOverwrite: true,
