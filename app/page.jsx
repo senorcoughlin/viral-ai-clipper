@@ -70,19 +70,14 @@ export default function Home() {
       for (const url of urls) {
         const response = await fetch('/api/clip', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle }),
         });
 
         const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Failed to process video');
 
-        if (!response.ok) {
-          throw new Error(result.message || 'Failed to process video');
-        }
-
-        const batchClips = result.data.generatedClips.map(c => ({
+        const batchClips = (result.data.generatedClips || []).map(c => ({
           ...c,
           title: `[${url.slice(0, 15)}...] ${c.title}`
         }));
@@ -91,20 +86,32 @@ export default function Home() {
       }
 
       setClips(allGeneratedClips);
-
-      setHistory((prev) => {
-        const updated = [
-          { id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: allGeneratedClips },
-          ...prev.filter(item => item.url !== videoUrl)
-        ].slice(0, 5);
-        return updated;
-      });
+      setHistory((prev) => [
+        { id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: allGeneratedClips },
+        ...prev.filter(item => item.url !== videoUrl)
+      ].slice(0, 5));
     } catch (error) {
       console.error('Error:', error);
       alert('Error processing video batch. Please try again.');
     } finally {
       setIsProcessing(false);
       setStatusMessage('');
+    }
+  };
+
+  const handleUpgrade = async (planType) => {
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType })
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.open(data.data.checkoutUrl, '_blank');
+      }
+    } catch (err) {
+      console.error('Checkout error', err);
     }
   };
 
@@ -164,8 +171,16 @@ export default function Home() {
   return (
     <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '650px', margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
       <div>
-        <h1>Viral AI Clipper</h1>
-        <p>Paste video links separated by commas to queue and generate short clips in batch.</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ margin: 0 }}>Viral AI Clipper</h1>
+          <button 
+            onClick={() => handleUpgrade('pro_monthly')}
+            style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#28a745', color: '#fff', border: 'none', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            ⭐ Upgrade to Pro ($29/mo)
+          </button>
+        </div>
+        <p style={{ marginTop: '8px' }}>Paste video links separated by commas to queue and generate short clips in batch.</p>
         
         <form onSubmit={handleClipping} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
           <textarea 
@@ -210,20 +225,12 @@ export default function Home() {
             <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>AI Enhancements:</label>
             
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
-              <input 
-                type="checkbox" 
-                checked={autoSubtitles} 
-                onChange={(e) => setAutoSubtitles(e.target.checked)} 
-              />
+              <input type="checkbox" checked={autoSubtitles} onChange={(e) => setAutoSubtitles(e.target.checked)} />
               Generate dynamic animated captions / subtitles
             </label>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
-              <input 
-                type="checkbox" 
-                checked={aiHook} 
-                onChange={(e) => setAiHook(e.target.checked)} 
-              />
+              <input type="checkbox" checked={aiHook} onChange={(e) => setAiHook(e.target.checked)} />
               Add viral text hook intro overlay
             </label>
           </div>
@@ -238,17 +245,7 @@ export default function Home() {
         </form>
 
         {isProcessing && (
-          <div style={{ 
-            marginTop: '20px', 
-            padding: '14px', 
-            backgroundColor: '#e6f4ff', 
-            border: '1px solid #91caff', 
-            borderRadius: '6px', 
-            color: '#0958d9', 
-            fontSize: '14px', 
-            textAlign: 'center',
-            fontWeight: '500'
-          }}>
+          <div style={{ marginTop: '20px', padding: '14px', backgroundColor: '#e6f4ff', border: '1px solid #91caff', borderRadius: '6px', color: '#0958d9', fontSize: '14px', textAlign: 'center', fontWeight: '500' }}>
             ⚡ {statusMessage}
           </div>
         )}
@@ -258,46 +255,13 @@ export default function Home() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <h2 style={{ margin: 0 }}>Generated Batch Clips ({clips.length}):</h2>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button 
-                  onClick={handleCopyAll}
-                  style={{ 
-                    padding: '6px 12px', 
-                    fontSize: '12px', 
-                    backgroundColor: copiedAll ? '#28a745' : '#6f42c1', 
-                    color: '#fff', 
-                    border: 'none', 
-                    borderRadius: '4px', 
-                    cursor: 'pointer' 
-                  }}
-                >
+                <button onClick={handleCopyAll} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: copiedAll ? '#28a745' : '#6f42c1', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                   {copiedAll ? '✓ Copied All!' : '📋 Copy All Data'}
                 </button>
-                <button 
-                  onClick={handleExportCSV}
-                  style={{ 
-                    padding: '6px 12px', 
-                    fontSize: '12px', 
-                    backgroundColor: '#0958d9', 
-                    color: '#fff', 
-                    border: 'none', 
-                    borderRadius: '4px', 
-                    cursor: 'pointer' 
-                  }}
-                >
+                <button onClick={handleExportCSV} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#0958d9', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                   ⬇ Export CSV
                 </button>
-                <button 
-                  onClick={handleReset}
-                  style={{ 
-                    padding: '6px 12px', 
-                    fontSize: '12px', 
-                    backgroundColor: '#e1e4e8', 
-                    color: '#333', 
-                    border: 'none', 
-                    borderRadius: '4px', 
-                    cursor: 'pointer' 
-                  }}
-                >
+                <button onClick={handleReset} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#e1e4e8', color: '#333', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                   Clear Results
                 </button>
               </div>
@@ -314,10 +278,7 @@ export default function Home() {
           <div style={{ marginTop: '40px', borderTop: '1px solid #eaeaea', paddingTop: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ fontSize: '16px', margin: 0 }}>Recent Sessions</h3>
-              <button 
-                onClick={clearHistory}
-                style={{ background: 'none', border: 'none', color: '#d9534f', fontSize: '12px', cursor: 'pointer' }}
-              >
+              <button onClick={clearHistory} style={{ background: 'none', border: 'none', color: '#d9534f', fontSize: '12px', cursor: 'pointer' }}>
                 Clear History
               </button>
             </div>
@@ -327,10 +288,7 @@ export default function Home() {
                   <span style={{ fontSize: '13px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '380px' }}>
                     {item.url} ({item.format})
                   </span>
-                  <button 
-                    onClick={() => loadHistoryItem(item)}
-                    style={{ padding: '4px 10px', fontSize: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                  >
+                  <button onClick={() => loadHistoryItem(item)} style={{ padding: '4px 10px', fontSize: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                     Load
                   </button>
                 </li>
@@ -341,7 +299,7 @@ export default function Home() {
       </div>
 
       <footer style={{ marginTop: '50px', borderTop: '1px solid #eaeaea', paddingTop: '20px', textAlign: 'center', fontSize: '13px', color: '#888' }}>
-        <p style={{ margin: '0 0 5px 0' }}>Viral AI Clipper v0.4.0 • Powered by Next.js & Vercel</p>
+        <p style={{ margin: '0 0 5px 0' }}>Viral AI Clipper v0.5.0 • Powered by Next.js & Vercel</p>
         <p style={{ margin: 0 }}>Built for high-performance automated batch short-form video generation.</p>
       </footer>
     </main>
