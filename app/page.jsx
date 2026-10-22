@@ -13,6 +13,25 @@ export default function Home() {
   const [clips, setClips] = useState([]);
   const [history, setHistory] = useState([]);
 
+  // Load saved history from localStorage on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('viral_clipper_history');
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error('Failed to parse history from localStorage', e);
+      }
+    }
+  }, []);
+
+  // Save history to localStorage whenever it updates
+  useEffect(() => {
+    if (history.length > 0) {
+      localStorage.setItem('viral_clipper_history', JSON.stringify(history));
+    }
+  }, [history]);
+
   useEffect(() => {
     if (!isProcessing) return;
 
@@ -59,10 +78,13 @@ export default function Home() {
       const newClips = result.data.generatedClips;
       setClips(newClips);
 
-      setHistory((prev) => [
-        { id: Date.now(), url: videoUrl, format: clipFormat, clips: newClips },
-        ...prev.slice(0, 4),
-      ]);
+      setHistory((prev) => {
+        const updated = [
+          { id: Date.now(), url: videoUrl, format: clipFormat, clips: newClips },
+          ...prev.filter(item => item.url !== videoUrl) // Prevent duplicates
+        ].slice(0, 5); // Keep last 5 entries
+        return updated;
+      });
     } catch (error) {
       console.error('Error:', error);
       alert('Error processing video. Please try again.');
@@ -75,6 +97,11 @@ export default function Home() {
   const handleReset = () => {
     setVideoUrl('');
     setClips([]);
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem('viral_clipper_history');
   };
 
   const loadHistoryItem = (item) => {
@@ -98,113 +125,3 @@ export default function Home() {
           required
         />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>Output Format:</label>
-          <select 
-            value={clipFormat} 
-            onChange={(e) => setClipFormat(e.target.value)}
-            style={{ padding: '10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff' }}
-          >
-            <option value="shorts_9_16">YouTube Shorts / TikTok (9:16 Vertical)</option>
-            <option value="landscape_16_9">Standard Landscape (16:9)</option>
-            <option value="square_1_1">Square (1:1)</option>
-          </select>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: '#f9f9f9', borderRadius: '6px', border: '1px solid #eee' }}>
-          <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>AI Enhancements:</label>
-          
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
-            <input 
-              type="checkbox" 
-              checked={autoSubtitles} 
-              onChange={(e) => setAutoSubtitles(e.target.checked)} 
-            />
-            Generate dynamic animated captions / subtitles
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
-            <input 
-              type="checkbox" 
-              checked={aiHook} 
-              onChange={(e) => setAiHook(e.target.checked)} 
-            />
-            Add viral text hook intro overlay
-          </label>
-        </div>
-
-        <button 
-          type="submit" 
-          style={{ padding: '12px', fontSize: '16px', backgroundColor: '#0070f3', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-          disabled={isProcessing}
-        >
-          {isProcessing ? 'Processing Clips...' : 'Generate Viral Clips'}
-        </button>
-      </form>
-
-      {isProcessing && (
-        <div style={{ 
-          marginTop: '20px', 
-          padding: '14px', 
-          backgroundColor: '#e6f4ff', 
-          border: '1px solid #91caff', 
-          borderRadius: '6px', 
-          color: '#0958d9', 
-          fontSize: '14px', 
-          textAlign: 'center',
-          fontWeight: '500'
-        }}>
-          ⚡ {statusMessage}
-        </div>
-      )}
-
-      {clips.length > 0 && (
-        <div style={{ marginTop: '30px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Generated Clips:</h2>
-            <button 
-              onClick={handleReset}
-              style={{ 
-                padding: '6px 12px', 
-                fontSize: '13px', 
-                backgroundColor: '#e1e4e8', 
-                color: '#333', 
-                border: 'none', 
-                borderRadius: '4px', 
-                cursor: 'pointer' 
-              }}
-            >
-              Clear Results
-            </button>
-          </div>
-          <div style={{ marginTop: '15px' }}>
-            {clips.map((clip) => (
-              <ClipPlayer key={clip.id} clip={clip} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {history.length > 0 && (
-        <div style={{ marginTop: '40px', borderTop: '1px solid #eaeaea', paddingTop: '20px' }}>
-          <h3 style={{ fontSize: '16px', marginBottom: '10px' }}>Recent Sessions</h3>
-          <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {history.map((item) => (
-              <li key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9f9f9', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
-                <span style={{ fontSize: '13px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '400px' }}>
-                  {item.url} ({item.format})
-                </span>
-                <button 
-                  onClick={() => loadHistoryItem(item)}
-                  style={{ padding: '4px 10px', fontSize: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                >
-                  Load
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </main>
-  );
-}
