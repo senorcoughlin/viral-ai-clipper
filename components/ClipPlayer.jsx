@@ -171,6 +171,20 @@ export default function ClipPlayer({ clip, compact = false }) {
           <>
             <h3 className="truncate text-sm font-semibold text-fg">{title}</h3>
             {socialCaption && <p className="text-sm leading-relaxed text-soft">“{socialCaption}”</p>}
+            {Array.isArray(clip.hooks) && clip.hooks.length > 1 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] font-semibold uppercase tracking-[.08em] text-muted">Hook variants</span>
+                {clip.hooks.map((h, i) => (
+                  <button key={i} type="button" onClick={() => setSocialCaption(h)} className="rounded-input border border-line2 px-2 py-1 text-left text-xs text-soft hover:border-lime">{h}</button>
+                ))}
+              </div>
+            )}
+            {(clip.hashtags || clip.bestTime) && (
+              <div className="flex flex-wrap gap-2 text-[11px] text-muted">
+                {clip.hashtags && <span className="text-lime">{clip.hashtags}</span>}
+                {clip.bestTime && <span>Best time · {clip.bestTime}</span>}
+              </div>
+            )}
             {aiPrompt && (
               <p className="flex items-start gap-1.5 text-xs leading-relaxed text-[#A48CFF]">
                 <span className="mt-0.5 shrink-0">{Icon.sparkle}</span>{aiPrompt}

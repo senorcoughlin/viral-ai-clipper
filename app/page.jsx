@@ -73,6 +73,8 @@ function HomeInner() {
   useEffect(() => {
     const b = searchParams.get('billing');
     if (b === 'monthly' || b === 'yearly') setBilling(b);
+    const preset = searchParams.get('url');
+    if (preset) setVideoUrl(preset);
     const saved = localStorage.getItem('viral_clipper_history');
     if (saved) try { setHistory(JSON.parse(saved)); } catch {}
 
@@ -223,6 +225,7 @@ function HomeInner() {
             <a href="#how" className="hover:text-fg">How it works</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
             <a href="/assets" className="hover:text-fg">My Assets</a>
+            <a href="/channel" className="hover:text-fg">Channel</a>
             <AccountBar />
             <a href="#pricing" className="hover:text-fg">Pricing</a>
           </nav>
@@ -513,7 +516,7 @@ function HomeInner() {
           <div className="grid gap-5 md:grid-cols-3">
             {[
               { n: '01', icon: <Link color="#C6FF3D" />, title: 'Paste a YouTube link', desc: 'Drop any public YouTube video. Pick a length from 15 to 60 seconds and the format you post in.' },
-              { n: '02', icon: <Sparkle />, title: 'AI cuts the moments', desc: 'It finds the hooks, cuts three clips from the source, and burns a caption on each one. Every clip is scored.' },
+              { n: '02', icon: <Sparkle />, title: 'AI cuts the moments', desc: 'It finds the hooks, cuts up to eight clips, burns a caption, and scores every one.' },
               { n: '03', icon: <Download />, title: 'Download and post', desc: 'Download the clip, copy the caption, and post to TikTok, Reels or Shorts. Save an account so your library follows you.' },
             ].map(s => (
               <article key={s.n} className="card flex flex-col gap-4 p-7 transition hover:-translate-y-1 hover:border-lime">
@@ -532,7 +535,7 @@ function HomeInner() {
         <section id="pricing" className="flex flex-col items-center gap-9 pb-28">
           <div className="flex max-w-[640px] flex-col items-center gap-3 text-center">
             <span className="eyebrow">Pricing</span>
-            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} clips a day free. Unlimited on Pro.</h2>
+            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} clips a day free. Unlimited on Pro. No per-minute credits.</h2>
             <div className="mt-2 inline-flex rounded-full border border-line2 bg-surface p-1">
               <button type="button" onClick={() => setBilling('monthly')} className={`chip h-[34px] border-0 ${billing === 'monthly' ? 'chip-on' : ''}`}>Monthly</button>
               <button type="button" onClick={() => setBilling('yearly')} className={`chip h-[34px] border-0 ${billing === 'yearly' ? 'chip-on' : ''}`}>

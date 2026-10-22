@@ -53,9 +53,9 @@ const SAMPLE_VIDEOS = [
 async function scoreWithGemini(transcript, videoUrl, format, style, length) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  const prompt = `You are a viral short-form editor. From this transcript, pick the 3 best moments of about ${length} seconds for TikTok/Reels/Shorts.
-Return ONLY valid JSON:
-{"clips":[{"title":"...","hook":"...","caption":"... #tag","score":90,"startSec":10,"endSec":${10 + length},"reason":"..."}]}
+  const prompt = `You are a viral short-form editor. From this transcript, pick the 8 best moments of about ${length} seconds for TikTok/Reels/Shorts.
+Return ONLY valid JSON with 8 clips, ranked best first:
+{"clips":[{"title":"...","hook":"...","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":90,"startSec":10,"endSec":${10 + length},"reason":"..."}]}
 Video: ${videoUrl}
 Format: ${format}
 Style: ${style}
@@ -113,12 +113,13 @@ function captionText(s) {
 async function renderioCut(url, start, length, key, caption, vertical) {
   const text = captionText(caption);
   const frame = vertical
-    ? 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black'
+    ? 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280'
     : 'scale=1280:-2';
   const vf = `${frame},drawtext=text='${text}':fontsize=42:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-160`;
+  const broll = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   const body = {
-    input_urls: { in_video: url },
-    ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -vf "${vf}" -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -movflags +faststart {{out_clip}}`,
+    input_urls: { in_video: url, in_broll: broll },
+    ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -i {{in_broll}} -filter_complex "[0:v]${vf}[base];[1:v]scale=720:280[b];[base][b]overlay=(W-w)/2:40:enable='between(t,0,2)'[v]" -map "[v]" -map 0:a? -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart {{out_clip}}`,
     output_files: { out_clip: 'clip.mp4' },
   };
   const submit = await fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
@@ -226,11 +227,16 @@ export async function POST(request) {
 
   const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength);
   const base = scored?.clips?.length
-    ? scored.clips.slice(0, 3)
+    ? scored.clips.slice(0, 8)
     : [
-        { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds…', caption: 'This changed everything. #viral', score: 94, startSec: 5 },
-        { title: 'Unexpected reaction', hook: 'I didn’t expect that', caption: 'The algorithm will love this. #shorts', score: 87, startSec: 40 },
-        { title: 'Quick tip that hits', hook: 'Do this next time', caption: 'Save this. #tips', score: 81, startSec: 80 },
+        { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds', hooks: ['Wait for the last 3 seconds', 'Nobody talks about this', 'Watch till the end'], caption: 'This changed everything. Save it.', hashtags: '#viral #shorts #fyp', bestTime: 'Tue 7pm', score: 94, startSec: 5 },
+        { title: 'Unexpected reaction', hook: 'I did not expect that', hooks: ['I did not expect that', 'The ending got me', 'POV you saw it too'], caption: 'The algorithm will love this.', hashtags: '#viral #reaction #fyp', bestTime: 'Thu 6pm', score: 87, startSec: 40 },
+        { title: 'Quick tip that hits', hook: 'Do this next time', hooks: ['Do this next time', 'Stop doing it the hard way', 'One change, better result'], caption: 'Save this for later.', hashtags: '#tips #howto #shorts', bestTime: 'Sun 11am', score: 81, startSec: 80 },
+        { title: 'The line that landed', hook: 'Say this instead', hooks: ['Say this instead', 'The line that landed', 'Copy this'], caption: 'Use this today.', hashtags: '#advice #viral #fyp', bestTime: 'Wed 8pm', score: 78, startSec: 120 },
+        { title: 'Proof it works', hook: 'Here is the proof', hooks: ['Here is the proof', 'Results in 10 seconds', 'Watch the numbers'], caption: 'Proof over promises.', hashtags: '#results #proof #shorts', bestTime: 'Fri 5pm', score: 76, startSec: 160 },
+        { title: 'The mistake to skip', hook: 'Stop doing this', hooks: ['Stop doing this', 'This is the mistake', 'Fix it in one step'], caption: 'Skip the mistake.', hashtags: '#mistake #tips #viral', bestTime: 'Mon 9am', score: 74, startSec: 200 },
+        { title: 'A better way', hook: 'There is a better way', hooks: ['There is a better way', 'Try this instead', 'Do it like this'], caption: 'A better way.', hashtags: '#better #howto #fyp', bestTime: 'Sat 10am', score: 72, startSec: 240 },
+        { title: 'The closer', hook: 'Remember this', hooks: ['Remember this', 'Take this with you', 'One thing to keep'], caption: 'Remember this.', hashtags: '#mindset #viral #shorts', bestTime: 'Sun 8pm', score: 70, startSec: 280 },
       ];
 
   const vertical = clipFormat === 'shorts_9_16';
@@ -278,6 +284,7 @@ export async function POST(request) {
       id: `c_${Date.now()}_${i + 1}`,
       title: c.title,
       hook: aiHook ? (c.hook || '') : '',
+      hooks: Array.isArray(c.hooks) ? c.hooks.slice(0, 3) : [c.hook].filter(Boolean),
       score: c.score || 80,
       viralScore: c.score || 80,
       duration: `${len}s`,
@@ -285,6 +292,8 @@ export async function POST(request) {
       style: aiStyle,
       caption: autoSubtitles ? (c.caption || '') : '',
       socialCaption: c.caption || '',
+      hashtags: c.hashtags || '',
+      bestTime: c.bestTime || '',
       aiPrompt: c.reason || c.hook || '',
       videoUrl: playUrl,
       source: videoUrl,
