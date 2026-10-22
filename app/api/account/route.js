@@ -33,6 +33,7 @@ async function writeAccount(email, data) {
 }
 
 export async function POST(request) {
+  try {
   const body = await request.json().catch(() => ({}));
   const { action, email, password, token, clips } = body;
   const clean = String(email || '').trim().toLowerCase();
@@ -84,4 +85,7 @@ export async function POST(request) {
   }
 
   return NextResponse.json({ success: false, message: 'Unknown action' }, { status: 400 });
+  } catch (e) {
+    return NextResponse.json({ success: false, message: e?.message || String(e) }, { status: 500 });
+  }
 }
