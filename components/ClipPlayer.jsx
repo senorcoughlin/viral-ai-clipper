@@ -10,7 +10,9 @@ const ASPECT = { shorts_9_16: 'aspect-[9/12]', landscape_16_9: 'aspect-[16/10]',
 const SAMPLE_VIDEOS = [
   'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
   'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
-  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  'https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4',
+  'https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4',
+  'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
 ];
 
 function Bar({ label, pct, color }) {
