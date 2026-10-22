@@ -102,10 +102,23 @@ async function transcribe(audioPath) {
 }
 
 
-async function renderioCut(url, start, length, key) {
+function captionText(s) {
+  return String(s || 'Watch this')
+    .replace(/[\\'":%]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 52) || 'Watch this';
+}
+
+async function renderioCut(url, start, length, key, caption, vertical) {
+  const text = captionText(caption);
+  const frame = vertical
+    ? 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black'
+    : 'scale=1280:-2';
+  const vf = `${frame},drawtext=text='${text}':fontsize=42:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-160`;
   const body = {
     input_urls: { in_video: url },
-    ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -c copy {{out_clip}}`,
+    ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -vf "${vf}" -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -movflags +faststart {{out_clip}}`,
     output_files: { out_clip: 'clip.mp4' },
   };
   const submit = await fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
@@ -220,9 +233,8 @@ export async function POST(request) {
         { title: 'Quick tip that hits', hook: 'Do this next time', caption: 'Save this. #tips', score: 81, startSec: 80 },
       ];
 
-  const clips = [];
-  for (let i = 0; i < base.length; i++) {
-    const c = base[i];
+  const vertical = clipFormat === 'shorts_9_16';
+  const jobs = base.map(async (c, i) => {
     const start = Number(c.startSec || 0);
     const len = Number(clipLength);
     let playUrl = SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length];
@@ -231,7 +243,8 @@ export async function POST(request) {
     const rio = process.env.RENDERIO_API_KEY;
     if (rio) {
       try {
-        playUrl = await renderioCut(videoUrl, start, len, rio);
+        const label = autoSubtitles !== false ? (c.hook || c.title || '') : '';
+        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical);
         real = true;
       } catch (e) {
         downloadError = e?.message || String(e);
@@ -261,7 +274,7 @@ export async function POST(request) {
       }
     }
 
-    clips.push({
+    return {
       id: `c_${Date.now()}_${i + 1}`,
       title: c.title,
       hook: aiHook ? (c.hook || '') : '',
@@ -278,8 +291,9 @@ export async function POST(request) {
       startSec: start,
       endSec: start + len,
       preview: !real,
-    });
-  }
+    };
+  });
+  const clips = await Promise.all(jobs);
 
   try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
 
