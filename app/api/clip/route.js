@@ -19,7 +19,9 @@ export async function POST(request) {
         timestamp: '00:12 - 00:38', 
         format: clipFormat || 'shorts_9_16',
         subtitlesEnabled: autoSubtitles ?? true,
-        hookEnabled: aiHook ?? true
+        hookEnabled: aiHook ?? true,
+        viralScore: 98,
+        socialCaption: 'Wait until the end... nobody saw this coming! 🔥👀 #shorts #viral #trending #highlights #fyp'
       },
       { 
         id: Date.now() + 2, 
@@ -27,7 +29,9 @@ export async function POST(request) {
         timestamp: '01:15 - 01:45', 
         format: clipFormat || 'shorts_9_16',
         subtitlesEnabled: autoSubtitles ?? true,
-        hookEnabled: aiHook ?? true
+        hookEnabled: aiHook ?? true,
+        viralScore: 92,
+        socialCaption: 'This 30-second breakdown changes everything 💡🚀 #clips #mustwatch #mindblown #viralshorts #creator'
       },
     ];
 
