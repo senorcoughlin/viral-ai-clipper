@@ -1,10 +1,11 @@
 export default function Cancel() {
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center text-center p-6">
-      <div>
-        <h1 className="text-2xl font-bold mb-2">Checkout canceled</h1>
-        <p className="text-slate-400 mb-6">No charge was made.</p>
-        <a href="/" className="px-4 py-2 bg-slate-800 rounded-lg">Return</a>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink p-6 text-center">
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-dots [background-size:28px_28px] opacity-60" />
+      <div className="card relative flex w-full max-w-md flex-col items-center gap-4 p-10">
+        <h1 className="font-display text-2xl font-extrabold tracking-tight text-white">Checkout canceled</h1>
+        <p className="text-soft">No charge was made. Your free clips are still waiting.</p>
+        <a href="/" className="btn-ghost h-12 w-full no-underline">Back to the app</a>
       </div>
     </div>
   );

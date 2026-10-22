@@ -3,5 +3,33 @@
 @tailwind utilities;
 
 body {
-  @apply bg-slate-950 text-slate-100 antialiased;
+  @apply bg-ink text-fg font-body antialiased;
+}
+
+@layer components {
+  .chip {
+    @apply inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line2 bg-surface px-3.5 text-[13px] font-medium text-soft transition hover:border-muted;
+  }
+  .chip-on {
+    @apply border-lime bg-lime-tint text-lime hover:border-lime;
+  }
+  .btn-lime {
+    @apply inline-flex items-center justify-center gap-2 rounded-input bg-lime font-semibold text-ink transition hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-input border border-line2 bg-transparent font-semibold text-fg transition hover:border-muted;
+  }
+  .card {
+    @apply rounded-card border border-line bg-surface;
+  }
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[.1em] text-lime;
+  }
+  .wave > span {
+    @apply inline-block w-1 origin-bottom rounded-sm bg-lime animate-bars;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-floaty, .animate-floaty-slow, .animate-confetti, .animate-marquee, .animate-bars { animation: none !important; }
 }
