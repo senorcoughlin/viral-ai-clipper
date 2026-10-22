@@ -71,4 +71,20 @@ export default function Home() {
         const response = await fetch('/api/clip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat
+          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle }),
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Failed to process video');
+
+        const batchClips = (result.data.generatedClips || []).map(c => ({
+          ...c,
+          title: `[${url.slice(0, 15)}...] ${c.title}`
+        }));
+        
+        allGeneratedClips = [...allGeneratedClips, ...batchClips];
+      }
+
+      setClips(allGeneratedClips);
+      setHistory((prev) => [
+        { id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: allGeneratedClips
