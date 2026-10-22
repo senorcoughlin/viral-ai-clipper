@@ -5,6 +5,7 @@ import ClipPlayer from '../components/ClipPlayer';
 
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
+  const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [isProcessing, setIsProcessing] = useState(false);
   const [clips, setClips] = useState([]);
 
@@ -19,7 +20,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ videoUrl }),
+        body: JSON.stringify({ videoUrl, clipFormat }),
       });
 
       const result = await response.json();
@@ -56,6 +57,20 @@ export default function Home() {
           style={{ padding: '12px', fontSize: '16px', borderRadius: '6px', border: '1px solid #ccc' }}
           required
         />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>Output Format:</label>
+          <select 
+            value={clipFormat} 
+            onChange={(e) => setClipFormat(e.target.value)}
+            style={{ padding: '10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff' }}
+          >
+            <option value="shorts_9_16">YouTube Shorts / TikTok (9:16 Vertical)</option>
+            <option value="landscape_16_9">Standard Landscape (16:9)</option>
+            <option value="square_1_1">Square (1:1)</option>
+          </select>
+        </div>
+
         <button 
           type="submit" 
           style={{ padding: '12px', fontSize: '16px', backgroundColor: '#0070f3', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
