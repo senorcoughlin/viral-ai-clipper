@@ -179,6 +179,7 @@ function HomeInner() {
   };
 
   const freeLeft = Math.max(0, FREE_DAILY_LIMIT - dailyCount);
+  const myAssets = history.flatMap(h => (h.clips || []).map(c => ({ ...c, sourceUrl: h.url, createdAt: h.id })));
   const topScore = clips.length ? Math.max(...clips.map(c => c.viralScore || 0)) : 0;
   const price = PRICE[billing];
 
@@ -199,6 +200,7 @@ function HomeInner() {
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
             <a href="#how" className="hover:text-fg">How it works</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
+            <a href="#assets" className="hover:text-fg">My Assets</a>
             <a href="#pricing" className="hover:text-fg">Pricing</a>
           </nav>
           <div className="flex items-center gap-2.5">
@@ -448,6 +450,24 @@ function HomeInner() {
                 {clips.map((c, i) => <ClipPlayer key={`${c.id}-${i}`} clip={c} />)}
               </div>
             </>
+          )}
+
+          {/* MY ASSETS */}
+          {myAssets.length > 0 && (
+            <section id="assets" className="flex flex-col gap-6 border-t border-line pt-12">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div className="flex flex-col gap-2">
+                  <span className="eyebrow">Library</span>
+                  <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">My Assets</h2>
+                  <p className="text-sm text-soft">{myAssets.length} clip{myAssets.length === 1 ? '' : 's'} saved on this device.</p>
+                </div>
+              </div>
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {myAssets.map((c, i) => (
+                  <ClipPlayer key={`asset-${c.id || i}-${c.createdAt}`} clip={c} />
+                ))}
+              </div>
+            </section>
           )}
 
           {history.length > 0 && (
