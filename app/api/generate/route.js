@@ -101,6 +101,41 @@ async function transcribe(audioPath) {
   }
 }
 
+
+async function renderioCut(url, start, length, key) {
+  const body = {
+    input_urls: { in_video: url },
+    ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -c copy {{out_clip}}`,
+    output_files: { out_clip: 'clip.mp4' },
+  };
+  const submit = await fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
+    body: JSON.stringify(body),
+  });
+  if (!submit.ok) {
+    const t = await submit.text();
+    throw new Error('renderio submit ' + submit.status + ' ' + t.slice(0, 160));
+  }
+  const { command_id } = await submit.json();
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2500));
+    const poll = await fetch('https://renderio.dev/api/v1/commands/' + command_id, {
+      headers: { 'X-API-KEY': key },
+    });
+    const result = await poll.json();
+    if (result.status === 'SUCCESS') {
+      const file = result.output_files?.out_clip;
+      const play = file?.storage_url || file?.external_uri;
+      if (!play) throw new Error('renderio no file');
+      return play;
+    }
+    if (result.status === 'FAILED') throw new Error(result.error_message || 'renderio failed');
+  }
+  throw new Error('renderio timeout');
+}
+
 async function downloadSource(url, dir) {
   const key = process.env.TUNELIO_API_KEY;
   if (!key) return { path: null, error: 'TUNELIO_API_KEY missing' };
@@ -189,16 +224,24 @@ export async function POST(request) {
     let playUrl = SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length];
     let real = false;
 
-    if (source) {
+    const rio = process.env.RENDERIO_API_KEY;
+    if (rio) {
+      try {
+        playUrl = await renderioCut(videoUrl, start, len, rio);
+        real = true;
+      } catch (e) {
+        downloadError = e?.message || String(e);
+      }
+    } else if (source) {
       const out = path.join(dir, `clip_${i}.mp4`);
       const cut = await cutClip(source, start, len, out);
-    let ok = cut.ok;
-    let fileToUpload = out;
-    if (!cut.ok) {
-      downloadError = cut.error;
-      fileToUpload = source;
-      ok = true;
-    }
+      let ok = cut.ok;
+      let fileToUpload = out;
+      if (!cut.ok) {
+        downloadError = cut.error;
+        fileToUpload = source;
+        ok = true;
+      }
       if (ok && process.env.BLOB_READ_WRITE_TOKEN) {
         try {
           const buf = await fs.readFile(fileToUpload);
@@ -248,6 +291,7 @@ export async function POST(request) {
       hasTranscript: !!transcript,
       downloadError: downloadError || null,
       hasTunelio: !!process.env.TUNELIO_API_KEY,
+      hasRenderio: !!process.env.RENDERIO_API_KEY,
     },
   });
 }
