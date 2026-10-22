@@ -5,22 +5,30 @@ export async function POST(request) {
     const body = await request.json();
     const planType = body.planType || 'pro_monthly';
 
-    // TODO: Replace with real Stripe when STRIPE_SECRET_KEY is set in Vercel
-    // const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    // const session = await stripe.checkout.sessions.create({ ... });
+    const secret = process.env.STRIPE_SECRET_KEY;
+    const priceId = planType === 'pro_yearly'
+      ? process.env.STRIPE_PRICE_YEARLY
+      : process.env.STRIPE_PRICE_MONTHLY;
 
-    const prices = {
-      pro_monthly: 'price_monthly_placeholder',
-      pro_yearly: 'price_yearly_placeholder'
-    };
+    if (!secret || !priceId) {
+      return NextResponse.json({ success: false, message: 'Stripe not configured' }, { status: 500 });
+    }
+
+    const stripe = require('stripe')(secret);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${request.headers.get('origin') || 'https://viral-ai-clipper-lovat.vercel.app'}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${request.headers.get('origin') || 'https://viral-ai-clipper-lovat.vercel.app'}/cancel`,
+    });
 
     return NextResponse.json({
       success: true,
-      data: {
-        checkoutUrl: `https://checkout.stripe.com/c/pay/${prices[planType] || 'test'}`
-      }
+      data: { checkoutUrl: session.url }
     });
   } catch (error) {
-    return NextResponse.json({ success: false, message: 'Checkout error' }, { status: 500 });
+    console.error(error);
+    return NextResponse.json({ success: false, message: error.message || 'Checkout error' }, { status: 500 });
   }
 }
