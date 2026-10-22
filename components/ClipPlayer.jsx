@@ -4,11 +4,20 @@ import { useState } from 'react';
 
 export default function ClipPlayer({ clip }) {
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(`${clip.title} (${clip.timestamp})`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = () => {
+    setDownloading(true);
+    setTimeout(() => {
+      setDownloading(false);
+      alert(`Successfully downloaded: ${clip.title} (${clip.format})`);
+    }, 1500);
   };
 
   return (
@@ -26,7 +35,7 @@ export default function ClipPlayer({ clip }) {
         <div>
           <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>{clip.title}</h3>
           <span style={{ fontSize: '14px', color: '#586069' }}>Timestamp: {clip.timestamp}</span>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '11px', background: '#e1f5fe', color: '#01579b', padding: '2px 6px', borderRadius: '4px' }}>
               Format: {clip.format}
             </span>
@@ -42,21 +51,38 @@ export default function ClipPlayer({ clip }) {
             )}
           </div>
         </div>
-        <button 
-          onClick={handleCopy}
-          style={{ 
-            padding: '6px 12px', 
-            fontSize: '14px', 
-            backgroundColor: copied ? '#28a745' : '#0070f3', 
-            color: '#fff', 
-            border: 'none', 
-            borderRadius: '4px', 
-            cursor: 'pointer',
-            transition: 'background-color 0.2s'
-          }}
-        >
-          {copied ? 'Copied!' : 'Copy Info'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            onClick={handleCopy}
+            style={{ 
+              padding: '6px 12px', 
+              fontSize: '13px', 
+              backgroundColor: copied ? '#28a745' : '#0070f3', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '4px', 
+              cursor: 'pointer',
+              transition: 'background-color 0.2s'
+            }}
+          >
+            {copied ? 'Copied!' : 'Copy Info'}
+          </button>
+          <button 
+            onClick={handleDownload}
+            style={{ 
+              padding: '6px 12px', 
+              fontSize: '13px', 
+              backgroundColor: downloading ? '#6c757d' : '#28a745', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '4px', 
+              cursor: 'pointer' 
+            }}
+            disabled={downloading}
+          >
+            {downloading ? 'Downloading...' : 'Download MP4'}
+          </button>
+        </div>
       </div>
     </div>
   );
