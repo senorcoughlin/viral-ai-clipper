@@ -20,6 +20,7 @@ function youtubeId(url) {
     if (u.searchParams.get('v')) return u.searchParams.get('v');
     const m = u.pathname.match(/\/(shorts|embed)\/([^/?]+)/);
     if (m) return m[2];
+    }
   } catch (e) { downloadError = e?.message || String(e); }
   return null;
 }
@@ -192,6 +193,9 @@ export async function POST(request) {
 
   let downloadError = null;
   try {
+    if (process.env.RENDERIO_API_KEY) {
+      // RenderIO handles download + cut. Skip Tunelio.
+    } else {
     const dl = await downloadSource(videoUrl, dir);
     source = dl?.path || null;
     downloadError = dl?.error || null;
