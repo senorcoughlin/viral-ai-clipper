@@ -1,51 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-
-function ClipItem({ clip }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(`${clip.title} (${clip.timestamp})`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div style={{ 
-      border: '1px solid #e1e4e8', 
-      borderRadius: '8px', 
-      padding: '16px', 
-      marginBottom: '12px',
-      backgroundColor: '#f6f8fa',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '10px'
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>{clip.title}</h3>
-          <span style={{ fontSize: '14px', color: '#586069' }}>Timestamp: {clip.timestamp}</span>
-        </div>
-        <button 
-          onClick={handleCopy}
-          style={{ 
-            padding: '6px 12px', 
-            fontSize: '14px', 
-            backgroundColor: copied ? '#28a745' : '#0070f3', 
-            color: '#fff', 
-            border: 'none', 
-            borderRadius: '4px', 
-            cursor: 'pointer',
-            transition: 'background-color 0.2s'
-          }}
-        >
-          {copied ? 'Copied!' : 'Copy Info'}
-        </button>
-      </div>
-    </div>
-  );
-}
+import ClipPlayer from '../components/ClipPlayer';
 
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
@@ -81,6 +37,11 @@ export default function Home() {
     }
   };
 
+  const handleReset = () => {
+    setVideoUrl('');
+    setClips([]);
+  };
+
   return (
     <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
       <h1>Viral AI Clipper</h1>
@@ -106,10 +67,26 @@ export default function Home() {
 
       {clips.length > 0 && (
         <div style={{ marginTop: '30px' }}>
-          <h2>Generated Clips:</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Generated Clips:</h2>
+            <button 
+              onClick={handleReset}
+              style={{ 
+                padding: '6px 12px', 
+                fontSize: '13px', 
+                backgroundColor: '#e1e4e8', 
+                color: '#333', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer' 
+              }}
+            >
+              Clear Results
+            </button>
+          </div>
           <div style={{ marginTop: '15px' }}>
             {clips.map((clip) => (
-              <ClipItem key={clip.id} clip={clip} />
+              <ClipPlayer key={clip.id} clip={clip} />
             ))}
           </div>
         </div>
