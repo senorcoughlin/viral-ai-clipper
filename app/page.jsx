@@ -1,14 +1,37 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ClipPlayer from '../components/ClipPlayer';
 
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
   const [clips, setClips] = useState([]);
   const [history, setHistory] = useState([]);
+
+  // Simulated status message cycler during processing
+  useEffect(() => {
+    if (!isProcessing) return;
+
+    const stages = [
+      'Connecting to AI transcription server...',
+      'Analyzing video audio and sentiment...',
+      'Detecting peak viral moments & highlights...',
+      'Rendering final 9:16 vertical crop...'
+    ];
+
+    let index = 0;
+    setStatusMessage(stages[0]);
+
+    const interval = setInterval(() => {
+      index = (index + 1) % stages.length;
+      setStatusMessage(stages[index]);
+    }, 1200);
+
+    return () => clearInterval(interval);
+  }, [isProcessing]);
 
   const handleClipping = async (e) => {
     e.preventDefault();
@@ -35,16 +58,16 @@ export default function Home() {
       const newClips = result.data.generatedClips;
       setClips(newClips);
 
-      // Add to session history
       setHistory((prev) => [
         { id: Date.now(), url: videoUrl, format: clipFormat, clips: newClips },
-        ...prev.slice(0, 4), // Keep last 5 entries
+        ...prev.slice(0, 4),
       ]);
     } catch (error) {
       console.error('Error:', error);
       alert('Error processing video. Please try again.');
     } finally {
       setIsProcessing(false);
+      setStatusMessage('');
     }
   };
 
@@ -95,6 +118,23 @@ export default function Home() {
           {isProcessing ? 'Processing Clips...' : 'Generate Viral Clips'}
         </button>
       </form>
+
+      {/* Real-time Status Notification Banner */}
+      {isProcessing && (
+        <div style={{ 
+          marginTop: '20px', 
+          padding: '14px', 
+          backgroundColor: '#e6f4ff', 
+          border: '1px solid #91caff', 
+          borderRadius: '6px', 
+          color: '#0958d9', 
+          fontSize: '14px', 
+          textAlign: 'center',
+          fontWeight: '500'
+        }}>
+          ⚡ {statusMessage}
+        </div>
+      )}
 
       {clips.length > 0 && (
         <div style={{ marginTop: '30px' }}>
