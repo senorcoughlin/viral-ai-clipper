@@ -20,8 +20,7 @@ function youtubeId(url) {
     if (u.searchParams.get('v')) return u.searchParams.get('v');
     const m = u.pathname.match(/\/(shorts|embed)\/([^/?]+)/);
     if (m) return m[2];
-    }
-  } catch (e) { downloadError = e?.message || String(e); }
+  } catch {}
   return null;
 }
 
@@ -208,6 +207,7 @@ export async function POST(request) {
           transcript = await transcribe(audio);
         } catch {}
       }
+    }
     }
   } catch {}
 
