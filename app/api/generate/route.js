@@ -13,6 +13,37 @@ const exec = promisify(execFile);
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
+function youtubeId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
+    if (u.searchParams.get('v')) return u.searchParams.get('v');
+    const m = u.pathname.match(/\/(shorts|embed)\/([^/?]+)/);
+    if (m) return m[2];
+  } catch {}
+  return null;
+}
+
+async function fetchTranscript(url) {
+  const id = youtubeId(url);
+  if (!id) return '';
+  try {
+    const { YouTubeTranscriptApi } = await import('extract-youtube');
+    const api = new YouTubeTranscriptApi();
+    const tr = await api.fetch(id);
+    const raw = typeof tr.toRawData === 'function' ? tr.toRawData() : tr;
+    const snippets = raw?.snippets || raw?.transcript || raw || [];
+    if (Array.isArray(snippets)) {
+      return snippets.map(s => s.text || s).filter(Boolean).join(' ');
+    }
+    return String(raw || '');
+  } catch (e) {
+    console.error('transcript failed', e?.message);
+    return '';
+  }
+}
+
+
 const SAMPLE_VIDEOS = [
   'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
   'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
@@ -117,7 +148,7 @@ export async function POST(request) {
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-'));
   let source = null;
-  let transcript = '';
+  let transcript = await fetchTranscript(videoUrl);
 
   try {
     source = await downloadSource(videoUrl, dir);
@@ -133,7 +164,7 @@ export async function POST(request) {
     }
   } catch {}
 
-  const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}`, videoUrl, clipFormat, aiStyle, clipLength);
+  const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength);
   const base = scored?.clips?.length
     ? scored.clips.slice(0, 3)
     : [
@@ -198,7 +229,8 @@ export async function POST(request) {
       simulated: clips.every(c => c.preview),
       note: clips.some(c => !c.preview)
         ? 'Cut from your source video.'
-        : 'Preview clips. Real cutting runs when download succeeds.',
+        : (transcript ? 'AI scored from the real transcript. Preview videos until download succeeds.' : 'Preview clips. Real cutting runs when download succeeds.'),
+      hasTranscript: !!transcript,
     },
   });
 }
