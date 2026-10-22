@@ -60,6 +60,7 @@ export default function ToolsPage() {
           </a>
           <nav className="flex gap-6 text-sm font-medium text-soft">
             <a href="/" className="hover:text-fg">Home</a>
+            <a href="/connectors" className="hover:text-fg">Connectors</a>
             <a href="/tools" className="text-lime">AI Tools</a>
             <a href="/assets" className="hover:text-fg">My Assets</a>
             <a href="/channel" className="hover:text-fg">Channel</a>
