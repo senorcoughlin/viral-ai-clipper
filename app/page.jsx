@@ -18,6 +18,12 @@ const STYLES = [
   { value: 'kids_3d', label: '3D Kids' },
   { value: 'clean_viral', label: 'Clean 4K' },
 ];
+const LENGTHS = [
+  { value: 15, label: '15s' },
+  { value: 30, label: '30s' },
+  { value: 45, label: '45s' },
+  { value: 60, label: '60s' },
+];
 const HOOKS = ['“Nobody tells you this about…”', '“I was wrong about…”', '“The $40k mistake”', '“Watch till the end”', '“This changed everything”', '“POV: you finally…”', '“Stop doing this”', '“3 things I wish I knew”'];
 const PRICE = { monthly: { amount: '$29', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199', per: '/yr · about $17/mo', plan: 'pro_yearly' } };
 
@@ -45,6 +51,7 @@ function HomeInner() {
   const [videoUrl, setVideoUrl] = useState('');
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [aiStyle, setAiStyle] = useState('character_swap');
+  const [clipLength, setClipLength] = useState(30);
   const [autoSubtitles, setAutoSubtitles] = useState(true);
   const [aiHook, setAiHook] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -134,7 +141,7 @@ function HomeInner() {
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle }),
+          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength }),
         });
         const result = await res.json();
         if (!res.ok) throw new Error(result.message);
@@ -271,6 +278,11 @@ function HomeInner() {
                 <span className="mr-1 text-xs text-muted">Style</span>
                 {STYLES.map(s => (
                   <button key={s.value} type="button" onClick={() => setAiStyle(s.value)} className={`chip ${aiStyle === s.value ? 'chip-on' : ''}`}>{s.label}</button>
+                ))}
+                <span className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />
+                <span className="mr-1 text-xs text-muted">Length</span>
+                {LENGTHS.map(l => (
+                  <button key={l.value} type="button" onClick={() => setClipLength(l.value)} className={`chip ${clipLength === l.value ? 'chip-on' : ''}`}>{l.label}</button>
                 ))}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">

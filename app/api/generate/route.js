@@ -21,7 +21,7 @@ function videoId(url) {
   return url.slice(-11);
 }
 
-async function scoreWithGemini(videoUrl, format, style) {
+async function scoreWithGemini(videoUrl, format, style, length = 30) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   const id = videoId(videoUrl);
@@ -34,7 +34,8 @@ Return ONLY valid JSON:
 Video: ${videoUrl}
 Video id: ${id}
 Format: ${format}
-Style: ${style}`;
+Style: ${style}
+Target length: ${length} seconds. Each clip should be about this long.`;
 
   try {
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
@@ -58,10 +59,10 @@ Style: ${style}`;
 
 export async function POST(request) {
   const body = await request.json();
-  const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook } = body;
+  const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30 } = body;
   if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
 
-  const scored = await scoreWithGemini(videoUrl, clipFormat, aiStyle);
+  const scored = await scoreWithGemini(videoUrl, clipFormat, aiStyle, clipLength);
   const base = scored?.clips?.length
     ? scored.clips.slice(0, 3)
     : [
@@ -76,7 +77,7 @@ export async function POST(request) {
     hook: aiHook ? (c.hook || '') : '',
     score: c.score || 80,
     viralScore: c.score || 80,
-    duration: `${Math.max(8, (c.endSec || 30) - (c.startSec || 0))}s`,
+    duration: `${clipLength}s`,
     format: clipFormat,
     style: aiStyle,
     caption: autoSubtitles ? (c.caption || '') : '',
@@ -85,7 +86,7 @@ export async function POST(request) {
     videoUrl: SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length],
     source: videoUrl,
     startSec: c.startSec,
-    endSec: c.endSec,
+    endSec: c.startSec ? c.startSec + Number(clipLength) : Number(clipLength),
     preview: true,
   }));
 
