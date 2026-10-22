@@ -217,7 +217,7 @@ function HomeInner() {
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
             <a href="#how" className="hover:text-fg">How it works</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
-            <a href="#assets" className="hover:text-fg">My Assets</a>
+            <a href="/assets" className="hover:text-fg">My Assets</a>
             <a href="#pricing" className="hover:text-fg">Pricing</a>
           </nav>
           <div className="flex items-center gap-2.5">
@@ -468,28 +468,17 @@ function HomeInner() {
                 </div>
                 <button onClick={() => setClips([])} className="btn-ghost h-10 px-4 text-sm">Clear</button>
               </div>
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {clips.map((c, i) => <ClipPlayer key={`${c.id}-${i}`} clip={c} />)}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {clips.map((c, i) => <ClipPlayer key={`${c.id}-${i}`} clip={c} compact />)}
               </div>
             </>
           )}
 
-          {/* MY ASSETS */}
           {myAssets.length > 0 && (
-            <section id="assets" className="flex flex-col gap-6 border-t border-line pt-12">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div className="flex flex-col gap-2">
-                  <span className="eyebrow">Library</span>
-                  <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">My Assets</h2>
-                  <p className="text-sm text-soft">{myAssets.length} clip{myAssets.length === 1 ? '' : 's'} saved on this device.</p>
-                </div>
-              </div>
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {myAssets.map((c, i) => (
-                  <ClipPlayer key={`asset-${c.id || i}-${c.createdAt}`} clip={c} />
-                ))}
-              </div>
-            </section>
+            <a href="/assets" className="flex items-center justify-between rounded-input border border-line bg-surface px-4 py-3 text-sm hover:border-lime">
+              <span className="font-semibold text-white">View all {myAssets.length} assets</span>
+              <span className="text-lime">Open library →</span>
+            </a>
           )}
 
           {history.length > 0 && (

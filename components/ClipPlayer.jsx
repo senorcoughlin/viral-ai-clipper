@@ -36,7 +36,7 @@ const Icon = {
   play: <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>,
 };
 
-export default function ClipPlayer({ clip }) {
+export default function ClipPlayer({ clip, compact = false }) {
   const [copied, setCopied] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -93,9 +93,9 @@ export default function ClipPlayer({ clip }) {
   const pacePct = Math.max(60, score - 5);
 
   return (
-    <article className="group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup">
+    <article className={`group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup ${compact ? 'max-w-[180px]' : ''}`}>
       {/* Preview / Player */}
-      <div className={`relative ${ASPECT[clip.format] || ASPECT.shorts_9_16} border-b border-line bg-black`}>
+      <div className={`relative ${compact ? 'aspect-[9/14]' : (ASPECT[clip.format] || ASPECT.shorts_9_16)} border-b border-line bg-black`}>
         <video
           ref={videoRef}
           src={videoSrc}
@@ -121,7 +121,7 @@ export default function ClipPlayer({ clip }) {
             {poster && (
               <img src={poster} alt="" className="absolute inset-0 h-full w-full object-cover opacity-90" />
             )}
-            <span className="relative grid h-16 w-16 place-items-center rounded-full bg-lime text-ink shadow-lg ring-4 ring-black/30">
+            <span className={`relative grid place-items-center rounded-full bg-lime text-ink shadow-lg ring-4 ring-black/30 ${compact ? 'h-10 w-10' : 'h-16 w-16'}`}>
               {Icon.play}
             </span>
           </button>
@@ -144,6 +144,15 @@ export default function ClipPlayer({ clip }) {
       </div>
 
       {/* Body */}
+      {compact ? (
+        <div className="flex flex-col gap-1 p-2.5">
+          <p className="line-clamp-2 text-xs font-bold text-white">{title}</p>
+          <div className="flex items-center justify-between text-[10px] text-muted">
+            <span style={{ color }}>{label}</span>
+            <span>{timestamp}</span>
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-[.08em]" style={{ color }}>{label}</span>
@@ -184,6 +193,7 @@ export default function ClipPlayer({ clip }) {
           </button>
         </div>
       </div>
+      )}
     </article>
   );
 }
