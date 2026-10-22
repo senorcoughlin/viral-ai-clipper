@@ -8,9 +8,12 @@ export default function Home() {
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [isProcessing, setIsProcessing] = useState(false);
   const [clips, setClips] = useState([]);
+  const [history, setHistory] = useState([]);
 
   const handleClipping = async (e) => {
     e.preventDefault();
+    if (!videoUrl.trim()) return;
+
     setIsProcessing(true);
     setClips([]);
 
@@ -29,7 +32,14 @@ export default function Home() {
         throw new Error(result.message || 'Failed to process video');
       }
 
-      setClips(result.data.generatedClips);
+      const newClips = result.data.generatedClips;
+      setClips(newClips);
+
+      // Add to session history
+      setHistory((prev) => [
+        { id: Date.now(), url: videoUrl, format: clipFormat, clips: newClips },
+        ...prev.slice(0, 4), // Keep last 5 entries
+      ]);
     } catch (error) {
       console.error('Error:', error);
       alert('Error processing video. Please try again.');
@@ -43,8 +53,14 @@ export default function Home() {
     setClips([]);
   };
 
+  const loadHistoryItem = (item) => {
+    setVideoUrl(item.url);
+    setClipFormat(item.format);
+    setClips(item.clips);
+  };
+
   return (
-    <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
+    <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '650px', margin: '0 auto' }}>
       <h1>Viral AI Clipper</h1>
       <p>Paste your long-form video link below to generate short clips instantly.</p>
       
@@ -104,6 +120,27 @@ export default function Home() {
               <ClipPlayer key={clip.id} clip={clip} />
             ))}
           </div>
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div style={{ marginTop: '40px', borderTop: '1px solid #eaeaea', paddingTop: '20px' }}>
+          <h3 style={{ fontSize: '16px', marginBottom: '10px' }}>Recent Sessions</h3>
+          <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {history.map((item) => (
+              <li key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9f9f9', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
+                <span style={{ fontSize: '13px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '400px' }}>
+                  {item.url} ({item.format})
+                </span>
+                <button 
+                  onClick={() => loadHistoryItem(item)}
+                  style={{ padding: '4px 10px', fontSize: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  Load
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </main>
