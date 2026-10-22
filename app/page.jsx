@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import ClipPlayer from '../components/ClipPlayer';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 
@@ -57,7 +58,10 @@ export default function Home() {
   const [billing, setBilling] = useState('yearly');
   const [justFinished, setJustFinished] = useState(false);
 
+  const searchParams = useSearchParams();
   useEffect(() => {
+    const b = searchParams.get('billing');
+    if (b === 'monthly' || b === 'yearly') setBilling(b);
     const saved = localStorage.getItem('viral_clipper_history');
     if (saved) try { setHistory(JSON.parse(saved)); } catch {}
 
@@ -545,6 +549,15 @@ export default function Home() {
           <span className="flex gap-5"><a href="#" className="hover:text-fg">Terms</a><a href="#" className="hover:text-fg">Privacy</a><a href="#" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
+
+      {/* Sticky mobile CTA */}
+      {!isPro && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-line bg-ink/95 p-3 backdrop-blur md:hidden">
+          <button onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
+            Upgrade to Pro
+          </button>
+        </div>
+      )}
     </div>
   );
 }
