@@ -12,20 +12,19 @@ export async function POST(request) {
       );
     }
 
-    // Mock generated clips incorporating enhancement settings
     const mockClips = [
       { 
-        id: 1, 
-        title: 'Highlight Clip 1 (Viral Hook Applied)', 
-        timestamp: '00:15 - 00:45', 
+        id: Date.now() + 1, 
+        title: 'Peak Moment Highlight 1', 
+        timestamp: '00:12 - 00:38', 
         format: clipFormat || 'shorts_9_16',
         subtitlesEnabled: autoSubtitles ?? true,
         hookEnabled: aiHook ?? true
       },
       { 
-        id: 2, 
-        title: 'Highlight Clip 2 (Viral Hook Applied)', 
-        timestamp: '01:20 - 01:50', 
+        id: Date.now() + 2, 
+        title: 'Engagement Spike Highlight 2', 
+        timestamp: '01:15 - 01:45', 
         format: clipFormat || 'shorts_9_16',
         subtitlesEnabled: autoSubtitles ?? true,
         hookEnabled: aiHook ?? true
@@ -34,7 +33,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      message: 'Clips generated successfully with AI enhancements',
+      message: 'Batch clip queue processed successfully',
       data: {
         sourceUrl: videoUrl,
         selectedFormat: clipFormat || 'shorts_9_16',
