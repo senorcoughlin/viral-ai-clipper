@@ -21,6 +21,7 @@ export async function POST(request) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${request.headers.get('origin') || 'https://viral-ai-clipper-lovat.vercel.app'}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${request.headers.get('origin') || 'https://viral-ai-clipper-lovat.vercel.app'}/cancel`,
+      managed_payments: { enabled: false },
     });
 
     return NextResponse.json({
