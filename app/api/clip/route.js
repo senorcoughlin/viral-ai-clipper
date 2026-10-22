@@ -1,82 +1,74 @@
 import { NextResponse } from 'next/server';
 
+const PRESETS = {
+  character_swap: {
+    p1: 'Character swap: Replace speaker with reference image, keep clothing, exact lip-sync, static background.',
+    p2: 'Motion body swap: Replace subject with reference character, lock dance/hand movements, 4k glitch-free.',
+    tags: '#aitools #characterswap #klingai #higgsfield #viralshorts #fyp'
+  },
+  anime_action: {
+    p1: '90s anime fighter restyle: Cel-shaded look, glowing energy aura, speed lines, preserve camera motion.',
+    p2: 'Vertical anime drama: Expressive shading, power-up particles, impact frames, exact lip-sync.',
+    tags: '#animeedit #dbzstyle #aianimation #verticalanime #shorts #viral'
+  },
+  kids_3d: {
+    p1: '3D cute animation: Tiny 3D dinosaur style, vibrant colors, bouncy motion tracking, studio lighting.',
+    p2: 'Playful 3D musical: Rhythmic stomping/dancing 3D character, bright background, synced mouth audio.',
+    tags: '#kidsshorts #3danimation #tinydino #singalong #cartoonshorts #fyp'
+  },
+  clean_viral: {
+    p1: 'Studio 4k enhance: Punchy color grading, face tracking on speaker, clean audio, depth of field.',
+    p2: 'High-retention cut: Dynamic zoom on vocal emphasis, crisp skin tones, studio lighting.',
+    tags: '#podcastclips #viralhighlights #mustwatch #trending #shorts #creator'
+  }
+};
+
 export async function POST(request) {
   try {
     const body = await request.json();
     const { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle } = body;
 
     if (!videoUrl) {
-      return NextResponse.json(
-        { success: false, message: 'Video URL is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, message: 'URL required' }, { status: 400 });
     }
 
-    const stylePresets = {
-      character_swap: {
-        prompt1: 'Video-to-video character replacement: Swap primary speaker with reference character image, keep exact clothing, replicate facial expressions and flawless lip-sync, preserve original background environment, zero flickering.',
-        prompt2: 'Motion control body swap: Replace subject with reference image character, lock exact dance/body movement and hand gestures, maintain scene lighting and shadows, glitch-free 4k output.',
-        tags: '#aitools #characterswap #klingai #higgsfield #viralshorts #fyp'
-      },
-      anime_action: {
-        prompt1: '90s anime action restyle: Transform subject into sharp cel-shaded anime fighter, intense aura energy glow, dramatic speed lines on movement, high-contrast Z-fighter aesthetic, preserve camera motion.',
-        prompt2: 'Dynamic anime drama shot: Convert scene to vertical anime series style, expressive character shading, glowing power-up particles, cinematic impact frames, keep exact lip-sync and head motion.',
-        tags: '#animeedit #dbzstyle #aianimation #verticalanime #shorts #viral'
-      },
-      kids_3d: {
-        prompt1: '3D Pixar/Cute animation restyle: Transform character into cute tiny 3D animated dinosaur/character, vibrant saturated colors, bouncy playful motion tracking, smooth studio lighting, kid-friendly aesthetic.',
-        prompt2: 'Playful 3D musical short: Convert movement into rhythmic stomping and dancing 3D cartoon character, bright cheerful background, synchronized mouth movement for sing-along audio.',
-        tags: '#kidsshorts #3danimation #tinydino #singalong #cartoonshorts #fyp'
-      },
-      clean_viral: {
-        prompt1: 'Studio quality enhancement: Upscale to crisp 4k, apply punchy high-retention color grading, lock face tracking on speaker, remove background noise, subtle cinematic depth of field.',
-        prompt2: 'High-retention podcast/highlight cut: Dynamic zoom-in on key vocal emphasis, crisp skin tones, clean studio lighting, zero motion blur.',
-        tags: '#podcastclips #viralhighlights #mustwatch #trending #shorts #creator'
-      }
-    };
-
-    const selectedPreset = stylePresets[aiStyle] || stylePresets.character_swap;
+    const preset = PRESETS[aiStyle] || PRESETS.character_swap;
+    const fmt = clipFormat || 'shorts_9_16';
 
     const mockClips = [
-      { 
-        id: Date.now() + 1, 
-        title: 'Peak Moment Highlight 1', 
-        timestamp: '00:12 - 00:38', 
-        format: clipFormat || 'shorts_9_16',
+      {
+        id: Date.now() + 1,
+        title: 'Peak Moment Highlight 1',
+        timestamp: '00:12 - 00:38',
+        format: fmt,
         subtitlesEnabled: autoSubtitles ?? true,
         hookEnabled: aiHook ?? true,
         viralScore: 98,
-        socialCaption: `Wait until the end... nobody saw this coming! 🔥👀 ${selectedPreset.tags}`,
-        aiPrompt: selectedPreset.prompt1
+        socialCaption: `Wait until the end! 🔥👀 ${preset.tags}`,
+        aiPrompt: preset.p1
       },
-      { 
-        id: Date.now() + 2, 
-        title: 'Engagement Spike Highlight 2', 
-        timestamp: '01:15 - 01:45', 
-        format: clipFormat || 'shorts_9_16',
+      {
+        id: Date.now() + 2,
+        title: 'Engagement Spike Highlight 2',
+        timestamp: '01:15 - 01:45',
+        format: fmt,
         subtitlesEnabled: autoSubtitles ?? true,
         hookEnabled: aiHook ?? true,
         viralScore: 94,
-        socialCaption: `This 30-second breakdown changes everything 💡🚀 ${selectedPreset.tags}`,
-        aiPrompt: selectedPreset.prompt2
-      },
+        socialCaption: `This breakdown changes everything 💡🚀 ${preset.tags}`,
+        aiPrompt: preset.p2
+      }
     ];
 
     return NextResponse.json({
       success: true,
-      message: 'Batch clip queue processed successfully',
       data: {
         sourceUrl: videoUrl,
-        selectedFormat: clipFormat || 'shorts_9_16',
-        options: { autoSubtitles, aiHook, aiStyle },
-        generatedClips: mockClips,
-      },
+        selectedFormat: fmt,
+        generatedClips: mockClips
+      }
     });
   } catch (error) {
-    console.error('API Error:', error);
-    return NextResponse.json(
-      { success: false, message: 'Internal Server Error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, message: 'Server Error' }, { status: 500 });
   }
 }
