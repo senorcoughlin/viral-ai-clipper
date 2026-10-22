@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 
 const exec = promisify(execFile);
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
 function youtubeId(url) {

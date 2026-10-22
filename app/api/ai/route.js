@@ -3,7 +3,7 @@ export const maxDuration = 30;
 
 import { NextResponse } from 'next/server';
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 
 const TOOLS = {
   hooks: 'Generate 8 short viral hooks (under 12 words) for TikTok/Reels/Shorts. Return a JSON array of strings only.',
