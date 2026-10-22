@@ -1,10 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import ViralScoreMeter, { scoreTier } from './ViralScoreMeter';
 
 const FORMAT_LABEL = { shorts_9_16: '9:16', landscape_16_9: '16:9', square_1_1: '1:1' };
 const ASPECT = { shorts_9_16: 'aspect-[9/12]', landscape_16_9: 'aspect-[16/10]', square_1_1: 'aspect-square' };
+
+// Public sample videos for demo playback until real generation is wired
+const SAMPLE_VIDEOS = [
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+];
 
 function Bar({ label, pct, color }) {
   return (
@@ -24,15 +31,20 @@ const Icon = {
   edit: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 20h4l10-10-4-4L4 16v4zM13 7l4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>,
   check: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="m5 12 5 5L20 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
   sparkle: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3v4m0 10v4M3 12h4m10 0h4M6.3 6.3l2.8 2.8m5.8 5.8 2.8 2.8M6.3 17.7l2.8-2.8m5.8-5.8 2.8-2.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>,
+  play: <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>,
 };
 
 export default function ClipPlayer({ clip }) {
   const [copied, setCopied] = useState('');
   const [isEditing, setIsEditing] = useState(false);
-  const [title, setTitle] = useState(clip.title);
-  const [timestamp, setTimestamp] = useState(clip.timestamp);
-  const [socialCaption, setSocialCaption] = useState(clip.socialCaption || '');
-  const [aiPrompt, setAiPrompt] = useState(clip.aiPrompt || '');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [title, setTitle] = useState(clip.title || 'Untitled');
+  const [timestamp, setTimestamp] = useState(clip.timestamp || clip.duration || '0:00');
+  const [socialCaption, setSocialCaption] = useState(clip.socialCaption || clip.caption || '');
+  const [aiPrompt, setAiPrompt] = useState(clip.aiPrompt || clip.hook || '');
+  const videoRef = useRef(null);
+
+  const videoSrc = clip.videoUrl || SAMPLE_VIDEOS[(clip.id || 0) % SAMPLE_VIDEOS.length];
 
   const copy = (text, key) => {
     if (!text) return;
@@ -41,38 +53,55 @@ export default function ClipPlayer({ clip }) {
     setTimeout(() => setCopied(''), 1500);
   };
 
-  const score = clip.viralScore || 90;
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      v.play();
+      setIsPlaying(true);
+    } else {
+      v.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  const score = clip.viralScore || clip.score || 90;
   const { color, label } = scoreTier(score);
   const hookText = (socialCaption || '').replace(/#\S+/g, '').replace(/[^\w\s'!?.,-]/g, '').trim();
-  // Derived sub-scores so the bars feel tied to the headline number
   const hookPct = Math.min(100, score + 2);
-  const pacePct = Math.max(60, score - 5 + ((clip.id || 0) % 7));
+  const pacePct = Math.max(60, score - 5);
 
   return (
     <article className="group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup">
-      {/* Preview */}
-      <div className={`relative ${ASPECT[clip.format] || ASPECT.shorts_9_16} border-b border-line bg-[#0F0F16]`}>
-        <div aria-hidden className="absolute inset-0 bg-dots [background-size:14px_14px] opacity-70" />
-        <div className="absolute left-3.5 top-3.5 flex gap-1.5">
+      {/* Preview / Player */}
+      <div className={`relative ${ASPECT[clip.format] || ASPECT.shorts_9_16} border-b border-line bg-black cursor-pointer`} onClick={togglePlay}>
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          className="absolute inset-0 h-full w-full object-cover"
+          playsInline
+          preload="metadata"
+          onEnded={() => setIsPlaying(false)}
+        />
+        {!isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <div className="grid h-16 w-16 place-items-center rounded-full bg-lime text-ink shadow-lg">
+              {Icon.play}
+            </div>
+          </div>
+        )}
+        <div className="absolute left-3.5 top-3.5 flex gap-1.5 pointer-events-none">
           <span className="rounded-full border border-line2 bg-ink/85 px-2 py-1 font-mono text-[11px]">{timestamp}</span>
           <span className="rounded-full border border-line2 bg-ink/85 px-2 py-1 text-[11px] font-semibold">{FORMAT_LABEL[clip.format] || '9:16'}</span>
         </div>
-        <div className="absolute right-3.5 top-3.5"><ViralScoreMeter score={score} size={56} /></div>
-
-        {/* waveform */}
-        <div className="wave absolute inset-x-4 top-[46%] flex h-10 items-end gap-1" aria-hidden>
-          {Array.from({ length: 22 }, (_, i) => (
-            <span key={i} className="h-10" style={{ animationDelay: `${(i * 137) % 1100}ms` }} />
-          ))}
-        </div>
-
-        {clip.hookEnabled && (
-          <div className="absolute left-1/2 top-[22%] -translate-x-1/2 rounded-md bg-hot px-2 py-1 font-display text-[11px] font-extrabold uppercase tracking-wide text-white">
+        <div className="absolute right-3.5 top-3.5 pointer-events-none"><ViralScoreMeter score={score} size={56} /></div>
+        {clip.hookEnabled && !isPlaying && (
+          <div className="absolute left-1/2 top-[22%] -translate-x-1/2 rounded-md bg-hot px-2 py-1 font-display text-[11px] font-extrabold uppercase tracking-wide text-white pointer-events-none">
             Wait for it
           </div>
         )}
-        {clip.subtitlesEnabled && (
-          <p className="absolute inset-x-3.5 bottom-4 text-center font-display text-[17px] font-extrabold uppercase leading-[1.05] text-white [text-shadow:0_2px_12px_rgba(0,0,0,.8)]">
+        {clip.subtitlesEnabled && !isPlaying && (
+          <p className="absolute inset-x-3.5 bottom-4 text-center font-display text-[17px] font-extrabold uppercase leading-[1.05] text-white [text-shadow:0_2px_12px_rgba(0,0,0,.8)] pointer-events-none">
             {hookText || 'This changes everything'}
           </p>
         )}

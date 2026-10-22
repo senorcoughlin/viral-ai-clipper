@@ -19,6 +19,7 @@ export async function POST(request) {
     {
       id: `c_${Date.now()}_1`,
       title: 'The moment everyone missed',
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       hook: aiHook ? 'Wait for the last 3 seconds…' : '',
       score: 94,
       duration: '0:18',
@@ -30,6 +31,7 @@ export async function POST(request) {
     {
       id: `c_${Date.now()}_2`,
       title: 'Unexpected reaction',
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       hook: aiHook ? 'I didn’t expect that' : '',
       score: 87,
       duration: '0:12',
@@ -41,6 +43,7 @@ export async function POST(request) {
     {
       id: `c_${Date.now()}_3`,
       title: 'Quick tip that hits',
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
       hook: aiHook ? 'Do this next time' : '',
       score: 81,
       duration: '0:15',
