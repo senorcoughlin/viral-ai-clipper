@@ -47,6 +47,7 @@ export default function AssetsPage() {
           </a>
           <nav className="flex items-center gap-6 text-sm font-medium text-soft">
             <a href="/" className="hover:text-fg">Home</a>
+            <a href="/tools" className="hover:text-fg">AI Tools</a>
             <a href="/assets" className="text-lime">My Assets</a>
             <AccountBar onChange={load} />
           </nav>

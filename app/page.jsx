@@ -224,6 +224,7 @@ function HomeInner() {
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
             <a href="#how" className="hover:text-fg">How it works</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
+            <a href="/tools" className="hover:text-fg">AI Tools</a>
             <a href="/assets" className="hover:text-fg">My Assets</a>
             <a href="/channel" className="hover:text-fg">Channel</a>
             <AccountBar />
