@@ -9,8 +9,8 @@ const ASPECT = { shorts_9_16: 'aspect-[9/12]', landscape_16_9: 'aspect-[16/10]',
 // Public sample videos for demo playback until real generation is wired
 const SAMPLE_VIDEOS = [
   'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-  'https://www.w3schools.com/html/mov_bbb.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+  'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
+  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
 ];
 
 function Bar({ label, pct, color }) {
@@ -38,13 +38,14 @@ export default function ClipPlayer({ clip }) {
   const [copied, setCopied] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [srcIndex, setSrcIndex] = useState(0);
   const [title, setTitle] = useState(clip.title || 'Untitled');
   const [timestamp, setTimestamp] = useState(clip.timestamp || clip.duration || '0:00');
   const [socialCaption, setSocialCaption] = useState(clip.socialCaption || clip.caption || '');
   const [aiPrompt, setAiPrompt] = useState(clip.aiPrompt || clip.hook || '');
   const videoRef = useRef(null);
 
-  const videoSrc = clip.videoUrl || SAMPLE_VIDEOS[(clip.id || 0) % SAMPLE_VIDEOS.length];
+  const videoSrc = srcIndex === 0 && clip.videoUrl ? clip.videoUrl : SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
 
   const copy = (text, key) => {
     if (!text) return;
@@ -90,7 +91,7 @@ export default function ClipPlayer({ clip }) {
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
-          onError={(e) => console.error('video error', e)}
+          onError={() => setSrcIndex(i => i + 1)}
         />
         {!isPlaying && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
