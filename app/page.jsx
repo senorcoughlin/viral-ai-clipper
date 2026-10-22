@@ -197,8 +197,14 @@ export default function Home() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
             <h2 className="text-xl font-bold mb-1">Go Pro</h2>
             <p className="text-slate-400 text-sm mb-5">Unlimited generations, priority processing, and no watermarks.</p>
-            <button onClick={() => handleUpgrade('pro_monthly')} className="w-full py-3 rounded-xl bg-indigo-600 font-medium mb-2 hover:bg-indigo-500">$29 / month</button>
-            <button onClick={() => handleUpgrade('pro_yearly')} className="w-full py-3 rounded-xl bg-slate-800 font-medium hover:bg-slate-700">$199 / year</button>
+            <button onClick={() => handleUpgrade('pro_monthly')} className="w-full py-3 rounded-xl bg-indigo-600 font-medium mb-2 hover:bg-indigo-500">Pro — $29 / month</button>
+            <button onClick={() => handleUpgrade('pro_yearly')} className="w-full py-3 rounded-xl bg-slate-800 font-medium mb-4 hover:bg-slate-700">Pro — $199 / year</button>
+            <p className="text-xs text-slate-500 mb-2 text-center">Or buy credits (one-time)</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={() => handleUpgrade('credits_10')} className="py-2.5 rounded-lg bg-slate-800 text-sm hover:bg-slate-700">10 for $5</button>
+              <button onClick={() => handleUpgrade('credits_25')} className="py-2.5 rounded-lg bg-slate-800 text-sm hover:bg-slate-700">25 for $10</button>
+              <button onClick={() => handleUpgrade('credits_50')} className="py-2.5 rounded-lg bg-slate-800 text-sm hover:bg-slate-700">50 for $15</button>
+            </div>
             <button onClick={() => setShowPricing(false)} className="mt-3 text-xs text-slate-500 w-full">Close</button>
           </div>
         </div>
