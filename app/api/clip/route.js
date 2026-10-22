@@ -1,74 +1,64 @@
 import { NextResponse } from 'next/server';
 
-const PRESETS = {
-  character_swap: {
-    p1: 'Character swap: Replace speaker with reference image, keep clothing, exact lip-sync, static background.',
-    p2: 'Motion body swap: Replace subject with reference character, lock dance/hand movements, 4k glitch-free.',
-    tags: '#aitools #characterswap #klingai #higgsfield #viralshorts #fyp'
+const P = {
+  swap: {
+    p1: 'Character swap with reference image, exact lip-sync.',
+    p2: 'Motion body swap, lock dance movements, 4k glitch-free.',
+    tags: '#aitools #swap #shorts'
   },
-  anime_action: {
-    p1: '90s anime fighter restyle: Cel-shaded look, glowing energy aura, speed lines, preserve camera motion.',
-    p2: 'Vertical anime drama: Expressive shading, power-up particles, impact frames, exact lip-sync.',
-    tags: '#animeedit #dbzstyle #aianimation #verticalanime #shorts #viral'
+  anime: {
+    p1: '90s anime fighter restyle, cel-shaded, aura glow.',
+    p2: 'Vertical anime drama, expressive shading, impact frames.',
+    tags: '#anime #shorts #viral'
   },
-  kids_3d: {
-    p1: '3D cute animation: Tiny 3D dinosaur style, vibrant colors, bouncy motion tracking, studio lighting.',
-    p2: 'Playful 3D musical: Rhythmic stomping/dancing 3D character, bright background, synced mouth audio.',
-    tags: '#kidsshorts #3danimation #tinydino #singalong #cartoonshorts #fyp'
+  kids: {
+    p1: '3D cute animation style, vibrant colors, studio lighting.',
+    p2: 'Playful 3D musical short, rhythmic dancing character.',
+    tags: '#kids #cartoon #3d'
   },
-  clean_viral: {
-    p1: 'Studio 4k enhance: Punchy color grading, face tracking on speaker, clean audio, depth of field.',
-    p2: 'High-retention cut: Dynamic zoom on vocal emphasis, crisp skin tones, studio lighting.',
-    tags: '#podcastclips #viralhighlights #mustwatch #trending #shorts #creator'
+  clean: {
+    p1: 'Studio 4k enhance, punchy color grading, face tracking.',
+    p2: 'High-retention zoom on vocal emphasis, crisp skin tones.',
+    tags: '#podcast #highlights #trending'
   }
 };
 
-export async function POST(request) {
+export async function POST(req) {
   try {
-    const body = await request.json();
-    const { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle } = body;
+    const body = await req.json();
+    const url = body.videoUrl;
+    if (!url) return NextResponse.json({ success: false }, { status: 400 });
 
-    if (!videoUrl) {
-      return NextResponse.json({ success: false, message: 'URL required' }, { status: 400 });
-    }
+    const pr = P[body.aiStyle] || P.swap;
+    const fmt = body.clipFormat || 'shorts_9_16';
 
-    const preset = PRESETS[aiStyle] || PRESETS.character_swap;
-    const fmt = clipFormat || 'shorts_9_16';
-
-    const mockClips = [
+    const clips = [
       {
-        id: Date.now() + 1,
-        title: 'Peak Moment Highlight 1',
+        id: 1,
+        title: 'Highlight 1',
         timestamp: '00:12 - 00:38',
         format: fmt,
-        subtitlesEnabled: autoSubtitles ?? true,
-        hookEnabled: aiHook ?? true,
+        subtitlesEnabled: body.autoSubtitles ?? true,
+        hookEnabled: body.aiHook ?? true,
         viralScore: 98,
-        socialCaption: `Wait until the end! 🔥👀 ${preset.tags}`,
-        aiPrompt: preset.p1
+        socialCaption: `Wait until the end! 🔥 ${pr.tags}`,
+        aiPrompt: pr.p1
       },
       {
-        id: Date.now() + 2,
-        title: 'Engagement Spike Highlight 2',
+        id: 2,
+        title: 'Highlight 2',
         timestamp: '01:15 - 01:45',
         format: fmt,
-        subtitlesEnabled: autoSubtitles ?? true,
-        hookEnabled: aiHook ?? true,
+        subtitlesEnabled: body.autoSubtitles ?? true,
+        hookEnabled: body.aiHook ?? true,
         viralScore: 94,
-        socialCaption: `This breakdown changes everything 💡🚀 ${preset.tags}`,
-        aiPrompt: preset.p2
+        socialCaption: `This changes everything! 🚀 ${pr.tags}`,
+        aiPrompt: pr.p2
       }
     ];
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        sourceUrl: videoUrl,
-        selectedFormat: fmt,
-        generatedClips: mockClips
-      }
-    });
-  } catch (error) {
-    return NextResponse.json({ success: false, message: 'Server Error' }, { status: 500 });
+    return NextResponse.json({ success: true, data: { generatedClips: clips } });
+  } catch (e) {
+    return NextResponse.json({ success: false }, { status: 500 });
   }
 }
