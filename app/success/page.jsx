@@ -1,11 +1,10 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function Success() {
+function SuccessContent() {
   const params = useSearchParams();
   useEffect(() => {
-    // Client-side unlock after successful checkout
     localStorage.setItem('viral_pro', 'true');
   }, []);
 
@@ -17,5 +16,13 @@ export default function Success() {
         <a href="/" className="px-4 py-2 bg-indigo-600 rounded-lg">Back to app</a>
       </div>
     </div>
+  );
+}
+
+export default function Success() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Loading...</div>}>
+      <SuccessContent />
+    </Suspense>
   );
 }
