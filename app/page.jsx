@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import ClipPlayer from '../components/ClipPlayer';
 
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
@@ -62,13 +63,11 @@ export default function Home() {
       {clips.length > 0 && (
         <div style={{ marginTop: '30px' }}>
           <h2>Generated Clips:</h2>
-          <ul style={{ paddingLeft: '20px', marginTop: '10px' }}>
+          <div style={{ marginTop: '15px' }}>
             {clips.map((clip) => (
-              <li key={clip.id} style={{ marginBottom: '10px' }}>
-                <strong>{clip.title}</strong> ({clip.timestamp})
-              </li>
+              <ClipPlayer key={clip.id} clip={clip} />
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </main>
