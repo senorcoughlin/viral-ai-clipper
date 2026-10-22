@@ -73,19 +73,23 @@ async function transcribe(audioPath) {
 async function downloadSource(url, dir) {
   try {
     const YTDlpWrap = (await import('yt-dlp-wrap')).default;
-    const ytdlp = new YTDlpWrap();
+    const bin = path.join(dir, 'yt-dlp');
+    await YTDlpWrap.downloadFromGithub(bin);
+    await fs.chmod(bin, 0o755);
+    const ytdlp = new YTDlpWrap(bin);
     const out = path.join(dir, 'source.mp4');
     await ytdlp.execPromise([
       url,
-      '-f', 'bv*[height<=720]+ba/b[height<=720]/b',
+      '-f', 'bv*[height<=480]+ba/b[height<=480]/b',
       '--merge-output-format', 'mp4',
       '-o', out,
       '--no-playlist',
-      '--max-filesize', '80M',
+      '--max-filesize', '60M',
+      '--socket-timeout', '30',
     ]);
     return out;
   } catch (e) {
-    console.error('download failed', e?.message);
+    console.error('download failed', e?.message || e);
     return null;
   }
 }
