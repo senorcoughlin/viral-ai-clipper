@@ -6,12 +6,13 @@ import ClipPlayer from '../components/ClipPlayer';
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
+  const [autoSubtitles, setAutoSubtitles] = useState(true);
+  const [aiHook, setAiHook] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [clips, setClips] = useState([]);
   const [history, setHistory] = useState([]);
 
-  // Simulated status message cycler during processing
   useEffect(() => {
     if (!isProcessing) return;
 
@@ -19,7 +20,7 @@ export default function Home() {
       'Connecting to AI transcription server...',
       'Analyzing video audio and sentiment...',
       'Detecting peak viral moments & highlights...',
-      'Rendering final 9:16 vertical crop...'
+      'Rendering final video crop & captions...'
     ];
 
     let index = 0;
@@ -46,7 +47,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ videoUrl, clipFormat }),
+        body: JSON.stringify({ videoUrl, clipFormat, autoSubtitles, aiHook }),
       });
 
       const result = await response.json();
@@ -110,6 +111,28 @@ export default function Home() {
           </select>
         </div>
 
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: '#f9f9f9', borderRadius: '6px', border: '1px solid #eee' }}>
+          <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>AI Enhancements:</label>
+          
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              checked={autoSubtitles} 
+              onChange={(e) => setAutoSubtitles(e.target.checked)} 
+            />
+            Generate dynamic animated captions / subtitles
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              checked={aiHook} 
+              onChange={(e) => setAiHook(e.target.checked)} 
+            />
+            Add viral text hook intro overlay
+          </label>
+        </div>
+
         <button 
           type="submit" 
           style={{ padding: '12px', fontSize: '16px', backgroundColor: '#0070f3', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
@@ -119,7 +142,6 @@ export default function Home() {
         </button>
       </form>
 
-      {/* Real-time Status Notification Banner */}
       {isProcessing && (
         <div style={{ 
           marginTop: '20px', 
