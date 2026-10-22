@@ -150,7 +150,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           <p className="line-clamp-2 text-xs font-bold text-white">{title}</p>
           <div className="flex items-center justify-between text-[10px] text-muted">
             <span style={{ color }}>{label}</span>
-            <a href={videoUrl} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
+            <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
           </div>
         </div>
       ) : (
@@ -186,7 +186,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           <button type="button" onClick={() => copy(socialCaption, 'cap')} className="btn-lime h-10 flex-1 text-sm">
             {copied === 'cap' ? 'Copied!' : 'Copy caption'}
           </button>
-          <a href={videoUrl} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
+          <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}
           </a>
           <button type="button" aria-label="Copy AI prompt" title="Copy AI prompt" onClick={() => copy(aiPrompt, 'prompt')} className="btn-ghost h-10 w-10 p-0">
