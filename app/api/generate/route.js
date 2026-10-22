@@ -1,37 +1,48 @@
 import { NextResponse } from 'next/server';
 
 export async function POST(request) {
-  try {
-    const body = await request.json();
-    const videoUrl = body.videoUrl;
-    if (!videoUrl) {
-      return NextResponse.json({ success: false, message: 'URL required' }, { status: 400 });
-    }
+  const body = await request.json();
+  const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap' } = body;
 
-    const styles = ['Character Swap', 'Anime Action', '3D Kids', 'Clean 4K'];
-    const hooks = ['Wait for the ending!', 'This changes everything', 'Nobody talks about this', 'I was shocked'];
-    
-    const clips = Array.from({ length: 3 + Math.floor(Math.random() * 3) }, (_, i) => {
-      const score = 85 + Math.floor(Math.random() * 15);
-      return {
-        id: Date.now() + i,
-        title: `Viral Moment ${i + 1}`,
-        timestamp: `00:${String(10 + i * 15).padStart(2, '0')} - 00:${String(35 + i * 15).padStart(2, '0')}`,
-        format: body.clipFormat || 'shorts_9_16',
-        subtitlesEnabled: body.autoSubtitles !== false,
-        hookEnabled: body.aiHook !== false,
-        viralScore: score,
-        socialCaption: `${hooks[i % hooks.length]} 🔥 #viral #shorts #fyp`,
-        aiPrompt: `${styles[i % styles.length]} style, cinematic lighting, perfect lip-sync, high energy, 4K`,
-        aiStyle: body.aiStyle || 'character_swap',
-      };
-    });
+  // Simulated viral clips — replace with real pipeline later
+  const clips = [
+    {
+      id: 'c1',
+      title: 'The moment everyone missed',
+      hook: 'Wait for the last 3 seconds…',
+      score: 94,
+      duration: '0:18',
+      format: clipFormat,
+      style: aiStyle,
+      thumbnail: null,
+      caption: 'This changed everything.',
+    },
+    {
+      id: 'c2',
+      title: 'Unexpected reaction',
+      hook: 'I didn’t expect that',
+      score: 87,
+      duration: '0:12',
+      format: clipFormat,
+      style: aiStyle,
+      thumbnail: null,
+      caption: 'The algorithm is going to love this.',
+    },
+    {
+      id: 'c3',
+      title: 'Quick tip that hits',
+      hook: 'Do this next time',
+      score: 81,
+      duration: '0:15',
+      format: clipFormat,
+      style: aiStyle,
+      thumbnail: null,
+      caption: 'Save this for later.',
+    },
+  ];
 
-    return NextResponse.json({
-      success: true,
-      data: { sourceUrl: videoUrl, generatedClips: clips }
-    });
-  } catch (error) {
-    return NextResponse.json({ success: false, message: 'Server error' }, { status: 500 });
-  }
+  return NextResponse.json({
+    success: true,
+    data: { clips, source: videoUrl }
+  });
 }
