@@ -1,3 +1,4 @@
+export const maxDuration = 300; // Vercel Pro
 import { NextResponse } from 'next/server';
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
