@@ -26,6 +26,21 @@ export default function ClipPlayer({ clip }) {
         <div>
           <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>{clip.title}</h3>
           <span style={{ fontSize: '14px', color: '#586069' }}>Timestamp: {clip.timestamp}</span>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+            <span style={{ fontSize: '11px', background: '#e1f5fe', color: '#01579b', padding: '2px 6px', borderRadius: '4px' }}>
+              Format: {clip.format}
+            </span>
+            {clip.subtitlesEnabled && (
+              <span style={{ fontSize: '11px', background: '#e8f5e9', color: '#1b5e20', padding: '2px 6px', borderRadius: '4px' }}>
+                Subtitles ON
+              </span>
+            )}
+            {clip.hookEnabled && (
+              <span style={{ fontSize: '11px', background: '#fff3e0', color: '#e65100', padding: '2px 6px', borderRadius: '4px' }}>
+                Viral Hook ON
+              </span>
+            )}
+          </div>
         </div>
         <button 
           onClick={handleCopy}
