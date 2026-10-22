@@ -4,7 +4,6 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const videoUrl = body.videoUrl;
-
     if (!videoUrl) {
       return NextResponse.json({ success: false, message: 'URL required' }, { status: 400 });
     }
@@ -30,10 +29,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      data: {
-        sourceUrl: videoUrl,
-        generatedClips: clips
-      }
+      data: { sourceUrl: videoUrl, generatedClips: clips }
     });
   } catch (error) {
     return NextResponse.json({ success: false, message: 'Server error' }, { status: 500 });
