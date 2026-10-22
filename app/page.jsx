@@ -5,10 +5,12 @@ import { useState } from 'react';
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [clips, setClips] = useState([]);
 
   const handleClipping = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
+    setClips([]);
 
     try {
       const response = await fetch('/api/clip', {
@@ -19,13 +21,13 @@ export default function Home() {
         body: JSON.stringify({ videoUrl }),
       });
 
-      const data = await response.json();
+      const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to process video');
+        throw new Error(result.message || 'Failed to process video');
       }
 
-      alert('Clip generation started successfully!');
+      setClips(result.data.generatedClips);
     } catch (error) {
       console.error('Error:', error);
       alert('Error processing video. Please try again.');
@@ -56,6 +58,19 @@ export default function Home() {
           {isProcessing ? 'Processing Clips...' : 'Generate Viral Clips'}
         </button>
       </form>
+
+      {clips.length > 0 && (
+        <div style={{ marginTop: '30px' }}>
+          <h2>Generated Clips:</h2>
+          <ul style={{ paddingLeft: '20px', marginTop: '10px' }}>
+            {clips.map((clip) => (
+              <li key={clip.id} style={{ marginBottom: '10px' }}>
+                <strong>{clip.title}</strong> ({clip.timestamp})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </main>
   );
 }
