@@ -376,7 +376,7 @@ export default function Home() {
               </svg>
               <h3 className="font-display text-2xl font-extrabold text-white">No clips yet</h3>
               <p className="max-w-[300px] text-sm leading-relaxed text-soft">Paste a link above and the AI will pull the best 30–60 second moments out of it.</p>
-              <button type="button" onClick={() => { setVideoUrl('https://youtube.com/watch?v=dQw4w9WgXcQ'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-ghost h-11 px-5 text-sm">Try a sample link</button>
+              <button type="button" onClick={() => { setVideoUrl('https://www.youtube.com/watch?v=jNQXAC9IVRw'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-ghost h-11 px-5 text-sm">Try a sample link</button>
             </div>
           )}
 
