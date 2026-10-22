@@ -48,6 +48,8 @@ function HomeInner() {
   const [autoSubtitles, setAutoSubtitles] = useState(true);
   const [aiHook, setAiHook] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [progressStep, setProgressStep] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [stage, setStage] = useState(0);
   const [clips, setClips] = useState([]);
@@ -117,9 +119,16 @@ function HomeInner() {
 
     setIsProcessing(true);
     setClips([]);
+    setProgressStep(0);
+    setProgressLabel('Downloading video…');
     try {
       let all = [];
       for (const url of urls) {
+        setProgressStep(1);
+        setProgressLabel('Analyzing audio with Groq…');
+        await new Promise(r => setTimeout(r, 500));
+        setProgressStep(2);
+        setProgressLabel('Scoring moments with Gemini…');
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -127,13 +136,18 @@ function HomeInner() {
         });
         const result = await res.json();
         if (!res.ok) throw new Error(result.message);
-        const batch = (result.data.generatedClips || []).map(c => ({
+        const batch = (result.data.clips || result.data.generatedClips || []).map(c => ({
           ...c,
           title: urls.length > 1 ? `[${url.slice(0, 18)}…] ${c.title}` : c.title
         }));
         all = [...all, ...batch];
       }
       all.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+      setProgressStep(3);
+      setProgressLabel('Cutting clips…');
+      await new Promise(r => setTimeout(r, 400));
+      setProgressStep(4);
+      setProgressLabel('Clips ready');
       setClips(all);
       setJustFinished(true);
       if (!isPro) incrementDaily();
@@ -381,6 +395,29 @@ function HomeInner() {
               <h3 className="font-display text-2xl font-extrabold text-white">No clips yet</h3>
               <p className="max-w-[300px] text-sm leading-relaxed text-soft">Paste a link above and the AI will pull the best 30–60 second moments out of it.</p>
               <button type="button" onClick={() => { setVideoUrl('https://www.youtube.com/watch?v=jNQXAC9IVRw'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-ghost h-11 px-5 text-sm">Try a sample link</button>
+            </div>
+          )}
+
+          {isProcessing && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-3xl border border-line2 bg-surface p-7 shadow-modal animate-fadeup">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="h-3 w-3 animate-pulse rounded-full bg-lime" />
+                  <span className="text-sm font-semibold text-white">Clipping in progress</span>
+                </div>
+                <p className="mb-5 text-sm text-soft">{progressLabel || 'Working…'}</p>
+                <div className="mb-4 h-2 overflow-hidden rounded-full bg-ink">
+                  <div className="h-full bg-lime transition-all duration-500" style={{ width: `${Math.min(100, (progressStep + 1) * 20)}%` }} />
+                </div>
+                <ul className="space-y-2 text-sm">
+                  {['Downloading video', 'Analyzing audio', 'Scoring moments', 'Cutting clips', 'Ready'].map((label, i) => (
+                    <li key={label} className={`flex items-center gap-2 ${i <= progressStep ? 'text-lime' : 'text-muted'}`}>
+                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${i <= progressStep ? 'bg-lime text-ink' : 'bg-ink text-muted'}`}>{i < progressStep ? '✓' : i + 1}</span>
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
 
