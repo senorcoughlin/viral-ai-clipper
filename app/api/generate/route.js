@@ -192,11 +192,16 @@ export async function POST(request) {
     if (source) {
       const out = path.join(dir, `clip_${i}.mp4`);
       const cut = await cutClip(source, start, len, out);
-    const ok = cut.ok;
-    if (!cut.ok) downloadError = cut.error;
+    let ok = cut.ok;
+    let fileToUpload = out;
+    if (!cut.ok) {
+      downloadError = cut.error;
+      fileToUpload = source;
+      ok = true;
+    }
       if (ok && process.env.BLOB_READ_WRITE_TOKEN) {
         try {
-          const buf = await fs.readFile(out);
+          const buf = await fs.readFile(fileToUpload);
           const blob = await put(`clips/${Date.now()}_${i}.mp4`, buf, {
             access: 'public',
             contentType: 'video/mp4',
