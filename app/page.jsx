@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ClipPlayer from '../components/ClipPlayer';
 import ViralScoreMeter from '../components/ViralScoreMeter';
+import AccountBar, { syncClips } from '../components/AccountBar';
 
 const FREE_DAILY_LIMIT = 3;
 
@@ -89,7 +90,11 @@ function HomeInner() {
   }, []);
 
   useEffect(() => {
-    if (history.length) localStorage.setItem('viral_clipper_history', JSON.stringify(history));
+    if (history.length) {
+      localStorage.setItem('viral_clipper_history', JSON.stringify(history));
+      const flat = history.flatMap(h => (h.clips || []).map(c => ({ ...c, sourceUrl: h.url, createdAt: h.id })));
+      syncClips(flat).catch(() => {});
+    }
   }, [history]);
 
   useEffect(() => {
@@ -218,6 +223,7 @@ function HomeInner() {
             <a href="#how" className="hover:text-fg">How it works</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
             <a href="/assets" className="hover:text-fg">My Assets</a>
+            <AccountBar />
             <a href="#pricing" className="hover:text-fg">Pricing</a>
           </nav>
           <div className="flex items-center gap-2.5">
@@ -306,7 +312,7 @@ function HomeInner() {
             <div className="flex flex-wrap gap-5 text-[13px] text-muted">
               <span className="flex items-center gap-1.5"><Check />No watermark on Pro</span>
               <span className="flex items-center gap-1.5"><Check />Captions burned in</span>
-              <span className="flex items-center gap-1.5"><Check />Ready in ~90s</span>
+              <span className="flex items-center gap-1.5"><Check />Ready in about a minute</span>
             </div>
           </div>
 
@@ -502,13 +508,13 @@ function HomeInner() {
           <div className="flex max-w-[640px] flex-col gap-3">
             <span className="eyebrow">How it works</span>
             <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Paste. Pick a style. Post.</h2>
-            <p className="text-base leading-relaxed text-soft">Three steps, about ninety seconds. No timeline, no scrubbing, no caption typing.</p>
+            <p className="text-base leading-relaxed text-soft">Three steps, about a minute. No timeline, no scrubbing, no caption typing.</p>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
             {[
-              { n: '01', icon: <Link color="#C6FF3D" />, title: 'Paste your links', desc: 'Drop one URL or a whole list. YouTube, Twitch VODs, podcasts, Zoom recordings — anything with a link.' },
-              { n: '02', icon: <Sparkle />, title: 'AI finds the moments', desc: 'It transcribes, scores every segment for hook strength and pacing, then cuts the top clips and writes the opening line.' },
-              { n: '03', icon: <Download />, title: 'Export & post', desc: 'Captions burned in, hook on screen, sized for 9:16, 16:9 or 1:1. Copy the caption and go.' },
+              { n: '01', icon: <Link color="#C6FF3D" />, title: 'Paste a YouTube link', desc: 'Drop any public YouTube video. Pick a length from 15 to 60 seconds and the format you post in.' },
+              { n: '02', icon: <Sparkle />, title: 'AI cuts the moments', desc: 'It finds the hooks, cuts three clips from the source, and burns a caption on each one. Every clip is scored.' },
+              { n: '03', icon: <Download />, title: 'Download and post', desc: 'Download the clip, copy the caption, and post to TikTok, Reels or Shorts. Save an account so your library follows you.' },
             ].map(s => (
               <article key={s.n} className="card flex flex-col gap-4 p-7 transition hover:-translate-y-1 hover:border-lime">
                 <div className="flex items-center justify-between">

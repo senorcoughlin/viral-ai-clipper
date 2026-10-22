@@ -34,6 +34,7 @@ const Icon = {
   check: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="m5 12 5 5L20 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
   sparkle: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3v4m0 10v4M3 12h4m10 0h4M6.3 6.3l2.8 2.8m5.8 5.8 2.8 2.8M6.3 17.7l2.8-2.8m5.8-5.8 2.8-2.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>,
   play: <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>,
+  download: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>,
 };
 
 export default function ClipPlayer({ clip, compact = false }) {
@@ -149,7 +150,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           <p className="line-clamp-2 text-xs font-bold text-white">{title}</p>
           <div className="flex items-center justify-between text-[10px] text-muted">
             <span style={{ color }}>{label}</span>
-            <span>{timestamp}</span>
+            <a href={videoUrl} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
           </div>
         </div>
       ) : (
@@ -185,6 +186,9 @@ export default function ClipPlayer({ clip, compact = false }) {
           <button type="button" onClick={() => copy(socialCaption, 'cap')} className="btn-lime h-10 flex-1 text-sm">
             {copied === 'cap' ? 'Copied!' : 'Copy caption'}
           </button>
+          <a href={videoUrl} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
+            {Icon.download}
+          </a>
           <button type="button" aria-label="Copy AI prompt" title="Copy AI prompt" onClick={() => copy(aiPrompt, 'prompt')} className="btn-ghost h-10 w-10 p-0">
             {copied === 'prompt' ? Icon.check : Icon.copy}
           </button>
