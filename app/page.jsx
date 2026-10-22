@@ -13,295 +13,207 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState('');
   const [clips, setClips] = useState([]);
   const [history, setHistory] = useState([]);
-  const [copiedAll, setCopiedAll] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
 
   useEffect(() => {
-    const savedHistory = localStorage.getItem('viral_clipper_history');
-    if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error('Failed to parse history from localStorage', e);
-      }
+    const saved = localStorage.getItem('viral_clipper_history');
+    if (saved) {
+      try { setHistory(JSON.parse(saved)); } catch {}
     }
   }, []);
 
   useEffect(() => {
-    if (history.length > 0) {
-      localStorage.setItem('viral_clipper_history', JSON.stringify(history));
-    }
+    if (history.length) localStorage.setItem('viral_clipper_history', JSON.stringify(history));
   }, [history]);
 
   useEffect(() => {
     if (!isProcessing) return;
-
     const stages = [
-      'Initializing batch processing queue...',
-      'Connecting to AI transcription server...',
-      'Analyzing video audio and sentiment...',
-      'Generating custom AI motion & restyle prompts...',
-      'Rendering final video crop & captions...'
+      'Initializing batch queue...',
+      'Connecting to AI servers...',
+      'Analyzing audio & sentiment...',
+      'Generating restyle prompts...',
+      'Rendering crops & captions...'
     ];
-
-    let index = 0;
+    let i = 0;
     setStatusMessage(stages[0]);
-
-    const interval = setInterval(() => {
-      index = (index + 1) % stages.length;
-      setStatusMessage(stages[index]);
+    const id = setInterval(() => {
+      i = (i + 1) % stages.length;
+      setStatusMessage(stages[i]);
     }, 1200);
-
-    return () => clearInterval(interval);
+    return () => clearInterval(id);
   }, [isProcessing]);
 
   const handleClipping = async (e) => {
     e.preventDefault();
     if (!videoUrl.trim()) return;
-
     const urls = videoUrl.split(',').map(u => u.trim()).filter(Boolean);
-    if (urls.length === 0) return;
+    if (!urls.length) return;
 
     setIsProcessing(true);
     setClips([]);
-
     try {
-      let allGeneratedClips = [];
-
+      let all = [];
       for (const url of urls) {
-        const response = await fetch('/api/generate', {
+        const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle }),
         });
-
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.message || 'Failed to process video');
-
-        const batchClips = (result.data.generatedClips || []).map(c => ({
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.message);
+        const batch = (result.data.generatedClips || []).map(c => ({
           ...c,
-          title: `[${url.slice(0, 15)}...] ${c.title}`
+          title: `[${url.slice(0, 20)}...] ${c.title}`
         }));
-        
-        allGeneratedClips = [...allGeneratedClips, ...batchClips];
+        all = [...all, ...batch];
       }
-
-      setClips(allGeneratedClips);
-      setHistory((prev) => [
-        { id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: allGeneratedClips },
-        ...prev.filter(item => item.url !== videoUrl)
-      ].slice(0, 5));
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Error processing video batch. Please try again.');
+      setClips(all);
+      setHistory(prev => [{ id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: all }, ...prev].slice(0, 5));
+    } catch (err) {
+      alert('Error processing batch. Try again.');
     } finally {
       setIsProcessing(false);
       setStatusMessage('');
     }
   };
 
-  const handleUpgrade = async (planType) => {
+  const handleUpgrade = async (plan) => {
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planType })
+        body: JSON.stringify({ planType: plan })
       });
       const data = await res.json();
-      if (data.success) {
-        window.open(data.data.checkoutUrl, '_blank');
-      }
-    } catch (err) {
-      console.error('Checkout error', err);
-    }
-  };
-
-  const handleReset = () => {
-    setVideoUrl('');
-    setClips([]);
-  };
-
-  const clearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('viral_clipper_history');
-  };
-
-  const loadHistoryItem = (item) => {
-    setVideoUrl(item.url);
-    setClipFormat(item.format);
-    if (item.aiStyle) setAiStyle(item.aiStyle);
-    setClips(item.clips);
-  };
-
-  const handleCopyAll = () => {
-    if (clips.length === 0) return;
-    const summaryText = clips.map((c, i) => (
-      `Clip ${i + 1}: ${c.title} (${c.timestamp})\n` +
-      `Format: ${c.format} | Viral Score: ${c.viralScore || 90}/100\n` +
-      `Caption: ${c.socialCaption || 'N/A'}\n` +
-      `AI Prompt: ${c.aiPrompt || 'N/A'}`
-    )).join('\n\n---\n\n');
-
-    navigator.clipboard.writeText(summaryText);
-    setCopiedAll(true);
-    setTimeout(() => setCopiedAll(false), 2000);
-  };
-
-  const handleExportCSV = () => {
-    if (clips.length === 0) return;
-    const headers = ['Title', 'Timestamp', 'Format', 'Viral Score', 'Social Caption', 'AI Prompt'];
-    const rows = clips.map(c => [
-      `"${(c.title || '').replace(/"/g, '""')}"`,
-      `"${c.timestamp || ''}"`,
-      `"${c.format || ''}"`,
-      `"${c.viralScore || ''}"`,
-      `"${(c.socialCaption || '').replace(/"/g, '""')}"`,
-      `"${(c.aiPrompt || '').replace(/"/g, '""')}"`
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `viral_clips_batch_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      if (data.success) window.open(data.data.checkoutUrl, '_blank');
+    } catch {}
   };
 
   return (
-    <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '650px', margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ margin: 0 }}>Viral AI Clipper</h1>
-          <button 
-            onClick={() => handleUpgrade('pro_monthly')}
-            style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#28a745', color: '#fff', border: 'none', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            ⭐ Upgrade to Pro ($29/mo)
-          </button>
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950">
+      <header className="border-b border-slate-800/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">⚡</span>
+            <h1 className="text-xl font-bold tracking-tight">Viral AI Clipper</h1>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowPricing(true)} className="px-4 py-1.5 text-sm rounded-full bg-indigo-600 hover:bg-indigo-500 transition">
+              Upgrade to Pro
+            </button>
+          </div>
         </div>
-        <p style={{ marginTop: '8px' }}>Paste video links separated by commas to queue and generate short clips in batch.</p>
-        
-        <form onSubmit={handleClipping} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
-          <textarea 
-            placeholder="Paste video URLs here (comma-separated)..." 
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 py-10">
+        <div className="text-center mb-10">
+          <h2 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-white to-indigo-300 bg-clip-text text-transparent">
+            Turn long videos into viral shorts
+          </h2>
+          <p className="mt-3 text-slate-400 max-w-xl mx-auto">
+            Paste one or more URLs. Get batch-generated clips with captions, hooks, and AI restyles in seconds.
+          </p>
+        </div>
+
+        <form onSubmit={handleClipping} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl">
+          <textarea
             value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
+            onChange={e => setVideoUrl(e.target.value)}
+            placeholder="Paste YouTube, TikTok, or other video URLs (comma-separated for batch)..."
             rows={3}
-            style={{ padding: '12px', fontSize: '16px', borderRadius: '6px', border: '1px solid #ccc', resize: 'vertical' }}
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
             required
           />
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>Output Format:</label>
-              <select 
-                value={clipFormat} 
-                onChange={(e) => setClipFormat(e.target.value)}
-                style={{ padding: '10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff' }}
-              >
-                <option value="shorts_9_16">Shorts / TikTok (9:16)</option>
-                <option value="landscape_16_9">Landscape (16:9)</option>
-                <option value="square_1_1">Square (1:1)</option>
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+            <div>
+              <label className="text-xs font-medium text-slate-400">Output Format</label>
+              <select value={clipFormat} onChange={e => setClipFormat(e.target.value)} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                <option value="shorts_9_16">9:16 Shorts / TikTok / Reels</option>
+                <option value="landscape_16_9">16:9 Landscape</option>
+                <option value="square_1_1">1:1 Square</option>
               </select>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>AI Video Prompt Style:</label>
-              <select 
-                value={aiStyle} 
-                onChange={(e) => setAiStyle(e.target.value)}
-                style={{ padding: '10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: '#fff' }}
-              >
+            <div>
+              <label className="text-xs font-medium text-slate-400">AI Style</label>
+              <select value={aiStyle} onChange={e => setAiStyle(e.target.value)} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
                 <option value="character_swap">🎭 Character Swap & Lip-Sync</option>
-                <option value="anime_action">⚡ Anime Action / Fighter Style</option>
-                <option value="kids_3d">🦖 3D Kids / Cute Animation</option>
-                <option value="clean_viral">🎬 Clean 4K Studio Enhance</option>
+                <option value="anime_action">⚡ Anime Action</option>
+                <option value="kids_3d">🦖 3D Kids / Cute</option>
+                <option value="clean_viral">🎬 Clean 4K Studio</option>
               </select>
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: '#f9f9f9', borderRadius: '6px', border: '1px solid #eee' }}>
-            <label style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>AI Enhancements:</label>
-            
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
-              <input type="checkbox" checked={autoSubtitles} onChange={(e) => setAutoSubtitles(e.target.checked)} />
-              Generate dynamic animated captions / subtitles
+          <div className="flex flex-wrap gap-4 mt-4 text-sm">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} className="rounded" />
+              Animated captions
             </label>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
-              <input type="checkbox" checked={aiHook} onChange={(e) => setAiHook(e.target.checked)} />
-              Add viral text hook intro overlay
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={aiHook} onChange={e => setAiHook(e.target.checked)} className="rounded" />
+              Viral hook overlay
             </label>
           </div>
 
-          <button 
-            type="submit" 
-            style={{ padding: '12px', fontSize: '16px', backgroundColor: '#0070f3', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+          <button
+            type="submit"
             disabled={isProcessing}
+            className="mt-5 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-medium transition"
           >
-            {isProcessing ? 'Processing Batch Queue...' : 'Generate Batch Clips'}
+            {isProcessing ? 'Generating…' : 'Generate Clips'}
           </button>
         </form>
 
         {isProcessing && (
-          <div style={{ marginTop: '20px', padding: '14px', backgroundColor: '#e6f4ff', border: '1px solid #91caff', borderRadius: '6px', color: '#0958d9', fontSize: '14px', textAlign: 'center', fontWeight: '500' }}>
-            ⚡ {statusMessage}
-          </div>
+          <div className="mt-4 text-center text-sm text-indigo-300 animate-pulse">{statusMessage}</div>
         )}
 
         {clips.length > 0 && (
-          <div style={{ marginTop: '30px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <h2 style={{ margin: 0 }}>Generated Batch Clips ({clips.length}):</h2>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button onClick={handleCopyAll} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: copiedAll ? '#28a745' : '#6f42c1', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                  {copiedAll ? '✓ Copied All!' : '📋 Copy All Data'}
-                </button>
-                <button onClick={handleExportCSV} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#0958d9', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                  ⬇ Export CSV
-                </button>
-                <button onClick={handleReset} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#e1e4e8', color: '#333', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                  Clear Results
-                </button>
-              </div>
+          <div className="mt-10">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Generated Clips ({clips.length})</h3>
+              <button onClick={() => setClips([])} className="text-xs text-slate-400 hover:text-white">Clear</button>
             </div>
-            <div style={{ marginTop: '15px' }}>
-              {clips.map((clip, idx) => (
-                <ClipPlayer key={`${clip.id}-${idx}`} clip={clip} />
-              ))}
+            <div className="space-y-3">
+              {clips.map((c, i) => <ClipPlayer key={c.id + '-' + i} clip={c} />)}
             </div>
           </div>
         )}
 
         {history.length > 0 && (
-          <div style={{ marginTop: '40px', borderTop: '1px solid #eaeaea', paddingTop: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ fontSize: '16px', margin: 0 }}>Recent Sessions</h3>
-              <button onClick={clearHistory} style={{ background: 'none', border: 'none', color: '#d9534f', fontSize: '12px', cursor: 'pointer' }}>
-                Clear History
-              </button>
-            </div>
-            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {history.map((item) => (
-                <li key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9f9f9', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
-                  <span style={{ fontSize: '13px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '380px' }}>
-                    {item.url} ({item.format})
-                  </span>
-                  <button onClick={() => loadHistoryItem(item)} style={{ padding: '4px 10px', fontSize: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    Load
-                  </button>
-                </li>
+          <div className="mt-12">
+            <h3 className="text-sm font-medium text-slate-400 mb-3">Recent Sessions</h3>
+            <div className="space-y-2">
+              {history.map(h => (
+                <div key={h.id} className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2 text-sm">
+                  <span className="truncate text-slate-300 max-w-md">{h.url}</span>
+                  <button onClick={() => { setVideoUrl(h.url); setClips(h.clips); }} className="text-xs text-indigo-400">Load</button>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
         )}
-      </div>
+      </main>
 
-      <footer style={{ marginTop: '50px', borderTop: '1px solid #eaeaea', paddingTop: '20px', textAlign: 'center', fontSize: '13px', color: '#888' }}>
-        <p style={{ margin: '0 0 5px 0' }}>Viral AI Clipper v0.5.4 • Powered by Next.js & Vercel</p>
-        <p style={{ margin: 0 }}>Built for high-performance automated batch short-form video generation.</p>
+      {showPricing && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setShowPricing(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-bold mb-2">Go Pro</h3>
+            <p className="text-sm text-slate-400 mb-4">Unlimited generations, higher quality, priority processing, and CSV export.</p>
+            <div className="space-y-2">
+              <button onClick={() => handleUpgrade('pro_monthly')} className="w-full py-3 rounded-xl bg-indigo-600 font-medium">$29 / month</button>
+              <button onClick={() => handleUpgrade('pro_yearly')} className="w-full py-3 rounded-xl bg-slate-800 font-medium">$199 / year (save 40%)</button>
+            </div>
+            <button onClick={() => setShowPricing(false)} className="mt-4 text-xs text-slate-500 w-full">Close</button>
+          </div>
+        </div>
+      )}
+
+      <footer className="mt-20 border-t border-slate-800 py-6 text-center text-xs text-slate-500">
+        Viral AI Clipper · Built with Next.js on Vercel
       </footer>
-    </main>
+    </div>
   );
 }
