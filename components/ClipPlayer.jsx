@@ -39,6 +39,7 @@ export default function ClipPlayer({ clip }) {
   const [isEditing, setIsEditing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [srcIndex, setSrcIndex] = useState(0);
+  const [poster, setPoster] = useState('');
   const [title, setTitle] = useState(clip.title || 'Untitled');
   const [timestamp, setTimestamp] = useState(clip.timestamp || clip.duration || '0:00');
   const [socialCaption, setSocialCaption] = useState(clip.socialCaption || clip.caption || '');
@@ -52,6 +53,18 @@ export default function ClipPlayer({ clip }) {
     navigator.clipboard.writeText(text);
     setCopied(key);
     setTimeout(() => setCopied(''), 1500);
+  };
+
+  const capturePoster = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    try {
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth;
+      c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      setPoster(c.toDataURL('image/jpeg', 0.7));
+    } catch {}
   };
 
   const togglePlay = async () => {
@@ -80,25 +93,36 @@ export default function ClipPlayer({ clip }) {
   return (
     <article className="group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup">
       {/* Preview / Player */}
-      <div className={`relative ${ASPECT[clip.format] || ASPECT.shorts_9_16} border-b border-line bg-black cursor-pointer`} onClick={togglePlay}>
+      <div className={`relative ${ASPECT[clip.format] || ASPECT.shorts_9_16} border-b border-line bg-black`}>
         <video
           ref={videoRef}
           src={videoSrc}
+          poster={poster || undefined}
           className="absolute inset-0 h-full w-full object-cover"
           playsInline
-          controls
+          controls={isPlaying}
           preload="auto"
+          muted
+          onLoadedData={capturePoster}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
           onError={() => setSrcIndex(i => i + 1)}
         />
         {!isPlaying && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-            <div className="grid h-16 w-16 place-items-center rounded-full bg-lime text-ink shadow-lg">
+          <button
+            type="button"
+            onClick={togglePlay}
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/35"
+            aria-label="Play clip"
+          >
+            {poster && (
+              <img src={poster} alt="" className="absolute inset-0 h-full w-full object-cover opacity-90" />
+            )}
+            <span className="relative grid h-16 w-16 place-items-center rounded-full bg-lime text-ink shadow-lg ring-4 ring-black/30">
               {Icon.play}
-            </div>
-          </div>
+            </span>
+          </button>
         )}
         <div className="absolute left-3.5 top-3.5 flex gap-1.5 pointer-events-none">
           <span className="rounded-full border border-line2 bg-ink/85 px-2 py-1 font-mono text-[11px]">{timestamp}</span>
