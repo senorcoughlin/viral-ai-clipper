@@ -9,7 +9,29 @@ export default function Home() {
   const handleClipping = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
-    setTimeout(() => setIsProcessing(false), 2000);
+
+    try {
+      const response = await fetch('/api/clip', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ videoUrl }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to process video');
+      }
+
+      alert('Clip generation started successfully!');
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error processing video. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -29,6 +51,7 @@ export default function Home() {
         <button 
           type="submit" 
           style={{ padding: '12px', fontSize: '16px', backgroundColor: '#0070f3', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+          disabled={isProcessing}
         >
           {isProcessing ? 'Processing Clips...' : 'Generate Viral Clips'}
         </button>
