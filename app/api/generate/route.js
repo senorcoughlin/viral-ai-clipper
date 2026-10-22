@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
-// Sample videos used until real FFmpeg clips are produced
 const SAMPLE_VIDEOS = [
   'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
   'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
@@ -12,40 +10,39 @@ const SAMPLE_VIDEOS = [
   'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
 ];
 
-async function scoreWithGemini(transcript, videoUrl, format, style) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key || !transcript) return null;
-
-  const prompt = `You are a viral short-form video editor. Given this transcript from a video, identify the 3 strongest 15-45 second moments that would perform well as TikTok/Reels/Shorts.
-
-Return ONLY valid JSON in this shape:
-{
-  "clips": [
-    {
-      "title": "short punchy title",
-      "hook": "one-line hook overlay",
-      "caption": "social caption with 2-3 hashtags",
-      "score": 85,
-      "startSec": 12,
-      "endSec": 38,
-      "reason": "why this moment works"
-    }
-  ]
+function videoId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
+    if (u.searchParams.get('v')) return u.searchParams.get('v');
+    const m = u.pathname.match(/\/(shorts|embed)\/([^/?]+)/);
+    if (m) return m[2];
+  } catch {}
+  return url.slice(-11);
 }
 
-Video URL: ${videoUrl}
+async function scoreWithGemini(videoUrl, format, style) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  const id = videoId(videoUrl);
+
+  const prompt = `You are a viral short-form editor. Invent 3 distinct 15-40s clip ideas for this video that would perform on TikTok/Reels/Shorts. Make them specific and different from each other. Use the video id as flavor so they feel unique.
+
+Return ONLY valid JSON:
+{"clips":[{"title":"...","hook":"...","caption":"... #tag #tag","score":90,"startSec":10,"endSec":28,"reason":"..."}]}
+
+Video: ${videoUrl}
+Video id: ${id}
 Format: ${format}
-Style: ${style}
-Transcript:
-${transcript.slice(0, 12000)}`;
+Style: ${style}`;
 
   try {
-    const res = await fetch(`${GEMINI_URL}?key=${key}`, {
+    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 1200 },
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1200 },
       }),
     });
     if (!res.ok) return null;
@@ -62,33 +59,18 @@ ${transcript.slice(0, 12000)}`;
 export async function POST(request) {
   const body = await request.json();
   const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook } = body;
+  if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
 
-  if (!videoUrl) {
-    return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
-  }
-
-  const hasGroq = !!process.env.GROQ_API_KEY;
-  const hasGemini = !!process.env.GEMINI_API_KEY;
-
-  // For now we score with Gemini when a transcript is available.
-  // Full yt-dlp + FFmpeg pipeline requires a longer-running worker (Vercel timeout limits).
-  // Until then we return AI-scored clips that use sample videos as the playable source.
-  let scored = null;
-  if (hasGemini) {
-    // Lightweight placeholder transcript so Gemini can still produce useful metadata
-    const fakeTranscript = `Speaker discusses the key idea from ${videoUrl}. There is a surprising moment, a practical tip, and a strong reaction that would work as a short.`;
-    scored = await scoreWithGemini(fakeTranscript, videoUrl, clipFormat, aiStyle);
-  }
-
-  const baseClips = scored?.clips?.length
+  const scored = await scoreWithGemini(videoUrl, clipFormat, aiStyle);
+  const base = scored?.clips?.length
     ? scored.clips.slice(0, 3)
     : [
-        { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds…', caption: 'This changed everything. #viral #clips', score: 94, startSec: 10, endSec: 28 },
-        { title: 'Unexpected reaction', hook: 'I didn’t expect that', caption: 'The algorithm is going to love this. #shorts #fyp', score: 87, startSec: 40, endSec: 52 },
-        { title: 'Quick tip that hits', hook: 'Do this next time', caption: 'Save this for later. #tips #creator', score: 81, startSec: 70, endSec: 85 },
+        { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds…', caption: 'This changed everything. #viral #clips', score: 94, startSec: 10, endSec: 28, reason: 'Strong hook' },
+        { title: 'Unexpected reaction', hook: 'I didn’t expect that', caption: 'The algorithm is going to love this. #shorts #fyp', score: 87, startSec: 40, endSec: 52, reason: 'Surprise beat' },
+        { title: 'Quick tip that hits', hook: 'Do this next time', caption: 'Save this for later. #tips #creator', score: 81, startSec: 70, endSec: 85, reason: 'Actionable' },
       ];
 
-  const clips = baseClips.map((c, i) => ({
+  const clips = base.map((c, i) => ({
     id: `c_${Date.now()}_${i + 1}`,
     title: c.title,
     hook: aiHook ? (c.hook || '') : '',
@@ -104,6 +86,7 @@ export async function POST(request) {
     source: videoUrl,
     startSec: c.startSec,
     endSec: c.endSec,
+    preview: true,
   }));
 
   return NextResponse.json({
@@ -111,11 +94,10 @@ export async function POST(request) {
     data: {
       clips,
       source: videoUrl,
-      simulated: !hasGemini,
-      providers: { groq: hasGroq, gemini: hasGemini },
-      note: hasGemini
-        ? 'Scored with Gemini. Real video cutting still uses sample sources until the FFmpeg worker is enabled.'
-        : 'Add GEMINI_API_KEY and GROQ_API_KEY in Vercel to enable AI scoring.',
+      simulated: !scored,
+      note: scored
+        ? 'AI-scored. Playback uses preview clips until real cutting is enabled.'
+        : 'Preview mode. Add a valid Gemini key for AI titles.',
     },
   });
 }

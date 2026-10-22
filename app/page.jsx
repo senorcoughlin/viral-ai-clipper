@@ -56,6 +56,7 @@ function HomeInner() {
   const [history, setHistory] = useState([]);
   const [showPricing, setShowPricing] = useState(false);
   const [dailyCount, setDailyCount] = useState(0);
+  const [credits, setCredits] = useState(0);
   const [isPro, setIsPro] = useState(false); // later from auth/subscription
   const [billing, setBilling] = useState('yearly');
   const [justFinished, setJustFinished] = useState(false);
@@ -77,6 +78,7 @@ function HomeInner() {
 
     const pro = localStorage.getItem('viral_pro') === 'true';
     setIsPro(pro);
+    setCredits(Number(localStorage.getItem('viral_credits') || 0));
   }, []);
 
   useEffect(() => {
@@ -109,7 +111,7 @@ function HomeInner() {
   const handleClipping = async (e) => {
     e.preventDefault();
     if (!videoUrl.trim()) return;
-    if (!isPro && dailyCount >= FREE_DAILY_LIMIT) {
+    if (!isPro && dailyCount >= FREE_DAILY_LIMIT && credits <= 0) {
       setShowPricing(true);
       return;
     }
@@ -150,7 +152,15 @@ function HomeInner() {
       setProgressLabel('Clips ready');
       setClips(all);
       setJustFinished(true);
-      if (!isPro) incrementDaily();
+      if (!isPro) {
+        if (dailyCount >= FREE_DAILY_LIMIT && credits > 0) {
+          const next = credits - 1;
+          setCredits(next);
+          localStorage.setItem('viral_credits', String(next));
+        } else {
+          incrementDaily();
+        }
+      }
       setHistory(prev => [{ id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: all }, ...prev].slice(0, 5));
     } catch {
       alert('Processing failed. Try again.');
@@ -204,7 +214,7 @@ function HomeInner() {
             <a href="#pricing" className="hover:text-fg">Pricing</a>
           </nav>
           <div className="flex items-center gap-2.5">
-            {!isPro && <span className="hidden text-xs text-muted sm:inline">{freeLeft}/{FREE_DAILY_LIMIT} free today</span>}
+            {!isPro && <span className="hidden text-xs text-muted sm:inline">{freeLeft}/{FREE_DAILY_LIMIT} free{credits > 0 ? ` · ${credits} credits` : ''}</span>}
             {isPro && (
               <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-lime bg-lime-tint px-2.5 text-[11px] font-bold text-lime">
                 <Bolt size={12} fill="#C6FF3D" />PRO
