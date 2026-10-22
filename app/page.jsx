@@ -478,7 +478,7 @@ function HomeInner() {
                   <div key={h.id} className="flex items-center justify-between gap-3 rounded-input border border-line bg-surface px-3.5 py-2.5 text-sm">
                     <span className="truncate text-soft">{h.url}</span>
                     <span className="hidden shrink-0 text-xs text-muted sm:inline">{h.clips?.length || 0} clips</span>
-                    <button onClick={() => { setVideoUrl(h.url); setClips(h.clips); }} className="shrink-0 text-xs font-semibold text-lime hover:text-lime-hover">Load</button>
+                    <button onClick={() => { setVideoUrl(h.url); setClips(h.clips || []); setJustFinished(false); setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }} className="shrink-0 text-xs font-semibold text-lime hover:text-lime-hover">Load</button>
                   </div>
                 ))}
               </div>
