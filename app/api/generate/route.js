@@ -257,35 +257,10 @@ export async function POST(request) {
   }
 
   try {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
-  let source = null;
-  let transcript = await fetchTranscript(videoUrl);
-
-  let downloadError = null;
-  try {
-    if (process.env.RENDERIO_API_KEY) {
-      // RenderIO handles download + cut. Skip Tunelio.
-    } else if (dir) {
-    const dl = await downloadSource(videoUrl, dir);
-    source = dl?.path || null;
-    downloadError = dl?.error || null;
-    if (source) {
-      const audio = path.join(dir, 'audio.mp3');
-      const ffmpeg = require('ffmpeg-static');
-      if (ffmpeg) {
-        try {
-          await exec(ffmpeg, ['-y', '-i', source, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', audio]);
-          transcript = await transcribe(audio);
-        } catch {}
-      }
-    }
-    }
-  } catch {}
-
-  const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength, count);
-  const base = scored?.clips?.length
-    ? scored.clips.slice(0, count)
-    : [
+  const vertical = clipFormat === 'shorts_9_16';
+  // Shared state filled in by the setup steps inside the stream.
+  const ctx = { dir: null, source: null, transcript: '', downloadError: null };
+  const FALLBACK = [
         { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds', hooks: ['Wait for the last 3 seconds', 'Nobody talks about this', 'Watch till the end'], caption: 'This changed everything. Save it.', hashtags: '#viral #shorts #fyp', bestTime: 'Tue 7pm', score: 94, startSec: 5 },
         { title: 'Unexpected reaction', hook: 'I did not expect that', hooks: ['I did not expect that', 'The ending got me', 'POV you saw it too'], caption: 'The algorithm will love this.', hashtags: '#viral #reaction #fyp', bestTime: 'Thu 6pm', score: 87, startSec: 40 },
         { title: 'Quick tip that hits', hook: 'Do this next time', hooks: ['Do this next time', 'Stop doing it the hard way', 'One change, better result'], caption: 'Save this for later.', hashtags: '#tips #howto #shorts', bestTime: 'Sun 11am', score: 81, startSec: 80 },
@@ -294,9 +269,8 @@ export async function POST(request) {
         { title: 'The mistake to skip', hook: 'Stop doing this', hooks: ['Stop doing this', 'This is the mistake', 'Fix it in one step'], caption: 'Skip the mistake.', hashtags: '#mistake #tips #viral', bestTime: 'Mon 9am', score: 74, startSec: 200 },
         { title: 'A better way', hook: 'There is a better way', hooks: ['There is a better way', 'Try this instead', 'Do it like this'], caption: 'A better way.', hashtags: '#better #howto #fyp', bestTime: 'Sat 10am', score: 72, startSec: 240 },
         { title: 'The closer', hook: 'Remember this', hooks: ['Remember this', 'Take this with you', 'One thing to keep'], caption: 'Remember this.', hashtags: '#mindset #viral #shorts', bestTime: 'Sun 8pm', score: 70, startSec: 280 },
-      ].slice(0, count);
+      ];
 
-  const vertical = clipFormat === 'shorts_9_16';
   async function runOne(c, i) {
     const start = Number(c.startSec || 0);
     const len = Number(clipLength);
@@ -310,16 +284,16 @@ export async function POST(request) {
         playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: false, broll: false });
         real = true;
       } catch (e) {
-        downloadError = e?.message || String(e);
+        ctx.downloadError = e?.message || String(e);
       }
-    } else if (source) {
-      const out = path.join(dir, `clip_${i}.mp4`);
-      const cut = await cutClip(source, start, len, out);
+    } else if (ctx.source) {
+      const out = path.join(ctx.dir, `clip_${i}.mp4`);
+      const cut = await cutClip(ctx.source, start, len, out);
       let ok = cut.ok;
       let fileToUpload = out;
       if (!cut.ok) {
-        downloadError = cut.error;
-        fileToUpload = source;
+        ctx.downloadError = cut.error;
+        fileToUpload = ctx.source;
         ok = true;
       }
       if (ok && process.env.BLOB_READ_WRITE_TOKEN) {
@@ -369,7 +343,7 @@ export async function POST(request) {
       const hit = getCached(videoUrl);
       const cached = hit && hit.length >= count ? hit.slice(0, count) : null;
       if (cached && cached.length) {
-        send({ type: 'start', total: cached.length, cached: true, hasTranscript: !!transcript });
+        send({ type: 'start', total: cached.length, cached: true });
         for (let i = 0; i < cached.length; i++) {
           send({ type: 'clip', index: i, total: cached.length, clip: cached[i] });
         }
@@ -377,8 +351,37 @@ export async function POST(request) {
         controller.close();
         return;
       }
-      send({ type: 'start', total: base.length, hasTranscript: !!transcript });
-      const clips = [];
+      // Tell the client right away that work has started; setup happens below.
+      send({ type: 'start', total: count });
+      send({ type: 'status', step: 'transcript' });
+      ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
+      ctx.transcript = await fetchTranscript(videoUrl);
+      try {
+        if (process.env.RENDERIO_API_KEY) {
+          // RenderIO handles download + cut. Skip Tunelio.
+        } else if (ctx.dir) {
+          send({ type: 'status', step: 'download' });
+          const dl = await downloadSource(videoUrl, ctx.dir);
+          ctx.source = dl?.path || null;
+          ctx.downloadError = dl?.error || null;
+          if (ctx.source) {
+            const audio = path.join(ctx.dir, 'audio.mp3');
+            const ffmpeg = require('ffmpeg-static');
+            if (ffmpeg) {
+              try {
+                await exec(ffmpeg, ['-y', '-i', ctx.source, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', audio]);
+                ctx.transcript = await transcribe(audio);
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+
+      send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript });
+      const scored = await scoreWithGemini(ctx.transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength, count);
+      const base = scored?.clips?.length ? scored.clips.slice(0, count) : FALLBACK.slice(0, count);
+
+      send({ type: 'status', step: 'cutting', total: base.length });
       // Cut all requested clips in parallel; each one streams to the client the
       // moment its job finishes (a 1-clip run streams that clip and ends right after).
       const results = await Promise.all(base.map(async (c, i) => {
@@ -391,16 +394,22 @@ export async function POST(request) {
           return null;
         }
       }));
-      clips.push(...results.filter(Boolean));
-      if (clips.length) setCached(videoUrl, clips);
-      try { if (dir) await fs.rm(dir, { recursive: true, force: true }); } catch {}
+      const clips = results.filter(Boolean);
+      if (clips.some(c => !c.preview)) setCached(videoUrl, clips);
+      try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+      const real = clips.filter(c => !c.preview).length;
       send({
         type: 'done',
-        note: clips.some(c => !c.preview) ? 'Cut from your source video.' : (downloadError || 'Preview clips.'),
+        note: real ? 'Cut from your source video.' : (ctx.downloadError || 'Preview clips.'),
         total: clips.length,
+        real,
+        preview: clips.length - real,
+        failed: base.length - clips.length,
+        reason: real ? null : (ctx.downloadError || 'Video processing is unavailable right now.'),
       });
       controller.close();
       } catch (e) {
+        console.error('generate stream failed', e);
         send({ type: 'error', message: e?.message || 'generate failed' });
         send({ type: 'done', note: 'Stopped early.', total: 0 });
         try { controller.close(); } catch {}

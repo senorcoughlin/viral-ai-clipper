@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ClipPlayer from '../components/ClipPlayer';
 import ViralScoreMeter from '../components/ViralScoreMeter';
@@ -69,6 +69,10 @@ function HomeInner() {
   const [isPro, setIsPro] = useState(false); // later from auth/subscription
   const [billing, setBilling] = useState('yearly');
   const [justFinished, setJustFinished] = useState(false);
+  const [error, setError] = useState(null); // { message, retry }
+  const [notice, setNotice] = useState('');
+  const [expected, setExpected] = useState(0);
+  const formRef = useRef(null);
 
   const searchParams = useSearchParams();
   useEffect(() => {
@@ -100,15 +104,11 @@ function HomeInner() {
     }
   }, [history]);
 
+  // Progress UI follows the real status events streamed by /api/generate.
   useEffect(() => {
-    if (!isProcessing) return;
-    const stages = ['Fetching video…', 'Transcribing audio…', 'Finding the hooks…', 'Rendering clips…'];
-    let i = 0;
-    setStage(0);
-    setStatusMessage(stages[0]);
-    const id = setInterval(() => { i = (i + 1) % stages.length; setStage(i); setStatusMessage(stages[i]); }, 1000);
-    return () => clearInterval(id);
-  }, [isProcessing]);
+    setStage(Math.min(progressStep, 3));
+    setStatusMessage(progressLabel);
+  }, [progressStep, progressLabel]);
 
   useEffect(() => {
     if (!justFinished) return;
@@ -136,26 +136,29 @@ function HomeInner() {
 
     setIsProcessing(true);
     setClips([]);
+    setError(null);
+    setNotice('');
+    setExpected(clipCount * urls.length);
     setProgressStep(0);
-    setProgressLabel('Downloading video…');
+    setProgressLabel('Starting…');
+    let all = [];
+    let failed = 0;
+    let lastReason = '';
+    const STEP = { download: [0, 'Downloading video…'], transcript: [1, 'Analyzing audio…'], scoring: [2, 'Scoring moments…'], cutting: [3, 'Cutting clips…'] };
     try {
-      let all = [];
       for (const url of urls) {
-        setProgressStep(1);
-        setProgressLabel('Analyzing audio…');
         const started = Date.now();
+        let label = 'Starting…';
         const tick = setInterval(() => {
           const secs = Math.floor((Date.now() - started) / 1000);
-          if (secs < 15) { setProgressStep(1); setProgressLabel(`Analyzing audio… ${secs}s`); }
-          else if (secs < 30) { setProgressStep(2); setProgressLabel(`Scoring moments… ${secs}s`); }
-          else { setProgressStep(3); setProgressLabel(`Cutting clips… ${secs}s`); }
+          setProgressLabel(`${label} ${secs}s`);
         }, 1000);
+        try {
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0 }),
         });
-        clearInterval(tick);
         if (!res.ok) {
           const text = await res.text().catch(() => '');
           let err = {};
@@ -177,8 +180,16 @@ function HomeInner() {
             let msg;
             try { msg = JSON.parse(line); } catch { continue; }
             if (msg.type === 'start') {
-              setProgressStep(3);
-              setProgressLabel(`Cutting 0 of ${msg.total}…`);
+              setProgressStep(msg.cached ? 3 : 0);
+            }
+            if (msg.type === 'status' && STEP[msg.step]) {
+              setProgressStep(STEP[msg.step][0]);
+              label = STEP[msg.step][1];
+              setProgressLabel(label);
+            }
+            if (msg.type === 'error') {
+              failed += 1;
+              lastReason = msg.message || lastReason;
             }
             if (msg.type === 'clip' && msg.clip) {
               const clip = {
@@ -188,15 +199,28 @@ function HomeInner() {
               all = [...all, clip];
               setClips([...all]);
               setProgressStep(3);
-              setProgressLabel(`${all.length} of ${msg.total} ready`);
+              label = `${all.length} of ${msg.total} ready…`;
+              setProgressLabel(label);
             }
             if (msg.type === 'done') {
               setProgressStep(4);
               setProgressLabel('Clips ready');
+              if (msg.reason) lastReason = msg.reason;
             }
           }
         }
+        } finally {
+          clearInterval(tick);
+        }
       }
+      if (!all.length) {
+        throw new Error(lastReason ? `No clips could be made: ${lastReason}` : 'No clips could be made from that link. Try another video.');
+      }
+      const previews = all.filter(c => c.preview).length;
+      const parts = [];
+      if (failed) parts.push(`${failed} clip${failed === 1 ? '' : 's'} failed to render`);
+      if (previews) parts.push(`${previews === all.length ? 'These are' : `${previews} are`} placeholder previews, not cuts from your video${lastReason ? ` (${lastReason})` : ''}`);
+      if (parts.length) setNotice(parts.join('. ') + '.');
       all.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
       setClips([...all]);
       setJustFinished(true);
@@ -211,7 +235,8 @@ function HomeInner() {
       }
       setHistory(prev => [{ id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: all }, ...prev].slice(0, 5));
     } catch (e) {
-      alert(e?.message || 'Processing failed. Try again.');
+      setClips([...all]);
+      setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
     } finally {
       setIsProcessing(false);
       setStatusMessage('');
@@ -229,10 +254,10 @@ function HomeInner() {
       if (data.success && data.data?.checkoutUrl) {
         window.open(data.data.checkoutUrl, '_blank');
       } else {
-        alert(data.message || 'Checkout is not available for this item yet.');
+        setError({ message: data.message || 'Checkout is not available for this item yet.' });
       }
     } catch (e) {
-      alert(e.message || 'Checkout failed');
+      setError({ message: e.message || 'Checkout failed' });
     }
   };
 
@@ -301,7 +326,7 @@ function HomeInner() {
             </p>
 
             {/* FORM */}
-            <form onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
+            <form ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
               <label htmlFor="urls" className="px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted">Video links</label>
               <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
                 <div className="flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
@@ -358,6 +383,16 @@ function HomeInner() {
                 )}
               </div>
             </form>
+            {error && (
+              <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
+                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
+                <p className="flex-1 leading-relaxed text-fg">{error.message}</p>
+                {error.retry && !isProcessing && (
+                  <button type="button" onClick={() => formRef.current?.requestSubmit()} className="btn-ghost h-8 shrink-0 px-3 text-xs">Try again</button>
+                )}
+                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-5 text-[13px] text-muted">
               <span className="flex items-center gap-1.5"><Check />No watermark on Pro</span>
@@ -516,6 +551,9 @@ function HomeInner() {
                     <p className="text-sm text-soft">Top score <span className="font-mono text-lime">{topScore}</span> — sorted best first.</p>
                   </div>
                 </div>
+              )}
+              {notice && !isProcessing && (
+                <p role="status" className="rounded-card border border-line2 bg-surface p-3 text-sm text-soft">{notice}</p>
               )}
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="flex flex-col gap-2">
