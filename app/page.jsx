@@ -197,8 +197,14 @@ function HomeInner() {
         body: JSON.stringify({ planType: plan })
       });
       const data = await res.json();
-      if (data.success) window.open(data.data.checkoutUrl, '_blank');
-    } catch {}
+      if (data.success && data.data?.checkoutUrl) {
+        window.open(data.data.checkoutUrl, '_blank');
+      } else {
+        alert(data.message || 'Checkout is not available for this item yet.');
+      }
+    } catch (e) {
+      alert(e.message || 'Checkout failed');
+    }
   };
 
   const unlockPro = () => {
