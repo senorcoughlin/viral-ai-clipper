@@ -170,7 +170,8 @@ function HomeInner() {
           buf = lines.pop() || '';
           for (const line of lines) {
             if (!line.trim()) continue;
-            const msg = JSON.parse(line);
+            let msg;
+            try { msg = JSON.parse(line); } catch { continue; }
             if (msg.type === 'start') {
               setProgressStep(3);
               setProgressLabel(`Cutting 0 of ${msg.total}…`);
@@ -205,8 +206,8 @@ function HomeInner() {
         }
       }
       setHistory(prev => [{ id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: all }, ...prev].slice(0, 5));
-    } catch {
-      alert('Processing failed. Try again.');
+    } catch (e) {
+      alert(e?.message || 'Processing failed. Try again.');
     } finally {
       setIsProcessing(false);
       setStatusMessage('');

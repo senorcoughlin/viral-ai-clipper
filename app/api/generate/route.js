@@ -348,7 +348,10 @@ export async function POST(request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      const send = (obj) => {
+        try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
+      };
+      try {
       const cached = getCached(videoUrl);
       if (cached && cached.length) {
         send({ type: 'start', total: cached.length, cached: true, hasTranscript: !!transcript });
@@ -389,6 +392,11 @@ export async function POST(request) {
         total: clips.length,
       });
       controller.close();
+      } catch (e) {
+        send({ type: 'error', message: e?.message || 'generate failed' });
+        send({ type: 'done', note: 'Stopped early.', total: 0 });
+        try { controller.close(); } catch {}
+      }
     },
   });
 
@@ -396,6 +404,7 @@ export async function POST(request) {
     headers: {
       'Content-Type': 'application/x-ndjson',
       'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
     },
   });
 }
