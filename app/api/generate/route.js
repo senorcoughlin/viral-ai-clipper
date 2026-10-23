@@ -53,8 +53,8 @@ const SAMPLE_VIDEOS = [
 async function scoreWithGemini(transcript, videoUrl, format, style, length) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  const prompt = `You are a viral short-form editor. From this transcript, pick the 8 best moments of about ${length} seconds for TikTok/Reels/Shorts.
-Return ONLY valid JSON with 4 clips, ranked best first:
+  const prompt = `You are a viral short-form editor. From this transcript, pick the ${count} best moments of about ${length} seconds for TikTok/Reels/Shorts.
+Return ONLY valid JSON with ${count} clip${count === 1 ? '' : 's'}, ranked best first:
 {"clips":[{"title":"...","hook":"...","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":90,"startSec":10,"endSec":${10 + length},"reason":"..."}]}
 Video: ${videoUrl}
 Format: ${format}
@@ -240,7 +240,8 @@ function setCached(url, clips) {
 
 export async function POST(request) {
   const body = await request.json();
-  const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30 } = body;
+  const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1 } = body;
+  const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-'));
@@ -270,7 +271,7 @@ export async function POST(request) {
 
   const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength);
   const base = scored?.clips?.length
-    ? scored.clips.slice(0, 4)
+    ? scored.clips.slice(0, count)
     : [
         { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds', hooks: ['Wait for the last 3 seconds', 'Nobody talks about this', 'Watch till the end'], caption: 'This changed everything. Save it.', hashtags: '#viral #shorts #fyp', bestTime: 'Tue 7pm', score: 94, startSec: 5 },
         { title: 'Unexpected reaction', hook: 'I did not expect that', hooks: ['I did not expect that', 'The ending got me', 'POV you saw it too'], caption: 'The algorithm will love this.', hashtags: '#viral #reaction #fyp', bestTime: 'Thu 6pm', score: 87, startSec: 40 },
@@ -280,7 +281,7 @@ export async function POST(request) {
         { title: 'The mistake to skip', hook: 'Stop doing this', hooks: ['Stop doing this', 'This is the mistake', 'Fix it in one step'], caption: 'Skip the mistake.', hashtags: '#mistake #tips #viral', bestTime: 'Mon 9am', score: 74, startSec: 200 },
         { title: 'A better way', hook: 'There is a better way', hooks: ['There is a better way', 'Try this instead', 'Do it like this'], caption: 'A better way.', hashtags: '#better #howto #fyp', bestTime: 'Sat 10am', score: 72, startSec: 240 },
         { title: 'The closer', hook: 'Remember this', hooks: ['Remember this', 'Take this with you', 'One thing to keep'], caption: 'Remember this.', hashtags: '#mindset #viral #shorts', bestTime: 'Sun 8pm', score: 70, startSec: 280 },
-      ];
+      ].slice(0, count);
 
   const vertical = clipFormat === 'shorts_9_16';
   async function runOne(c, i) {
@@ -352,7 +353,8 @@ export async function POST(request) {
         try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
       };
       try {
-      const cached = getCached(videoUrl);
+      const hit = getCached(videoUrl);
+      const cached = hit && hit.length >= count ? hit.slice(0, count) : null;
       if (cached && cached.length) {
         send({ type: 'start', total: cached.length, cached: true, hasTranscript: !!transcript });
         for (let i = 0; i < cached.length; i++) {
@@ -364,8 +366,8 @@ export async function POST(request) {
       }
       send({ type: 'start', total: base.length, hasTranscript: !!transcript });
       const clips = [];
-      // Cut first 4 immediately so the user sees results fast, then the rest.
-      // Cut up to 4 in parallel so the user is not waiting on one job at a time.
+      // Cut all requested clips in parallel; each one streams to the client the
+      // moment its job finishes (a 1-clip run streams that clip and ends right after).
       const results = await Promise.all(base.map(async (c, i) => {
         try {
           const clip = await runOne(c, i);

@@ -53,6 +53,7 @@ function HomeInner() {
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [aiStyle, setAiStyle] = useState('character_swap');
   const [clipLength, setClipLength] = useState(30);
+  const [clipCount, setClipCount] = useState(1);
   const [autoSubtitles, setAutoSubtitles] = useState(true);
   const [aiHook, setAiHook] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -152,7 +153,7 @@ function HomeInner() {
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength }),
+          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount }),
         });
         clearInterval(tick);
         if (!res.ok) {
@@ -331,6 +332,11 @@ function HomeInner() {
                 {LENGTHS.map(l => (
                   <button key={l.value} type="button" onClick={() => setClipLength(l.value)} className={`chip ${clipLength === l.value ? 'chip-on' : ''}`}>{l.label}</button>
                 ))}
+                <span className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />
+                <span className="mr-1 text-xs text-muted">Clips</span>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
+                  <button key={n} type="button" onClick={() => setClipCount(n)} className={`chip ${clipCount === n ? 'chip-on' : ''}`}>{n}</button>
+                ))}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
                 <div className="flex gap-4">
@@ -427,7 +433,7 @@ function HomeInner() {
       <main className="relative mx-auto max-w-6xl px-5">
         {/* STATUS / RESULTS */}
         <section id="clips" className="flex flex-col gap-8 pb-20 pt-20">
-          {isProcessing && (
+          {isProcessing && clips.length === 0 && (
             <div className="card flex flex-col gap-4 p-5 animate-fadeup">
               <div className="flex items-center gap-3.5 rounded-[14px] border border-line bg-[#0F0F16] p-3.5">
                 <svg className="animate-spin" width="40" height="40" viewBox="0 0 40 40" aria-hidden><circle cx="20" cy="20" r="16" fill="none" stroke="#23232E" strokeWidth="5" /><path d="M20 4a16 16 0 0 1 16 16" fill="none" stroke="#C6FF3D" strokeWidth="5" strokeLinecap="round" /></svg>
@@ -469,7 +475,7 @@ function HomeInner() {
             </div>
           )}
 
-          {isProcessing && (
+          {isProcessing && clips.length === 0 && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4 backdrop-blur-sm">
               <div className="w-full max-w-md rounded-3xl border border-line2 bg-surface p-7 shadow-modal animate-fadeup">
                 <div className="mb-4 flex items-center gap-3">
@@ -492,9 +498,9 @@ function HomeInner() {
             </div>
           )}
 
-          {!isProcessing && clips.length > 0 && (
+          {clips.length > 0 && (
             <>
-              {justFinished && (
+              {justFinished && !isProcessing && (
                 <div className="relative flex items-center gap-4 overflow-hidden rounded-card border border-lime bg-lime-tint p-4 animate-fadeup">
                   <div aria-hidden className="pointer-events-none absolute inset-0">
                     {['12%', '28%', '44%', '60%', '76%', '90%'].map((l, i) => (
@@ -503,7 +509,7 @@ function HomeInner() {
                   </div>
                   <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-lime shadow-glow animate-pop"><Check color="#0A0A0F" /></span>
                   <div className="relative">
-                    <p className="font-display text-lg font-extrabold text-white">{clips.length} clips ready</p>
+                    <p className="font-display text-lg font-extrabold text-white">{clips.length} {clips.length === 1 ? 'clip' : 'clips'} ready</p>
                     <p className="text-sm text-soft">Top score <span className="font-mono text-lime">{topScore}</span> — sorted best first.</p>
                   </div>
                 </div>
