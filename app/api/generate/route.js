@@ -318,28 +318,35 @@ export async function POST(request) {
       preview: !real,
     };
   }
-  const clips = [];
-  for (let n = 0; n < base.length; n += 3) {
-    const slice = base.slice(n, n + 3);
-    const batch = await Promise.all(slice.map((c, j) => runOne(c, n + j)));
-    clips.push(...batch);
-  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      send({ type: 'start', total: base.length, hasTranscript: !!transcript });
+      const clips = [];
+      for (let i = 0; i < base.length; i++) {
+        try {
+          const clip = await runOne(base[i], i);
+          clips.push(clip);
+          send({ type: 'clip', index: i, total: base.length, clip });
+        } catch (e) {
+          send({ type: 'error', index: i, message: e?.message || 'cut failed' });
+        }
+      }
+      try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
+      send({
+        type: 'done',
+        note: clips.some(c => !c.preview) ? 'Cut from your source video.' : (downloadError || 'Preview clips.'),
+        total: clips.length,
+      });
+      controller.close();
+    },
+  });
 
-  try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
-
-  return NextResponse.json({
-    success: true,
-    data: {
-      clips,
-      source: videoUrl,
-      simulated: clips.every(c => c.preview),
-      note: clips.some(c => !c.preview)
-        ? 'Cut from your source video.'
-        : (downloadError || (transcript ? 'AI scored from the real transcript. Preview videos until download succeeds.' : 'Preview clips. Real cutting runs when download succeeds.')),
-      hasTranscript: !!transcript,
-      downloadError: downloadError || null,
-      hasTunelio: !!process.env.TUNELIO_API_KEY,
-      hasRenderio: !!process.env.RENDERIO_API_KEY,
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson',
+      'Cache-Control': 'no-cache, no-transform',
     },
   });
 }

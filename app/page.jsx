@@ -155,21 +155,45 @@ function HomeInner() {
           body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength }),
         });
         clearInterval(tick);
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.message);
-        const batch = (result.data.clips || result.data.generatedClips || []).map(c => ({
-          ...c,
-          title: urls.length > 1 ? `[${url.slice(0, 18)}…] ${c.title}` : c.title
-        }));
-        all = [...all, ...batch];
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Generate failed');
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const msg = JSON.parse(line);
+            if (msg.type === 'start') {
+              setProgressStep(3);
+              setProgressLabel(`Cutting 0 of ${msg.total}…`);
+            }
+            if (msg.type === 'clip' && msg.clip) {
+              const clip = {
+                ...msg.clip,
+                title: urls.length > 1 ? `[${url.slice(0, 18)}…] ${msg.clip.title}` : msg.clip.title,
+              };
+              all = [...all, clip];
+              setClips([...all]);
+              setProgressStep(3);
+              setProgressLabel(`${all.length} of ${msg.total} ready`);
+            }
+            if (msg.type === 'done') {
+              setProgressStep(4);
+              setProgressLabel('Clips ready');
+            }
+          }
+        }
       }
       all.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
-      setProgressStep(3);
-      setProgressLabel('Cutting clips…');
-      await new Promise(r => setTimeout(r, 400));
-      setProgressStep(4);
-      setProgressLabel('Clips ready');
-      setClips(all);
+      setClips([...all]);
       setJustFinished(true);
       if (!isPro) {
         if (dailyCount >= FREE_DAILY_LIMIT && credits > 0) {
