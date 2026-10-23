@@ -99,12 +99,12 @@ export default function ClipPlayer({ clip, compact = false }) {
       <div className={`relative ${compact ? 'aspect-[9/14]' : (ASPECT[clip.format] || ASPECT.shorts_9_16)} border-b border-line bg-black`}>
         <video
           ref={videoRef}
-          src={videoSrc}
+          src={videoSrc && !videoSrc.includes('#') ? `${videoSrc}#t=0.1` : videoSrc}
           poster={poster || undefined}
           className="absolute inset-0 h-full w-full object-cover"
           playsInline
           controls={isPlaying}
-          preload="auto"
+          preload="metadata"
           muted
           onLoadedData={capturePoster}
           onPlay={() => setIsPlaying(true)}

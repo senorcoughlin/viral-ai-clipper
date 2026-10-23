@@ -197,8 +197,13 @@ function HomeInner() {
                 ...msg.clip,
                 title: urls.length > 1 ? `[${url.slice(0, 18)}…] ${msg.clip.title}` : msg.clip.title,
               };
-              all = [...all, clip];
+              // Insert in score order so cards don't reshuffle when the run ends.
+              const at = all.findIndex(c => (c.viralScore || 0) < (clip.viralScore || 0));
+              all = at === -1 ? [...all, clip] : [...all.slice(0, at), clip, ...all.slice(at)];
               setClips([...all]);
+              if (all.length === 1) {
+                setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+              }
               setProgressStep(3);
               label = `${all.length} of ${msg.total} ready…`;
               setProgressLabel(label);
@@ -555,13 +560,19 @@ function HomeInner() {
               )}
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="flex flex-col gap-2">
-                  <span className="eyebrow">Your clips</span>
+                  <span className="eyebrow" aria-live="polite">{isProcessing ? `Your clips · ${clips.length} of ${expected} ready` : 'Your clips'}</span>
                   <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Ranked by how likely they are to blow up.</h2>
                 </div>
                 <button onClick={() => setClips([])} className="btn-ghost h-10 px-4 text-sm">Clear</button>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {clips.map((c, i) => <ClipPlayer key={`${c.id}-${i}`} clip={c} compact />)}
+                {clips.map((c) => <ClipPlayer key={c.id} clip={c} compact />)}
+                {isProcessing && Array.from({ length: Math.max(0, expected - clips.length) }, (_, i) => (
+                  <div key={`pending-${i}`} aria-hidden className="flex flex-col gap-2">
+                    <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />
+                    <div className="h-2.5 w-4/5 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
+                  </div>
+                ))}
               </div>
             </>
           )}

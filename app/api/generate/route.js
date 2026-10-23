@@ -11,6 +11,7 @@ import os from 'os';
 import { checkLimit, clientIp } from '../../../lib/ratelimit';
 import { isProEmail } from '../../../lib/pro';
 import { validateVideoUrl } from '../../../lib/validate';
+import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 
 const exec = promisify(execFile);
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
@@ -41,7 +42,8 @@ async function fetchTranscript(url) {
     }
     return String(raw || '');
   } catch (e) {
-    console.error('transcript failed', e?.message);
+    // Many videos simply have no captions; this is expected, not an error.
+    console.warn('transcript unavailable:', String(e?.message || e).split('\n')[0].slice(0, 160));
     return '';
   }
 }
@@ -58,7 +60,8 @@ async function scoreWithGemini(transcript, videoUrl, format, style, length, coun
   if (!key) return null;
   const prompt = `You are a viral short-form editor. From this transcript, pick the ${count} best moments of about ${length} seconds for TikTok/Reels/Shorts.
 Return ONLY valid JSON with ${count} clip${count === 1 ? '' : 's'}, ranked best first:
-{"clips":[{"title":"...","hook":"...","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":90,"startSec":10,"endSec":${10 + length},"reason":"..."}]}
+{"clips":[{"title":"...","hook":"...","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":90,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"..."}]}
+Clips must not overlap. startSec/endSec are seconds from the start of the video.
 Video: ${videoUrl}
 Format: ${format}
 Style: ${style}
@@ -73,15 +76,23 @@ ${(transcript || '').slice(0, 14000)}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 1200 },
+        generationConfig: { temperature: 0.5, maxOutputTokens: Math.min(8192, 600 + 450 * count), responseMimeType: 'application/json' },
       }),
     });
     clearTimeout(timer);
     if (!res.ok) return null;
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const match = text.match(/\{[\s\S]*\}/);
-    return match ? JSON.parse(match[0]) : null;
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      parsed = match ? JSON.parse(match[0]) : null;
+    }
+    if (!Array.isArray(parsed?.clips)) return null;
+    parsed.clips = parsed.clips
+      .filter(c => c && typeof c === 'object')
+      .map(c => ({ ...c, startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Number(c.score) || 80)) }));
+    return parsed.clips.length ? parsed : null;
   } catch {
     return null;
   }
@@ -152,11 +163,17 @@ async function renderioCut(url, start, length, key, caption, vertical, opts = {}
         ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -vf "${vf}" -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -movflags +faststart {{out_clip}}`,
         output_files: { out_clip: 'clip.mp4' },
       };
-  const submit = await fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
+  const doSubmit = () => fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
     body: JSON.stringify(body),
   });
+  // Retry once on network errors, 429 or 5xx.
+  let submit = await doSubmit().catch(() => null);
+  if (!submit || submit.status === 429 || submit.status >= 500) {
+    await new Promise(r => setTimeout(r, 1500));
+    submit = await doSubmit();
+  }
   if (!submit.ok) {
     const t = await submit.text();
     throw new Error('renderio submit ' + submit.status + ' ' + t.slice(0, 160));
@@ -225,20 +242,39 @@ async function cutClip(src, start, length, outPath) {
   return { ok: false, error: last.slice(0, 180) };
 }
 
+// Recent results cache, keyed by URL + options. Uses KV/Redis when configured so
+// it survives across serverless instances; otherwise per-instance memory.
+const CACHE_TTL_SEC = 60 * 30;
 const recentCache = new Map();
-function cacheKey(url) { return String(url || '').trim(); }
-function getCached(url) {
-  const hit = recentCache.get(cacheKey(url));
+function cacheKey(url, opts) { return 'gen:' + JSON.stringify([String(url || '').trim(), opts]); }
+async function getCached(key) {
+  if (kvEnabled) return kvGetJson(key);
+  const hit = recentCache.get(key);
   if (!hit) return null;
-  if (Date.now() - hit.at > 1000 * 60 * 30) { recentCache.delete(cacheKey(url)); return null; }
+  if (Date.now() - hit.at > CACHE_TTL_SEC * 1000) { recentCache.delete(key); return null; }
   return hit.clips;
 }
-function setCached(url, clips) {
-  recentCache.set(cacheKey(url), { at: Date.now(), clips });
+async function setCached(key, clips) {
+  if (kvEnabled) { await kvSetJson(key, clips, CACHE_TTL_SEC); return; }
+  recentCache.set(key, { at: Date.now(), clips });
   if (recentCache.size > 20) {
     const first = recentCache.keys().next().value;
     recentCache.delete(first);
   }
+}
+
+// Run async jobs with at most `limit` in flight; results keep their index.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 export async function POST(request) {
@@ -340,7 +376,8 @@ export async function POST(request) {
         try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
       };
       try {
-      const hit = getCached(videoUrl);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook]);
+      const hit = await getCached(key);
       const cached = hit && hit.length >= count ? hit.slice(0, count) : null;
       if (cached && cached.length) {
         send({ type: 'start', total: cached.length, cached: true });
@@ -384,7 +421,8 @@ export async function POST(request) {
       send({ type: 'status', step: 'cutting', total: base.length });
       // Cut all requested clips in parallel; each one streams to the client the
       // moment its job finishes (a 1-clip run streams that clip and ends right after).
-      const results = await Promise.all(base.map(async (c, i) => {
+      // At most 4 RenderIO jobs in flight; the first ones start immediately.
+      const results = await mapLimit(base, 4, async (c, i) => {
         try {
           const clip = await runOne(c, i);
           send({ type: 'clip', index: i, total: base.length, clip });
@@ -393,9 +431,9 @@ export async function POST(request) {
           send({ type: 'error', index: i, message: e?.message || 'cut failed' });
           return null;
         }
-      }));
+      });
       const clips = results.filter(Boolean);
-      if (clips.some(c => !c.preview)) setCached(videoUrl, clips);
+      if (clips.some(c => !c.preview)) await setCached(key, clips);
       try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
       const real = clips.filter(c => !c.preview).length;
       send({
