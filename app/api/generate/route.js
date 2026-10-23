@@ -50,7 +50,7 @@ const SAMPLE_VIDEOS = [
   'https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4',
 ];
 
-async function scoreWithGemini(transcript, videoUrl, format, style, length) {
+async function scoreWithGemini(transcript, videoUrl, format, style, length, count = 1) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   const prompt = `You are a viral short-form editor. From this transcript, pick the ${count} best moments of about ${length} seconds for TikTok/Reels/Shorts.
@@ -244,7 +244,8 @@ export async function POST(request) {
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
 
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-'));
+  try {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
   let source = null;
   let transcript = await fetchTranscript(videoUrl);
 
@@ -252,7 +253,7 @@ export async function POST(request) {
   try {
     if (process.env.RENDERIO_API_KEY) {
       // RenderIO handles download + cut. Skip Tunelio.
-    } else {
+    } else if (dir) {
     const dl = await downloadSource(videoUrl, dir);
     source = dl?.path || null;
     downloadError = dl?.error || null;
@@ -269,7 +270,7 @@ export async function POST(request) {
     }
   } catch {}
 
-  const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength);
+  const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength, count);
   const base = scored?.clips?.length
     ? scored.clips.slice(0, count)
     : [
@@ -380,7 +381,7 @@ export async function POST(request) {
       }));
       clips.push(...results.filter(Boolean));
       if (clips.length) setCached(videoUrl, clips);
-      try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
+      try { if (dir) await fs.rm(dir, { recursive: true, force: true }); } catch {}
       send({
         type: 'done',
         note: clips.some(c => !c.preview) ? 'Cut from your source video.' : (downloadError || 'Preview clips.'),
@@ -402,4 +403,8 @@ export async function POST(request) {
       'X-Accel-Buffering': 'no',
     },
   });
+  } catch (e) {
+    console.error('generate failed', e);
+    return NextResponse.json({ success: false, message: e?.message || 'generate failed' }, { status: 500 });
+  }
 }

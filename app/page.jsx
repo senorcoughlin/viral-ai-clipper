@@ -157,8 +157,10 @@ function HomeInner() {
         });
         clearInterval(tick);
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || 'Generate failed');
+          const text = await res.text().catch(() => '');
+          let err = {};
+          try { err = JSON.parse(text); } catch {}
+          throw new Error(err.message || `Generate failed (${res.status})`);
         }
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
