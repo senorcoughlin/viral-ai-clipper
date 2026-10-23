@@ -54,7 +54,7 @@ async function scoreWithGemini(transcript, videoUrl, format, style, length) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   const prompt = `You are a viral short-form editor. From this transcript, pick the 8 best moments of about ${length} seconds for TikTok/Reels/Shorts.
-Return ONLY valid JSON with 8 clips, ranked best first:
+Return ONLY valid JSON with 4 clips, ranked best first:
 {"clips":[{"title":"...","hook":"...","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":90,"startSec":10,"endSec":${10 + length},"reason":"..."}]}
 Video: ${videoUrl}
 Format: ${format}
@@ -270,7 +270,7 @@ export async function POST(request) {
 
   const scored = await scoreWithGemini(transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength);
   const base = scored?.clips?.length
-    ? scored.clips.slice(0, 8)
+    ? scored.clips.slice(0, 4)
     : [
         { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds', hooks: ['Wait for the last 3 seconds', 'Nobody talks about this', 'Watch till the end'], caption: 'This changed everything. Save it.', hashtags: '#viral #shorts #fyp', bestTime: 'Tue 7pm', score: 94, startSec: 5 },
         { title: 'Unexpected reaction', hook: 'I did not expect that', hooks: ['I did not expect that', 'The ending got me', 'POV you saw it too'], caption: 'The algorithm will love this.', hashtags: '#viral #reaction #fyp', bestTime: 'Thu 6pm', score: 87, startSec: 40 },
@@ -365,25 +365,18 @@ export async function POST(request) {
       send({ type: 'start', total: base.length, hasTranscript: !!transcript });
       const clips = [];
       // Cut first 4 immediately so the user sees results fast, then the rest.
-      const first = Math.min(4, base.length);
-      for (let i = 0; i < first; i++) {
+      // Cut up to 4 in parallel so the user is not waiting on one job at a time.
+      const results = await Promise.all(base.map(async (c, i) => {
         try {
-          const clip = await runOne(base[i], i);
-          clips.push(clip);
+          const clip = await runOne(c, i);
           send({ type: 'clip', index: i, total: base.length, clip });
+          return clip;
         } catch (e) {
           send({ type: 'error', index: i, message: e?.message || 'cut failed' });
+          return null;
         }
-      }
-      for (let i = first; i < base.length; i++) {
-        try {
-          const clip = await runOne(base[i], i);
-          clips.push(clip);
-          send({ type: 'clip', index: i, total: base.length, clip });
-        } catch (e) {
-          send({ type: 'error', index: i, message: e?.message || 'cut failed' });
-        }
-      }
+      }));
+      clips.push(...results.filter(Boolean));
       if (clips.length) setCached(videoUrl, clips);
       try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
       send({
