@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { markPro } from '../../../lib/pro';
 
 export async function POST(request) {
   try {
@@ -26,14 +27,10 @@ export async function POST(request) {
       const email = session.customer_details?.email || session.customer_email;
       console.log('Payment succeeded:', session.id, email);
 
-      // Mark as pro (in-memory for now — replace with real store)
-      if (email) {
+      // Mark as pro in the Blob-backed list (credit packs are not Pro).
+      if (email && session.metadata?.type !== 'credits') {
         try {
-          await fetch(`${process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : 'http://localhost:3000'}/api/pro`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, customerId: session.customer }),
-          });
+          await markPro({ email, customerId: session.customer });
         } catch (e) {
           console.error('Failed to mark pro:', e);
         }

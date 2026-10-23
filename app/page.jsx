@@ -153,13 +153,14 @@ function HomeInner() {
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount }),
+          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0 }),
         });
         clearInterval(tick);
         if (!res.ok) {
           const text = await res.text().catch(() => '');
           let err = {};
           try { err = JSON.parse(text); } catch {}
+          if (err.limitReached) setShowPricing(true);
           throw new Error(err.message || `Generate failed (${res.status})`);
         }
         const reader = res.body.getReader();

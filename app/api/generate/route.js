@@ -8,6 +8,9 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { checkLimit, clientIp } from '../../../lib/ratelimit';
+import { isProEmail } from '../../../lib/pro';
+import { validateVideoUrl } from '../../../lib/validate';
 
 const exec = promisify(execFile);
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
@@ -239,10 +242,19 @@ function setCached(url, clips) {
 }
 
 export async function POST(request) {
-  const body = await request.json();
-  const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1 } = body;
+  const body = await request.json().catch(() => ({}));
+  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1, proEmail, hasCredits } = body;
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
-  if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
+  if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
+  const videoUrl = validateVideoUrl(rawUrl);
+  if (!videoUrl) {
+    return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
+  }
+  const pro = proEmail ? await isProEmail(proEmail).catch(() => false) : false;
+  const limit = await checkLimit(clientIp(request), pro ? 'pro' : hasCredits ? 'credits' : 'free');
+  if (!limit.ok) {
+    return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached }, { status: limit.status });
+  }
 
   try {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);

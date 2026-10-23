@@ -17,7 +17,7 @@ export async function POST(request) {
     }
 
     const stripe = require('stripe')(secret);
-    const origin = request.headers.get('origin') || 'https://viral-ai-clipper-lovat.vercel.app';
+    const origin = request.headers.get('origin') || 'https://viralaiclipper.com';
 
     // One-time credit packs
     if (CREDIT_PACKS[planType]) {
