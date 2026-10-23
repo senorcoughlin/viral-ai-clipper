@@ -618,6 +618,15 @@ function HomeInner() {
                 <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 43%</span></button>
                 <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$29 / month</button>
               </div>
+              <div className="border-t border-line pt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · under $30</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button onClick={() => handleUpgrade('credits_10')} className="btn-ghost h-14 flex-col text-xs">10 credits<span className="text-[11px] text-muted">$9</span></button>
+                  <button onClick={() => handleUpgrade('credits_25')} className="btn-ghost h-14 flex-col text-xs">25 credits<span className="text-[11px] text-muted">$19</span></button>
+                  <button onClick={() => handleUpgrade('credits_50')} className="btn-ghost h-14 flex-col text-xs">50 credits<span className="text-[11px] text-muted">$29</span></button>
+                </div>
+                <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation after your free clips. Credits never expire.</p>
+              </div>
               <div className="flex items-center justify-between text-xs text-muted">
                 <span>Secure checkout via Stripe · cancel anytime</span>
                 <button onClick={unlockPro} className="text-muted/70 hover:text-muted">Demo unlock (local)</button>
