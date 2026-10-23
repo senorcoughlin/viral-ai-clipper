@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 const CREDIT_PACKS = {
   credits_10: { priceEnv: 'STRIPE_PRICE_CREDITS_10', credits: 10, mode: 'payment' },
-  credits_25: { priceEnv: 'STRIPE_PRICE_CREDITS_25', credits: 25, mode: 'payment' },
+  credits_20: { priceEnv: 'STRIPE_PRICE_CREDITS_20', credits: 20, mode: 'payment' },
   credits_50: { priceEnv: 'STRIPE_PRICE_CREDITS_50', credits: 50, mode: 'payment' },
 };
 

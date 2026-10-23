@@ -628,7 +628,7 @@ function HomeInner() {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · under $30</p>
                 <div className="grid grid-cols-3 gap-2">
                   <button onClick={() => handleUpgrade('credits_10')} className="btn-ghost h-16 flex-col text-xs">10 credits<span className="text-[11px] text-muted">$9</span><span className="text-[10px] text-muted">base</span></button>
-                  <button onClick={() => handleUpgrade('credits_25')} className="btn-ghost h-16 flex-col text-xs">25 credits<span className="text-[11px] text-muted">$19</span><span className="text-[10px] font-bold text-lime">save 16%</span></button>
+                  <button onClick={() => handleUpgrade('credits_20')} className="btn-ghost h-16 flex-col text-xs">20 credits<span className="text-[11px] text-muted">$15</span><span className="text-[10px] font-bold text-lime">save 17%</span></button>
                   <button onClick={() => handleUpgrade('credits_50')} className="btn-ghost h-16 flex-col text-xs">50 credits<span className="text-[11px] text-muted">$29</span><span className="text-[10px] font-bold text-lime">save 36%</span></button>
                 </div>
                 <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation after your free clips. Bigger packs cost less per clip.</p>
