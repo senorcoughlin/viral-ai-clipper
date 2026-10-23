@@ -62,14 +62,18 @@ Style: ${style}
 Transcript:
 ${(transcript || '').slice(0, 14000)}`;
   try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
       method: 'POST',
+      signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.5, maxOutputTokens: 1200 },
       }),
     });
+    clearTimeout(timer);
     if (!res.ok) return null;
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -252,7 +256,7 @@ export async function POST(request) {
       ];
 
   const vertical = clipFormat === 'shorts_9_16';
-  const jobs = base.map(async (c, i) => {
+  async function runOne(c, i) {
     const start = Number(c.startSec || 0);
     const len = Number(clipLength);
     let playUrl = SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length];
@@ -313,8 +317,13 @@ export async function POST(request) {
       endSec: start + len,
       preview: !real,
     };
-  });
-  const clips = await Promise.all(jobs);
+  }
+  const clips = [];
+  for (let n = 0; n < base.length; n += 3) {
+    const slice = base.slice(n, n + 3);
+    const batch = await Promise.all(slice.map((c, j) => runOne(c, n + j)));
+    clips.push(...batch);
+  }
 
   try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
 

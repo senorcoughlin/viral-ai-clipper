@@ -141,15 +141,20 @@ function HomeInner() {
       let all = [];
       for (const url of urls) {
         setProgressStep(1);
-        setProgressLabel('Analyzing audio with Groq…');
-        await new Promise(r => setTimeout(r, 500));
-        setProgressStep(2);
-        setProgressLabel('Scoring moments with Gemini…');
+        setProgressLabel('Analyzing audio…');
+        const started = Date.now();
+        const tick = setInterval(() => {
+          const secs = Math.floor((Date.now() - started) / 1000);
+          if (secs < 15) { setProgressStep(1); setProgressLabel(`Analyzing audio… ${secs}s`); }
+          else if (secs < 30) { setProgressStep(2); setProgressLabel(`Scoring moments… ${secs}s`); }
+          else { setProgressStep(3); setProgressLabel(`Cutting clips… ${secs}s`); }
+        }, 1000);
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength }),
         });
+        clearInterval(tick);
         const result = await res.json();
         if (!res.ok) throw new Error(result.message);
         const batch = (result.data.clips || result.data.generatedClips || []).map(c => ({
