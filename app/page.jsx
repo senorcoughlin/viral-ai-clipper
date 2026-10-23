@@ -25,6 +25,7 @@ const LENGTHS = [
   { value: 45, label: '45s' },
   { value: 60, label: '60s' },
 ];
+const CLIP_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }));
 const HOOKS = ['“Nobody tells you this about…”', '“I was wrong about…”', '“The $40k mistake”', '“Watch till the end”', '“This changed everything”', '“POV: you finally…”', '“Stop doing this”', '“3 things I wish I knew”'];
 const PRICE = { monthly: { amount: '$29', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199', per: '/yr · about $17/mo', plan: 'pro_yearly' } };
 
@@ -328,9 +329,10 @@ function HomeInner() {
             {/* FORM */}
             <form ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
               <label htmlFor="urls" className="px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted">Video links</label>
+              <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
               <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
                 <div className="flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
-                  <span className="mt-0.5"><Link /></span>
+                  <span aria-hidden className="mt-0.5"><Link /></span>
                   <textarea
                     id="urls"
                     value={videoUrl}
@@ -338,6 +340,7 @@ function HomeInner() {
                     placeholder="https://youtube.com/watch?v=…  (one per line for batch)"
                     rows={2}
                     required
+                    aria-describedby="urls-hint"
                     className="min-w-0 flex-1 resize-none bg-transparent text-[15px] text-fg outline-none placeholder:text-muted"
                   />
                 </div>
@@ -345,25 +348,20 @@ function HomeInner() {
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
-              <div className="flex flex-wrap items-center gap-2 px-0.5">
-                <span className="mr-1 text-xs text-muted">Format</span>
-                {FORMATS.map(f => (
-                  <button key={f.value} type="button" onClick={() => setClipFormat(f.value)} className={`chip ${clipFormat === f.value ? 'chip-on' : ''}`}>{f.label}</button>
-                ))}
-                <span className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />
-                <span className="mr-1 text-xs text-muted">Style</span>
-                {STYLES.map(s => (
-                  <button key={s.value} type="button" onClick={() => setAiStyle(s.value)} className={`chip ${aiStyle === s.value ? 'chip-on' : ''}`}>{s.label}</button>
-                ))}
-                <span className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />
-                <span className="mr-1 text-xs text-muted">Length</span>
-                {LENGTHS.map(l => (
-                  <button key={l.value} type="button" onClick={() => setClipLength(l.value)} className={`chip ${clipLength === l.value ? 'chip-on' : ''}`}>{l.label}</button>
-                ))}
-                <span className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />
-                <span className="mr-1 text-xs text-muted">Clips</span>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
-                  <button key={n} type="button" onClick={() => setClipCount(n)} className={`chip ${clipCount === n ? 'chip-on' : ''}`}>{n}</button>
+              <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
+                {[
+                  { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
+                  { label: 'Style', options: STYLES, value: aiStyle, set: setAiStyle },
+                  { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
+                  { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
+                ].map((g, gi) => (
+                  <div key={g.label} role="group" aria-label={g.label} className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0">
+                    {gi > 0 && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
+                    <span className="mr-1 w-12 shrink-0 text-xs text-muted sm:w-auto">{g.label}</span>
+                    {g.options.map(o => (
+                      <button key={o.value} type="button" aria-pressed={g.value === o.value} onClick={() => g.set(o.value)} className={`chip shrink-0 ${g.value === o.value ? 'chip-on' : ''}`}>{o.label}</button>
+                    ))}
+                  </div>
                 ))}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
@@ -514,13 +512,13 @@ function HomeInner() {
           )}
 
           {isProcessing && clips.length === 0 && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4 backdrop-blur-sm">
-              <div className="w-full max-w-md rounded-3xl border border-line2 bg-surface p-7 shadow-modal animate-fadeup">
+            <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/80 p-4 backdrop-blur-sm sm:items-center">
+              <div role="dialog" aria-modal="true" aria-labelledby="progress-title" className="w-full max-w-md rounded-3xl border border-line2 bg-surface p-7 shadow-modal animate-fadeup">
                 <div className="mb-4 flex items-center gap-3">
                   <div className="h-3 w-3 animate-pulse rounded-full bg-lime" />
-                  <span className="text-sm font-semibold text-white">Clipping in progress</span>
+                  <span id="progress-title" className="text-sm font-semibold text-white">Clipping in progress</span>
                 </div>
-                <p className="mb-5 text-sm text-soft">{progressLabel || 'Working…'}</p>
+                <p aria-live="polite" className="mb-5 text-sm text-soft">{progressLabel || 'Working…'}</p>
                 <div className="mb-4 h-2 overflow-hidden rounded-full bg-ink">
                   <div className="h-full bg-lime transition-all duration-500" style={{ width: `${Math.min(100, (progressStep + 1) * 20)}%` }} />
                 </div>

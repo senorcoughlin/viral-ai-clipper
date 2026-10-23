@@ -33,3 +33,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-floaty, .animate-floaty-slow, .animate-confetti, .animate-marquee, .animate-bars { animation: none !important; }
 }
+
+/* Visible keyboard focus for all interactive elements */
+:focus-visible { outline: 2px solid #C6FF3D; outline-offset: 2px; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
