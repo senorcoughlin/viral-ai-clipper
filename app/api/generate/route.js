@@ -126,18 +126,29 @@ function wordFilters(caption, length) {
   }).join(',');
 }
 
-async function renderioCut(url, start, length, key, caption, vertical) {
+async function renderioCut(url, start, length, key, caption, vertical, opts = {}) {
   const frame = vertical
     ? 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280'
     : 'scale=1280:-2';
-  const words = wordFilters(caption, length);
-  const vf = words ? `${frame},${words}` : frame;
+  // Simpler captions by default (one line). Word-level only when opts.wordCaptions is true.
+  const text = captionText(caption);
+  const simple = `drawtext=text='${text}':fontsize=42:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-160`;
+  const words = opts.wordCaptions ? wordFilters(caption, length) : '';
+  const vf = words ? `${frame},${words}` : `${frame},${simple}`;
+  // B-roll overlay is optional and off by default for speed.
+  const useBroll = !!opts.broll;
   const broll = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-  const body = {
-    input_urls: { in_video: url, in_broll: broll },
-    ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -i {{in_broll}} -filter_complex "[0:v]${vf}[base];[1:v]scale=720:280[b];[base][b]overlay=(W-w)/2:40:enable='between(t,0,2)'[v]" -map "[v]" -map 0:a? -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart {{out_clip}}`,
-    output_files: { out_clip: 'clip.mp4' },
-  };
+  const body = useBroll
+    ? {
+        input_urls: { in_video: url, in_broll: broll },
+        ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -i {{in_broll}} -filter_complex "[0:v]${vf}[base];[1:v]scale=720:280[b];[base][b]overlay=(W-w)/2:40:enable='between(t,0,2)'[v]" -map "[v]" -map 0:a? -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart {{out_clip}}`,
+        output_files: { out_clip: 'clip.mp4' },
+      }
+    : {
+        input_urls: { in_video: url },
+        ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -vf "${vf}" -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -movflags +faststart {{out_clip}}`,
+        output_files: { out_clip: 'clip.mp4' },
+      };
   const submit = await fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
@@ -148,9 +159,9 @@ async function renderioCut(url, start, length, key, caption, vertical) {
     throw new Error('renderio submit ' + submit.status + ' ' + t.slice(0, 160));
   }
   const { command_id } = await submit.json();
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 2500));
+    await new Promise(r => setTimeout(r, 1000));
     const poll = await fetch('https://renderio.dev/api/v1/commands/' + command_id, {
       headers: { 'X-API-KEY': key },
     });
@@ -211,6 +222,22 @@ async function cutClip(src, start, length, outPath) {
   return { ok: false, error: last.slice(0, 180) };
 }
 
+const recentCache = new Map();
+function cacheKey(url) { return String(url || '').trim(); }
+function getCached(url) {
+  const hit = recentCache.get(cacheKey(url));
+  if (!hit) return null;
+  if (Date.now() - hit.at > 1000 * 60 * 30) { recentCache.delete(cacheKey(url)); return null; }
+  return hit.clips;
+}
+function setCached(url, clips) {
+  recentCache.set(cacheKey(url), { at: Date.now(), clips });
+  if (recentCache.size > 20) {
+    const first = recentCache.keys().next().value;
+    recentCache.delete(first);
+  }
+}
+
 export async function POST(request) {
   const body = await request.json();
   const { videoUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30 } = body;
@@ -266,7 +293,7 @@ export async function POST(request) {
     if (rio) {
       try {
         const label = autoSubtitles !== false ? (c.hook || c.title || '') : '';
-        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical);
+        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: false, broll: false });
         real = true;
       } catch (e) {
         downloadError = e?.message || String(e);
@@ -322,9 +349,21 @@ export async function POST(request) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      const cached = getCached(videoUrl);
+      if (cached && cached.length) {
+        send({ type: 'start', total: cached.length, cached: true, hasTranscript: !!transcript });
+        for (let i = 0; i < cached.length; i++) {
+          send({ type: 'clip', index: i, total: cached.length, clip: cached[i] });
+        }
+        send({ type: 'done', note: 'Served from recent cache.', total: cached.length, cached: true });
+        controller.close();
+        return;
+      }
       send({ type: 'start', total: base.length, hasTranscript: !!transcript });
       const clips = [];
-      for (let i = 0; i < base.length; i++) {
+      // Cut first 4 immediately so the user sees results fast, then the rest.
+      const first = Math.min(4, base.length);
+      for (let i = 0; i < first; i++) {
         try {
           const clip = await runOne(base[i], i);
           clips.push(clip);
@@ -333,6 +372,16 @@ export async function POST(request) {
           send({ type: 'error', index: i, message: e?.message || 'cut failed' });
         }
       }
+      for (let i = first; i < base.length; i++) {
+        try {
+          const clip = await runOne(base[i], i);
+          clips.push(clip);
+          send({ type: 'clip', index: i, total: base.length, clip });
+        } catch (e) {
+          send({ type: 'error', index: i, message: e?.message || 'cut failed' });
+        }
+      }
+      if (clips.length) setCached(videoUrl, clips);
       try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
       send({
         type: 'done',
