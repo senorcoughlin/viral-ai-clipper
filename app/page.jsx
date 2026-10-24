@@ -304,7 +304,7 @@ function HomeInner() {
             <span className="font-display text-lg font-extrabold tracking-tight">Viral AI Clipper</span>
           </a>
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
-            <a href="#how" className="hover:text-fg">How it works</a>
+            <a href="/tutorial" className="hover:text-fg">Tutorial</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
             <a href="/connectors" className="hover:text-fg">Connectors</a>
             <a href="/tools" className="hover:text-fg">AI Tools</a>
