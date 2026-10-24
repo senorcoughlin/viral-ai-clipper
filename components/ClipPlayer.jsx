@@ -210,6 +210,11 @@ export default function ClipPlayer({ clip, compact = false }) {
             </span>
           </div>
           <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Post to Shorts'}</button>
+          <div className="grid grid-cols-3 gap-1">
+            <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">TikTok</button>
+            <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">Reels</button>
+            <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">X</button>
+          </div>
           {postStatus && <div className="break-words text-[10px] [&>div]:px-2 [&>div]:py-1.5 [&>div]:text-[10px]">{postStatus}</div>}
         </div>
       ) : (
