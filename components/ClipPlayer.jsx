@@ -170,6 +170,7 @@ export default function ClipPlayer({ clip, compact = false }) {
         ) : (
           <>
             <h3 className="truncate text-sm font-semibold text-fg">{title}</h3>
+            {clip.reason && <p className="text-xs leading-relaxed text-muted">Why this score: {clip.reason}</p>}
             {socialCaption && <p className="text-sm leading-relaxed text-soft">“{socialCaption}”</p>}
             {Array.isArray(clip.hooks) && clip.hooks.length > 1 && (
               <div className="flex flex-col gap-1">

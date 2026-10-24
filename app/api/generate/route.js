@@ -140,15 +140,27 @@ function wordFilters(caption, length) {
   }).join(',');
 }
 
-async function renderioCut(url, start, length, key, caption, vertical, opts = {}) {
-  const frame = vertical
-    ? 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280'
-    : 'scale=1280:-2';
-  // Simpler captions by default (one line). Word-level only when opts.wordCaptions is true.
+function styleCaption(caption, style) {
   const text = captionText(caption);
-  const simple = `drawtext=text='${text}':fontsize=42:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-160`;
+  const s = String(style || '').toLowerCase();
+  if (s.includes('hormozi') || s.includes('bold')) {
+    return `drawtext=text='${text}':fontsize=52:fontcolor=yellow:borderw=6:bordercolor=black:x=(w-text_w)/2:y=h-200`;
+  }
+  if (s.includes('podcast') || s.includes('clean')) {
+    return `drawtext=text='${text}':fontsize=36:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-140`;
+  }
+  return `drawtext=text='${text}':fontsize=44:fontcolor=white:borderw=5:bordercolor=black:x=(w-text_w)/2:y=h-160`;
+}
+
+async function renderioCut(url, start, length, key, caption, vertical, opts = {}) {
+  // Face-biased crop: prefer the upper-center of the frame where speakers usually sit.
+  const frame = vertical
+    ? 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=(iw-720)/2:y=(ih-1280)/5'
+    : 'scale=1280:-2';
+  const text = captionText(caption);
+  const styled = styleCaption(caption, opts.style);
   const words = opts.wordCaptions ? wordFilters(caption, length) : '';
-  const vf = words ? `${frame},${words}` : `${frame},${simple}`;
+  const vf = words ? `${frame},${words}` : `${frame},${styled}`;
   // B-roll overlay is optional and off by default for speed.
   const useBroll = !!opts.broll;
   const broll = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
@@ -323,7 +335,7 @@ export async function POST(request) {
     if (rio) {
       try {
         const label = autoSubtitles !== false ? (c.hook || c.title || '') : '';
-        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: false, broll: false });
+        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, broll: false, style: aiStyle });
         real = true;
       } catch (e) {
         ctx.downloadError = e?.message || String(e);
@@ -368,6 +380,7 @@ export async function POST(request) {
       hashtags: c.hashtags || '',
       bestTime: c.bestTime || '',
       aiPrompt: c.reason || c.hook || '',
+      reason: c.reason || c.hook || '',
       videoUrl: playUrl,
       source: videoUrl,
       startSec: start,
