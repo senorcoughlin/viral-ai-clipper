@@ -728,13 +728,13 @@ function HomeInner() {
               </ul>
               <a href="#top" className="btn-ghost mt-auto h-12 no-underline">Start free</a>
             </article>
-            <article className="card relative flex flex-col gap-5 border-lime p-8 shadow-pro">
+            <article className="card relative flex min-w-0 flex-col gap-5 border-lime p-6 sm:p-8 shadow-pro">
               <span className="absolute -top-3.5 left-8 inline-flex h-7 items-center gap-1.5 rounded-full bg-lime px-3 text-xs font-bold tracking-wide text-ink"><Bolt size={14} />MOST POPULAR</span>
               <div className="flex flex-col gap-1.5">
                 <span className="font-display text-xl font-extrabold text-lime">Pro</span>
                 <span className="text-sm text-muted">For creators posting daily.</span>
               </div>
-              <div className="flex items-baseline gap-1.5"><span className="font-display text-[52px] font-extrabold leading-none text-white">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></div>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1"><span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></div>
               <ul className="flex flex-col gap-2.5 text-sm text-fg">
                 <li className="flex items-center gap-2.5"><Check />Unlimited generations</li>
                 <li className="flex items-center gap-2.5"><Check />All AI styles</li>
