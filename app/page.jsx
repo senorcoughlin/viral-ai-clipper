@@ -7,6 +7,7 @@ import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 import AccountBar, { syncClips } from '../components/AccountBar';
 import BoltMenu from '../components/BoltMenu';
+import EasterEgg from '../components/EasterEgg';
 
 const FREE_DAILY_LIMIT = 3;
 
@@ -806,7 +807,7 @@ function HomeInner() {
 
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14]">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
-          <span className="flex items-center gap-2"><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span>Viral AI Clipper © {new Date().getFullYear()}</span>
+          <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
           <span className="flex gap-5"><a href="#" className="hover:text-fg">Terms</a><a href="#" className="hover:text-fg">Privacy</a><a href="#" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
