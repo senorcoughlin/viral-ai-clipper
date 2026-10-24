@@ -1,6 +1,6 @@
 import LegalPage from '../../components/LegalPage';
 export const metadata = { title: 'Privacy Policy – Viral AI Clipper' };
-const EMAIL = 'senorcoughlin@gmail.com';
+const EMAIL = 'support@viralaiclipper.com';
 export default function Privacy() {
   return (
     <LegalPage title="Privacy Policy" updated="October 24, 2026">

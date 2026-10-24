@@ -6,7 +6,7 @@ import { renderioUsed, RENDERIO_CAP, cycleId } from '../../../lib/capacity';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Score dashboard', robots: { index: false, follow: false } };
 
-const ADMINS = (process.env.ADMIN_EMAILS || 'senorcoughlin@gmail.com').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const ADMINS = (process.env.ADMIN_EMAILS || 'support@viralaiclipper.com').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const num = (k) => (process.env[k] ? Number(process.env[k]) : null);
 const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: d }) : '–');
 

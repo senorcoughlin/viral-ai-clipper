@@ -1,6 +1,6 @@
 import LegalPage from '../../components/LegalPage';
 export const metadata = { title: 'Terms of Service – Viral AI Clipper' };
-const EMAIL = 'senorcoughlin@gmail.com';
+const EMAIL = 'support@viralaiclipper.com';
 export default function Terms() {
   return (
     <LegalPage title="Terms of Service" updated="October 24, 2026">
