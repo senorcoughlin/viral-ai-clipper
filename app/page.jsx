@@ -22,6 +22,12 @@ const STYLES = [
   { value: 'kids_3d', label: '3D Kids' },
   { value: 'clean_viral', label: 'Clean 4K' },
 ];
+const PACKS = [
+  { value: '', label: 'Default' },
+  { value: 'bold', label: 'Bold captions' },
+  { value: 'podcast', label: 'Podcast' },
+  { value: 'gameplay', label: 'Gameplay zoom' },
+];
 const LENGTHS = [
   { value: 15, label: '15s' },
   { value: 30, label: '30s' },
@@ -56,6 +62,7 @@ function HomeInner() {
   const [videoUrl, setVideoUrl] = useState('');
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [aiStyle, setAiStyle] = useState('character_swap');
+  const [pack, setPack] = useState('');
   const [clipLength, setClipLength] = useState(30);
   const [clipCount, setClipCount] = useState(1);
   const [autoSubtitles, setAutoSubtitles] = useState(true);
@@ -167,9 +174,9 @@ function HomeInner() {
   const lastRunRef = useRef(null);
   const handleClipping = async (e, override) => {
     e?.preventDefault?.();
-    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount };
+    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack };
     // Shadow state so a retry reuses exactly the same URL and settings.
-    const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count } = settings;
+    const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk } = settings;
     if (!runUrl.trim()) return;
     if (!isPro && dailyCount >= FREE_DAILY_LIMIT && credits <= 0) {
       setShowPricing(true);
@@ -213,7 +220,7 @@ function HomeInner() {
           res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
+          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk || '', faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
           });
         } catch {
           throw new Error('Could not reach the server. Check your connection and retry.');
@@ -427,6 +434,7 @@ function HomeInner() {
                 {[
                   { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
                   { label: 'Style', options: STYLES, value: aiStyle, set: setAiStyle },
+                  { label: 'Pack', options: PACKS, value: pack, set: setPack },
                   { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
                   { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
                 ].map((g, gi) => (

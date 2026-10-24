@@ -139,6 +139,13 @@ const SAMPLE_VIDEOS = [
   'https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4',
 ];
 
+function cleanReasons(r) {
+  if (!r || typeof r !== 'object') return null;
+  const out = {};
+  for (const k of ['hook', 'pacing', 'emotion']) if (r[k]) out[k] = String(r[k]).replace(/\s+/g, ' ').trim().slice(0, 90);
+  return Object.keys(out).length ? out : null;
+}
+
 async function scoreWithGemini(transcript, videoUrl, format, style, length, count = 1) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
@@ -153,7 +160,7 @@ How to choose:
 - Score 1-99 for how likely this clip is to stop the scroll and get shared. Be honest: most moments are 60-80. Reserve 90+ for exceptional ones.
 ${timed ? `- startSec MUST be a second where a sentence begins, taken from the [mm:ss] markers (convert to seconds). Do not invent times outside the transcript range.` : ''}
 Return ONLY valid JSON with ${count} clip${count === 1 ? '' : 's'}, ranked best first:
-{"clips":[{"title":"short punchy title","hook":"on-screen hook, under 8 words","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":72,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"one sentence on why this moment works"}]}
+{"clips":[{"title":"short punchy title","hook":"on-screen hook, under 8 words","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":72,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"one sentence on why this moment works","reasons":{"hook":"under 10 words on the opening","pacing":"under 10 words on pacing","emotion":"under 10 words on the emotion or CTA payoff"}}]}
 Clips must not overlap. startSec/endSec are seconds from the start of the video.
 Video: ${videoUrl}
 Format: ${format}
@@ -185,7 +192,7 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
     if (!Array.isArray(parsed?.clips)) { console.warn('gemini no clips', data?.candidates?.[0]?.finishReason, text.slice(0, 200)); return null; }
     parsed.clips = parsed.clips
       .filter(c => c && typeof c === 'object')
-      .map(c => ({ ...c, startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Math.round(Number(c.score)) || 60)) }));
+      .map(c => ({ ...c, reasons: cleanReasons(c.reasons), startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Math.round(Number(c.score)) || 60)) }));
     console.log('gemini scores', parsed.clips.map(c => [c.startSec, c.score]));
     return parsed.clips.length ? parsed : null;
   } catch (e) {
@@ -300,7 +307,8 @@ async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false) {
     const data = await res.json();
     meterGemini('face', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
-    const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x > 0.02 && x < 0.98) // 0/1 = model's "no face".sort((a, b) => a - b);
+    const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x > 0.02 && x < 0.98) // 0/1 = model's "no face"
+      .sort((a, b) => a - b);
     console.log('face track', { ms: Date.now() - t0, xs });
     if (!xs.length) return null;
     const cx = xs[Math.floor(xs.length / 2)];
@@ -317,7 +325,7 @@ async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false) {
 }
 
 // Transcripts are cached per video for a week so repeat runs skip extraction.
-const trKey = (url) => 'tr:' + (youtubeId(url) || String(url).trim());
+const trKey = (url) => 'tr2:' + (youtubeId(url) || String(url).trim());
 async function getCachedTranscript(url) {
   if (!kvEnabled) return null;
   const v = await kvGetJson(trKey(url));
@@ -414,6 +422,7 @@ async function mapLimit(items, limit, fn) {
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipCount = 1, faceCrop } = body;
+  const pack = ['bold', 'podcast', 'gameplay'].includes(body.pack) ? body.pack : null;
   // The browser may suggest a crop filter; only accept the exact shape cropFromFace() builds.
   const brand = sanitizeBrand(body.brand);
   const safeClientCrop = typeof faceCrop === 'string' && /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)\*[01]\.\d{3}$/.test(faceCrop) ? faceCrop : null;
@@ -508,7 +517,7 @@ export async function POST(request) {
         // Skip face tracking when the monthly RenderIO budget is getting tight.
         const src = ctx.srcP ? await ctx.srcP : { url: rioUrl, direct: false };
         if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(src.url, start, len, src.direct ? 30000 : 45000, src.direct);
-        playUrl = await renderioCut(src.url, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop, brand, direct: src.direct });
+        playUrl = await renderioCut(src.url, start, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
@@ -551,13 +560,15 @@ export async function POST(request) {
       scored: c.scored !== false,
       duration: `${len}s`,
       format: clipFormat,
-      style: aiStyle,
+      style: pack || aiStyle,
       caption: autoSubtitles ? (c.caption || '') : '',
       socialCaption: c.caption || '',
       hashtags: c.hashtags || '',
       bestTime: c.bestTime || '',
       aiPrompt: c.reason || c.hook || '',
       reason: c.reason || c.hook || '',
+      reasons: c.reasons || null,
+      pack: pack || null,
       videoUrl: playUrl,
       source: videoUrl,
       startSec: start,
@@ -578,7 +589,7 @@ export async function POST(request) {
         try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
       };
       try {
-      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand]);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2']);
       const hit = await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
@@ -618,8 +629,17 @@ export async function POST(request) {
       if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
         audioP = ctx.srcP.then(src => audioTranscript(src.url, 120000, src.direct)).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }
-      ctx.transcript = cachedTr || (ytId ? await fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT);
-      ctx.transcriptSource = cachedTr ? 'cache' : ctx.transcript?.segments?.length ? 'youtube' : null;
+      // Whisper gives true per-word timings (captions pop on the spoken word); YouTube
+      // captions only give phrase timings. Prefer Whisper whenever the audio job runs.
+      if (audioP) {
+        send({ type: 'status', step: 'transcript', detail: 'audio' });
+        const [w, yt] = await Promise.all([audioP, ytId ? fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT]);
+        ctx.transcript = w?.segments?.length ? w : yt;
+        ctx.transcriptSource = w?.segments?.length ? 'whisper' : yt?.segments?.length ? 'youtube' : null;
+      } else {
+        ctx.transcript = cachedTr || (ytId ? await fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT);
+        ctx.transcriptSource = cachedTr ? 'cache' : ctx.transcript?.segments?.length ? 'youtube' : null;
+      }
       try {
         if (process.env.RENDERIO_API_KEY) {
           // RenderIO handles download + cut. If captions were blocked, use the

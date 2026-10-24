@@ -54,6 +54,8 @@ export default function ClipPlayer({ clip, compact = false }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [transform, setTransform] = useState({ hook: '', overlay: false, commentary: false });
   const [pendingPost, setPendingPost] = useState(null);
+  const [postMsg, setPostMsg] = useState(null);
+  const [postBusy, setPostBusy] = useState(false);
   const [creditOn, setCreditOn] = useState(true);
   const credit = useCredit(clip.source);
   const [showMonetize, setShowMonetize] = useState(false);
@@ -102,6 +104,7 @@ export default function ClipPlayer({ clip, compact = false }) {
     const risks = platform === 'youtube' ? reuseRisks(clip, transform) : [];
     if (!checked && risks.length) { setPendingPost({ platform, risks }); return; }
     setPendingPost(null);
+    if (platform === 'youtube') { setPostBusy(true); setPostMsg(null); }
     const text = withCredit(socialCaption, credit, creditOn);
     try {
       copy(text, platform);
@@ -111,9 +114,18 @@ export default function ClipPlayer({ clip, compact = false }) {
         body: JSON.stringify({ platform, caption: text, videoUrl: videoSrc, title }),
       });
       const data = await res.json();
-      if (data.success && data.data?.url) window.open(data.data.url, '_blank');
-      else if (data.success && data.data?.uploadUrl) window.open(data.data.uploadUrl, '_blank');
+      const d = data?.data || {};
+      if (platform === 'youtube') {
+        if (d.mode === 'youtube-uploaded' || d.mode === 'youtube-scheduled') setPostMsg({ ok: true, text: 'Uploaded to your YouTube as private. Review and publish in Studio.', url: d.url });
+        else if (d.why === 'not_connected') setPostMsg({ ok: false, text: 'Connect YouTube once and this button uploads the clip for you. Caption copied.', connect: true });
+        else if (d.why === 'not_authorized') setPostMsg({ ok: false, text: 'YouTube refused the upload (sign-in expired or this Google account is not approved yet). Reconnect, or upload manually — caption copied.', connect: true, url: d.url });
+        else setPostMsg({ ok: false, text: 'Auto-upload failed. Caption copied — upload it in YouTube Studio.', url: d.url || 'https://studio.youtube.com/' });
+        setPostBusy(false);
+        return;
+      }
+      if (data.success && d.url) window.open(d.url, '_blank');
     } catch {
+      if (platform === 'youtube') { setPostBusy(false); setPostMsg({ ok: false, text: 'Could not reach the uploader. Caption copied — upload it in YouTube Studio.', url: 'https://studio.youtube.com/' }); return; }
       window.open(platform === 'youtube' ? 'https://studio.youtube.com/' : 'https://www.tiktok.com/upload', '_blank');
     }
   };
@@ -208,6 +220,13 @@ export default function ClipPlayer({ clip, compact = false }) {
           <>
             <h3 className="truncate text-sm font-semibold text-fg">{title}</h3>
             {clip.reason && <p className="text-xs leading-relaxed text-muted">Why this score: {clip.reason}</p>}
+            {clip.reasons && (
+              <ul className="flex flex-col gap-1 text-xs leading-snug text-soft">
+                {[['hook', 'Hook'], ['pacing', 'Pacing'], ['emotion', 'Emotion/CTA']].filter(([k]) => clip.reasons[k]).map(([k, l]) => (
+                  <li key={k} className="min-w-0 break-words"><span className="font-semibold text-lime">{l}:</span> {clip.reasons[k]}</li>
+                ))}
+              </ul>
+            )}
             {socialCaption && <p className="text-sm leading-relaxed text-soft">“{socialCaption}”</p>}
             {Array.isArray(clip.hooks) && clip.hooks.length > 1 && (
               <div className="flex flex-col gap-1">
@@ -231,6 +250,13 @@ export default function ClipPlayer({ clip, compact = false }) {
           </>
         )}
 
+        {postMsg && (
+          <div role="status" className={`rounded-input border px-3 py-2 text-xs leading-relaxed ${postMsg.ok ? 'border-lime text-lime' : 'border-line2 text-soft'}`}>
+            {postMsg.text}{' '}
+            {postMsg.url && <a href={postMsg.url} target="_blank" rel="noreferrer" className="underline">Open Studio</a>}
+            {postMsg.connect && <> {postMsg.url ? '· ' : ''}<a href="/api/youtube/start" className="underline">Connect YouTube</a></>}
+          </div>
+        )}
         <Bar label="Hook" pct={hookPct} color={color} />
         <Bar label="Pacing" pct={pacePct} color={color} />
 
@@ -240,7 +266,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           </button>
           <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-10 px-3 text-xs">TikTok</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
-          <button type="button" onClick={() => postClip('youtube')} className="btn-ghost h-10 px-3 text-xs">Shorts</button>
+          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost h-10 px-3 text-xs">{postBusy ? 'Uploading…' : 'Shorts'}</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
           <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}

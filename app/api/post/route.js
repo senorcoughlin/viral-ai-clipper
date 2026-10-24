@@ -48,7 +48,8 @@ export async function POST(request) {
     const publishAt = schedule ? nextBestTime(bestTime, tz) : null;
     if (schedule && !publishAt) return NextResponse.json({ success: false, message: 'Could not read the best time for this clip.' }, { status: 400 });
     if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing video' }, { status: 400 });
-    const open = NextResponse.json({ success: true, data: { mode: 'open', url: TARGETS[platform] || TARGETS.youtube, caption } });
+    const openWith = (why) => NextResponse.json({ success: true, data: { mode: 'open', url: TARGETS[platform] || TARGETS.youtube, caption, why } });
+    const open = openWith(null);
     if (platform !== 'youtube') return open;
 
     let access = readCookie(request, 'yt_access');
@@ -58,7 +59,7 @@ export async function POST(request) {
       refreshed = await refreshAccessToken(refresh);
       access = refreshed?.access_token || null;
     }
-    if (!access) return open;
+    if (!access) return openWith('not_connected');
 
     const src = validateVideoUrl(videoUrl);
     if (!src || !src.startsWith('https://')) return open;
@@ -84,13 +85,14 @@ export async function POST(request) {
     const uploadUrl = init.headers.get('location');
     if (!init.ok || !uploadUrl) {
       console.warn('youtube init failed', init.status);
-      return open;
+      // 401/403: token expired, app still in Google "testing" without this user, or scope missing.
+      return openWith(init.status === 401 || init.status === 403 ? 'not_authorized' : 'upload_failed');
     }
     const up = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: bytes });
     const video = await up.json().catch(() => ({}));
     if (!up.ok || !video.id) {
       console.warn('youtube upload failed', up.status);
-      return open;
+      return openWith('upload_failed');
     }
     const res = NextResponse.json({ success: true, data: { mode: publishAt ? 'youtube-scheduled' : 'youtube-uploaded', videoId: video.id, publishAt: publishAt?.toISOString() || null, url: `https://studio.youtube.com/video/${video.id}/edit`, caption } });
     if (refreshed?.access_token) res.cookies.set('yt_access', refreshed.access_token, { ...COOKIE_OPTS, maxAge: Math.max(60, Number(refreshed.expires_in || 3600) - 60) });
