@@ -34,7 +34,7 @@ function SuccessContent() {
   const body = state.status === 'loading' ? 'One moment while we check with Stripe.'
     : state.status === 'error' ? state.message
     : isCredits ? `${state.purchased} credits added. You have ${state.credits} credits on ${state.email}.`
-    : state.pro ? `Unlimited generations, no watermark, every AI style. Linked to ${state.email}.`
+    : state.pro ? `200 generations a day, no watermark. Linked to ${state.email}.`
     : 'Your subscription is still activating. Refresh in a minute.';
 
   return (

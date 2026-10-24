@@ -455,7 +455,7 @@ function HomeInner() {
             <div id="remaining" className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-line2 bg-surface/80 px-4 py-3 text-sm">
               <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Generations remaining</span>
               {isPro ? (
-                <span className="flex items-center gap-1.5 font-semibold text-lime"><Bolt size={13} fill="#C6FF3D" />Unlimited with Pro</span>
+                <span className="flex items-center gap-1.5 font-semibold text-lime"><Bolt size={13} fill="#C6FF3D" />200/day with Pro</span>
               ) : (
                 <>
                   <span className="flex items-center gap-2 text-soft"><b className="text-white">{freeLeft}</b> of {FREE_DAILY_LIMIT} free today
@@ -720,7 +720,7 @@ function HomeInner() {
         <section id="pricing" className="flex flex-col items-center gap-9 pb-28">
           <div className="flex max-w-[640px] flex-col items-center gap-3 text-center">
             <span className="eyebrow">Pricing</span>
-            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} clips a day free. Unlimited on Pro. No per-minute credits.</h2>
+            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} clips a day free. 200 a day on Pro. No per-minute credits.</h2>
             <div className="mt-2 inline-flex rounded-full border border-line2 bg-surface p-1">
               <button type="button" onClick={() => setBilling('monthly')} className={`chip h-[34px] border-0 ${billing === 'monthly' ? 'chip-on' : ''}`}>Monthly</button>
               <button type="button" onClick={() => setBilling('yearly')} className={`chip h-[34px] border-0 ${billing === 'yearly' ? 'chip-on' : ''}`}>
@@ -737,7 +737,6 @@ function HomeInner() {
               <div className="flex items-baseline gap-1.5"><span className="font-display text-[52px] font-extrabold leading-none text-white">$0</span><span className="text-sm text-muted">forever</span></div>
               <ul className="flex flex-col gap-2.5 text-sm text-soft">
                 <li className="flex items-center gap-2.5"><Check color="#8A8AA0" />{FREE_DAILY_LIMIT} generations per day</li>
-                <li className="flex items-center gap-2.5"><Check color="#8A8AA0" />Basic styles</li>
                 <li className="flex items-center gap-2.5"><Check color="#8A8AA0" />Watermarked exports</li>
               </ul>
               <a href="#top" className="btn-ghost mt-auto h-12 no-underline">Start free</a>
@@ -750,8 +749,7 @@ function HomeInner() {
               </div>
               <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1"><span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></div>
               <ul className="flex flex-col gap-2.5 text-sm text-fg">
-                <li className="flex items-center gap-2.5"><Check />Unlimited generations</li>
-                <li className="flex items-center gap-2.5"><Check />All AI styles</li>
+                <li className="flex items-center gap-2.5"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2.5"><Check />No watermark</li>
                 <li className="flex items-center gap-2.5"><Check />Batch up to 10 links</li>
                 <li className="flex items-center gap-2.5"><Check />CSV export + priority</li>
@@ -789,14 +787,13 @@ function HomeInner() {
                 </button>
               </div>
               <h3 id="up-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[38px]">
-                Keep the clips coming.<br /><span className="text-lime">Go unlimited.</span>
+                Keep the clips coming.<br /><span className="text-lime">Go Pro.</span>
               </h3>
-              <p className="text-[15px] leading-relaxed text-soft">Pro removes the daily cap and the watermark, unlocks every AI style, and saves your history so you never lose a banger.</p>
+              <p className="text-[15px] leading-relaxed text-soft">Pro raises the daily cap to 200, removes the watermark, and saves your history so you never lose a banger.</p>
               <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
-                <li className="flex items-center gap-2"><Check />Unlimited generations</li>
+                <li className="flex items-center gap-2"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2"><Check />No watermark</li>
                 <li className="flex items-center gap-2"><Check />Batch up to 10 links</li>
-                <li className="flex items-center gap-2"><Check />All AI styles</li>
               </ul>
               <div className="flex flex-col gap-2.5 sm:flex-row">
                 <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
