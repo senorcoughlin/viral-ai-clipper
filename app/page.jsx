@@ -27,7 +27,7 @@ const LENGTHS = [
 ];
 const CLIP_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }));
 const HOOKS = ['“Nobody tells you this about…”', '“I was wrong about…”', '“The $40k mistake”', '“Watch till the end”', '“This changed everything”', '“POV: you finally…”', '“Stop doing this”', '“3 things I wish I knew”'];
-const PRICE = { monthly: { amount: '$29', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199', per: '/yr · about $17/mo', plan: 'pro_yearly' } };
+const PRICE = { monthly: { amount: '$29.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly' } };
 
 /* ---------- small icons (inline SVG, no deps) ---------- */
 const Bolt = ({ className = '', fill = '#0A0A0F', size = 18 }) => (
@@ -95,6 +95,17 @@ function HomeInner() {
     const pro = localStorage.getItem('viral_pro') === 'true';
     setIsPro(pro);
     setCredits(Number(localStorage.getItem('viral_credits') || 0));
+    const em = localStorage.getItem('viral_pro_email');
+    if (em) {
+      fetch(`/api/billing?email=${encodeURIComponent(em)}`).then(r => r.json()).then(d => {
+        if (!d?.success) return;
+        setIsPro(!!d.pro || pro);
+        if (d.pro) localStorage.setItem('viral_pro', 'true');
+        else if (pro) { setIsPro(false); localStorage.removeItem('viral_pro'); }
+        setCredits(d.credits);
+        localStorage.setItem('viral_credits', String(d.credits));
+      }).catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -158,7 +169,7 @@ function HomeInner() {
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0 }),
+          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0, useCredit: !isPro && dailyCount >= FREE_DAILY_LIMIT && credits > 0 }),
         });
         if (!res.ok) {
           const text = await res.text().catch(() => '');
@@ -702,8 +713,8 @@ function HomeInner() {
                 <li className="flex items-center gap-2"><Check />All AI styles</li>
               </ul>
               <div className="flex flex-col gap-2.5 sm:flex-row">
-                <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 43%</span></button>
-                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$29 / month</button>
+                <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 44%</span></button>
+                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$29.99 / month</button>
               </div>
               <div className="border-t border-line pt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · under $30</p>

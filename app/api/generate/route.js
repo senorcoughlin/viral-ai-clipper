@@ -9,7 +9,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { checkLimit, clientIp } from '../../../lib/ratelimit';
-import { isProEmail } from '../../../lib/pro';
+import { getEntitlement, consumeCredit } from '../../../lib/billing';
 import { validateVideoUrl } from '../../../lib/validate';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 
@@ -279,15 +279,21 @@ async function mapLimit(items, limit, fn) {
 
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1, proEmail, hasCredits } = body;
+  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1, proEmail, hasCredits, useCredit } = body;
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
   const videoUrl = validateVideoUrl(rawUrl);
   if (!videoUrl) {
     return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
   }
-  const pro = proEmail ? await isProEmail(proEmail).catch(() => false) : false;
-  const limit = await checkLimit(clientIp(request), pro ? 'pro' : hasCredits ? 'credits' : 'free');
+  const ent = proEmail ? await getEntitlement(proEmail).catch(() => null) : null;
+  const pro = !!ent?.pro;
+  let creditTier = !!hasCredits;
+  if (ent && !pro && useCredit) {
+    // Server record is authoritative when we have one: spend a credit up front.
+    creditTier = ent.credits > 0 ? await consumeCredit(proEmail).catch(() => false) : false;
+  }
+  const limit = await checkLimit(clientIp(request), pro ? 'pro' : creditTier ? 'credits' : 'free');
   if (!limit.ok) {
     return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached }, { status: limit.status });
   }

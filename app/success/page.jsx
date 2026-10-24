@@ -15,6 +15,15 @@ function SuccessContent() {
       const email = params.get('email');
       if (email) localStorage.setItem('viral_pro_email', email);
     }
+    const sid = params.get('session_id');
+    if (sid) {
+      fetch(`/api/billing?session_id=${encodeURIComponent(sid)}`).then(r => r.json()).then(d => {
+        if (!d?.success) return;
+        localStorage.setItem('viral_pro_email', d.email);
+        if (d.pro) localStorage.setItem('viral_pro', 'true');
+        if (d.credits > 0 || type === 'credits') localStorage.setItem('viral_credits', String(Math.max(d.credits, Number(localStorage.getItem('viral_credits') || 0))));
+      }).catch(() => {});
+    }
   }, [params]);
 
   return (
