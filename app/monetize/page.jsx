@@ -25,24 +25,37 @@ function Guide() {
   const permHref = `/permissions?${new URLSearchParams({ name: credit?.author || '', url: credit?.authorUrl || '' })}`;
   const risky = !check.captions && !check.hook && !check.commentary;
 
-  const steps = [
-    { id: 'perm', title: 'Check you have permission', body: <>Make sure {credit?.author || 'the streamer'} allows clipping, and log their terms and any revenue split.</>,
-      action: <a href={permHref} className="btn-ghost h-9 px-3 text-xs leading-9">Open Permissions{credit?.author ? ` for ${credit.author}` : ''}</a> },
-    { id: 'transform', title: 'Make it transformative', body: <>Add captions, a hook overlay, a facecam reaction, or your own commentary. In Your clips, tap <b>Edit</b> on the clip, then use the <b>Transform</b> section (hook text, facecam upload, AI commentary script).</>,
-      action: <a href={back} className="btn-ghost h-9 px-3 text-xs leading-9">Go to my clip</a> },
-    { id: 'credit', title: 'Add credit', body: <>Credit the streamer in your caption and description. {credit ? <span className="text-soft">{creditLine(credit)}</span> : 'We add it automatically for YouTube sources.'}</>,
+  const btn = 'btn-ghost h-9 px-3 text-xs leading-9';
+  const S = {
+    perm: { title: 'Check you have permission', body: <>Make sure {credit?.author || 'the streamer'} allows clipping, and log their terms and any revenue split.</>,
+      action: <a href={permHref} className={btn}>Open Permissions{credit?.author ? ` for ${credit.author}` : ''}</a> },
+    transform: { title: 'Make it transformative', body: <>Add captions, a hook overlay, a facecam reaction, or your own commentary. In Your clips, tap <b>Edit</b> on the clip, then use the <b>Transform</b> section.</>,
+      action: <a href={back} className={btn}>Go to my clip</a> },
+    credit: { title: 'Add credit', body: <>Credit the streamer in your caption and description. {credit ? <span className="text-soft">{creditLine(credit)}</span> : 'We add it automatically for YouTube sources.'}</>,
       action: <label className="flex items-center gap-2 text-xs text-soft"><input type="checkbox" checked={creditOn} onChange={e => { setCreditOn(e.target.checked); setAutoCredit(e.target.checked); }} /> Auto-add credit when posting</label> },
-    { id: 'check', title: 'Run the pre-upload check', body: <>What does this clip have?
+    check: { title: 'Run the pre-upload check', body: <>What does this clip have?
       <span className="mt-2 flex flex-wrap gap-3">{[['captions', 'Captions'], ['hook', 'Hook text or facecam'], ['commentary', 'My commentary']].map(([k, l]) => (
         <label key={k} className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={check[k]} onChange={e => setCheck({ ...check, [k]: e.target.checked })} />{l}</label>))}</span>
       <span className={`mt-2 block text-xs ${risky ? 'text-yellow-300' : 'text-lime'}`}>{risky ? 'High reused-content risk: this is mostly unedited footage. YouTube may not monetize it and Content ID may claim it.' : 'Looks transformative. Keep adding your own value.'} <a href={REUSE_URL} target="_blank" rel="noreferrer" className="text-lime">Reused content policy →</a></span></> },
-    { id: 'post', title: 'Post it', body: <>Use the <b>Shorts</b>, <b>TikTok</b>, <b>Reels</b> or <b>X</b> buttons on the clip. Shorts runs the pre-upload check again and uploads as private for you to review.</>,
-      action: <a href={back} className="btn-ghost h-9 px-3 text-xs leading-9">Go post</a> },
-    { id: 'paid', title: 'Get paid', body: path === 'creator'
-      ? <>Grow your own channel into the YouTube Partner Program. YouTube&apos;s official page lists the ad-revenue thresholds as <b>1,000 subscribers</b> plus either <b>4,000 qualified watch hours in the last 12 months</b> or <b>10 million qualified Shorts views in the last 90 days</b>. Your channel also has to follow YouTube&apos;s monetization policies, including the reused content rules. <a href={YPP_URL} target="_blank" rel="noreferrer" className="text-lime">Check the current requirements →</a></>
-      : <>This is how big clipping channels earn. Join an official clipping campaign or a streamer&apos;s own clip program, follow its rules, and post across TikTok, Reels and Shorts. Campaigns usually pay per view at their own rates. Track each clip&apos;s views and submit your links to the campaign before its deadline.</>,
-      action: path === 'creator' ? <a href={YPP_URL} target="_blank" rel="noreferrer" className="btn-ghost h-9 px-3 text-xs leading-9">YouTube Partner Program</a> : <a href="/programs" className="btn-ghost h-9 px-3 text-xs leading-9">Browse clipping programs</a> },
+  };
+  const PRO = [
+    { id: 'p_join', title: 'Join a clipping campaign', body: <>Big clipping channels get paid by campaigns: streamers, creators or brands pay clippers per view. Pick an official campaign or a streamer&apos;s own clip program.</>, action: <a href="/programs" className={btn}>Browse clipping programs</a> },
+    { id: 'p_rules', title: 'Read the campaign rules', body: <>Each campaign sets which streamer to clip, required tags or links, allowed platforms, minimum length and the deadline. Log the terms so you don&apos;t forget them.</>, action: <a href={permHref} className={btn}>Log campaign terms</a> },
+    { id: 'p_pick', title: 'Clip the moments the campaign wants', body: <>Paste the streamer&apos;s latest videos into Clip a channel and keep the clips with the highest viral scores.</>, action: <a href="/channel" className={btn}>Open Clip a channel</a> },
+    { id: 'transform', ...S.transform },
+    { id: 'credit', ...S.credit, title: 'Add the required tags and credit' },
+    { id: 'p_post', title: 'Post everywhere', body: <>Post the same clip to TikTok, Reels and Shorts. Campaigns usually count views from every platform, so more platforms means more paid views.</>, action: <a href={back} className={btn}>Go post</a> },
+    { id: 'p_submit', title: 'Submit links and get paid', body: <>Track each clip&apos;s views and submit the post links in the campaign dashboard before the deadline. The campaign pays out at its own rate.</>, action: <a href="/programs" className={btn}>Back to programs</a> },
   ];
+  const CREATOR = [
+    { id: 'perm', ...S.perm },
+    { id: 'transform', ...S.transform, body: <>On your own channel, YouTube only pays for content that adds your own value. Lean on commentary: tap <b>Edit</b>, then <b>Transform</b>, and use the AI commentary script to record your take.</> },
+    { id: 'credit', ...S.credit },
+    { id: 'check', ...S.check },
+    { id: 'c_post', title: 'Post on your own channel consistently', body: <>Use the <b>Shorts</b> button (it uploads as private for review). Post on a steady schedule and use <b>Post at best time</b>.</>, action: <a href={back} className={btn}>Go post</a> },
+    { id: 'c_ypp', title: 'Reach the Partner Program and apply', body: <>YouTube&apos;s official page lists the ad-revenue thresholds as <b>1,000 subscribers</b> plus either <b>4,000 qualified watch hours in the last 12 months</b> or <b>10 million qualified Shorts views in the last 90 days</b>. Then apply in YouTube Studio.</>, action: <a href={YPP_URL} target="_blank" rel="noreferrer" className={btn}>Check the current requirements</a> },
+  ];
+  const steps = path === 'creator' ? CREATOR : PRO;
   const count = steps.filter(s => done[s.id]).length;
 
   return (
@@ -54,6 +67,7 @@ function Guide() {
         {[['pro', 'Pro clipper path'], ['creator', 'Creator path']].map(([k, l]) => (
           <button key={k} type="button" onClick={() => save(done, k)} className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${path === k ? 'border-lime text-lime' : 'border-line2 text-soft'}`}>{l}</button>))}
       </div>
+      <p className="text-sm text-soft">{path === 'creator' ? 'Grow your own channel and earn YouTube ad revenue.' : 'Earn the way big clipping channels do: get paid per view by clipping campaigns.'}</p>
       <p className="text-xs text-muted">{count} of {steps.length} steps done. Progress is saved on this device.</p>
       <ol className="flex flex-col gap-3">
         {steps.map((s, i) => (
