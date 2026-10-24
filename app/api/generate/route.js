@@ -158,7 +158,7 @@ Transcript:
 ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcript || '').slice(0, 14000)}`;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const timer = setTimeout(() => ctrl.abort(), 30000);
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
       method: 'POST',
       signal: ctrl.signal,
@@ -169,7 +169,7 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
       }),
     });
     clearTimeout(timer);
-    if (!res.ok) return null;
+    if (!res.ok) { console.warn('gemini failed', res.status, (await res.text().catch(() => '')).slice(0, 200)); return null; }
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     let parsed = null;
@@ -180,21 +180,26 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
     if (!Array.isArray(parsed?.clips)) return null;
     parsed.clips = parsed.clips
       .filter(c => c && typeof c === 'object')
-      .map(c => ({ ...c, startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Number(c.score) || 80)) }));
+      .map(c => ({ ...c, startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Math.round(Number(c.score)) || 60)) }));
+    console.log('gemini scores', parsed.clips.map(c => [c.startSec, c.score]));
     return parsed.clips.length ? parsed : null;
-  } catch {
+  } catch (e) {
+    console.warn('gemini error', e?.message);
     return null;
   }
 }
 
 async function transcribe(audioPath) {
+  try { return await transcribeBuffer(await fs.readFile(audioPath)); } catch { return EMPTY_TRANSCRIPT; }
+}
+
+async function transcribeBuffer(buf) {
   const key = process.env.GROQ_API_KEY;
-  if (!key) return '';
+  if (!key || !buf?.length) return EMPTY_TRANSCRIPT;
   try {
-    const buf = await fs.readFile(audioPath);
     const form = new FormData();
-    form.append('file', new Blob([buf]), 'audio.mp3');
-    form.append('model', 'whisper-large-v3');
+    form.append('file', new Blob([buf], { type: 'audio/mpeg' }), 'audio.mp3');
+    form.append('model', 'whisper-large-v3-turbo');
     // Word-level timestamps: this is what makes captions land on the spoken word.
     form.append('response_format', 'verbose_json');
     form.append('timestamp_granularities[]', 'word');
@@ -204,7 +209,10 @@ async function transcribe(audioPath) {
       headers: { Authorization: `Bearer ${key}` },
       body: form,
     });
-    if (!res.ok) return EMPTY_TRANSCRIPT;
+    if (!res.ok) {
+      console.warn('groq transcribe failed', res.status, (await res.text().catch(() => '')).slice(0, 200));
+      return EMPTY_TRANSCRIPT;
+    }
     const data = await res.json();
     const words = Array.isArray(data.words) ? data.words : [];
     const segments = words.length
@@ -277,6 +285,79 @@ function styleCaption(caption, style) {
   return `drawtext=text='${text}':fontsize=44:fontcolor=white:borderw=5:bordercolor=black:x=(w-text_w)/2:y=h-160`;
 }
 
+// Submit a RenderIO yt-dlp+ffmpeg job and wait for one named output file.
+async function renderioRun(body, outKey, key, timeoutMs = 90000) {
+  const doSubmit = () => fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
+    body: JSON.stringify(body),
+  });
+  let submit = await doSubmit().catch(() => null);
+  if (!submit || submit.status === 429 || submit.status >= 500) {
+    await new Promise(r => setTimeout(r, 1500));
+    submit = await doSubmit();
+  }
+  if (!submit.ok) {
+    const t = await submit.text();
+    throw new Error('renderio submit ' + submit.status + ' ' + t.slice(0, 160));
+  }
+  const { command_id } = await submit.json();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1000));
+    const poll = await fetch('https://renderio.dev/api/v1/commands/' + command_id, { headers: { 'X-API-KEY': key } });
+    const result = await poll.json().catch(() => ({}));
+    if (result.status === 'SUCCESS') {
+      const file = result.output_files?.[outKey];
+      const out = file?.storage_url || file?.external_uri;
+      if (!out) throw new Error('renderio no file');
+      return out;
+    }
+    if (result.status === 'FAILED') throw new Error(result.error_message || 'renderio failed');
+  }
+  throw new Error('renderio timeout');
+}
+
+// Whisper fallback when YouTube captions can't be fetched (YouTube blocks Vercel IPs):
+// RenderIO pulls just the audio (mono 16 kHz, 32 kbps mp3 => ~14 MB/hour), we download
+// it and send it to Groq Whisper for word timestamps. Capped at AUDIO_CAP_SEC so the
+// file stays under Groq's 25 MB upload limit.
+const AUDIO_CAP_SEC = 90 * 60;
+const GROQ_MAX_BYTES = 25 * 1024 * 1024;
+async function audioTranscript(url, timeoutMs) {
+  const rio = process.env.RENDERIO_API_KEY;
+  if (!rio || !process.env.GROQ_API_KEY) return EMPTY_TRANSCRIPT;
+  const t0 = Date.now();
+  const audioUrl = await renderioRun({
+    input_urls: { in_video: url },
+    ffmpeg_command: `-i {{in_video}} -t ${AUDIO_CAP_SEC} -map 0:a:0 -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k {{out_audio}}`,
+    output_files: { out_audio: 'audio.mp3' },
+  }, 'out_audio', rio, timeoutMs);
+  const r = await fetch(audioUrl, { cache: 'no-store' });
+  if (!r.ok) throw new Error('audio download ' + r.status);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > GROQ_MAX_BYTES) throw new Error('audio too large for Whisper');
+  const t1 = Date.now();
+  const tr = await transcribeBuffer(buf);
+  console.log('audio transcript', { extractMs: t1 - t0, whisperMs: Date.now() - t1, bytes: buf.length, words: tr.segments.length });
+  return tr;
+}
+
+// Transcripts are cached per video for a week so repeat runs skip extraction.
+const trKey = (url) => 'tr:' + (youtubeId(url) || String(url).trim());
+async function getCachedTranscript(url) {
+  if (!kvEnabled) return null;
+  const v = await kvGetJson(trKey(url));
+  if (!v?.s?.length) return null;
+  const segments = v.s.map(([start, end, text]) => ({ start, end, text }));
+  return { text: segments.map(x => x.text).join(' '), segments };
+}
+async function setCachedTranscript(url, tr) {
+  if (!kvEnabled || !tr?.segments?.length) return;
+  const s = tr.segments.map(x => [Math.round(x.start * 100) / 100, Math.round(x.end * 100) / 100, x.text]);
+  await kvSetJson(trKey(url), { s }, 7 * 24 * 3600);
+}
+
 async function renderioCut(url, start, length, key, caption, vertical, opts = {}) {
   // Face-biased crop: prefer the upper-center of the frame where speakers usually sit.
   const frame = opts.crop || (vertical
@@ -302,38 +383,7 @@ async function renderioCut(url, start, length, key, caption, vertical, opts = {}
         ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(length) || 30} -vf "${vf}" -map 0:v:0 -map 0:a:0 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k -ac 2 -movflags +faststart {{out_clip}}`,
         output_files: { out_clip: 'clip.mp4' },
       };
-  const doSubmit = () => fetch('https://renderio.dev/api/v1/run-ytdlp-command', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
-    body: JSON.stringify(body),
-  });
-  // Retry once on network errors, 429 or 5xx.
-  let submit = await doSubmit().catch(() => null);
-  if (!submit || submit.status === 429 || submit.status >= 500) {
-    await new Promise(r => setTimeout(r, 1500));
-    submit = await doSubmit();
-  }
-  if (!submit.ok) {
-    const t = await submit.text();
-    throw new Error('renderio submit ' + submit.status + ' ' + t.slice(0, 160));
-  }
-  const { command_id } = await submit.json();
-  const deadline = Date.now() + 90000;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1000));
-    const poll = await fetch('https://renderio.dev/api/v1/commands/' + command_id, {
-      headers: { 'X-API-KEY': key },
-    });
-    const result = await poll.json();
-    if (result.status === 'SUCCESS') {
-      const file = result.output_files?.out_clip;
-      const play = file?.storage_url || file?.external_uri;
-      if (!play) throw new Error('renderio no file');
-      return play;
-    }
-    if (result.status === 'FAILED') throw new Error(result.error_message || 'renderio failed');
-  }
-  throw new Error('renderio timeout');
+  return renderioRun(body, 'out_clip', key, 90000);
 }
 
 async function downloadSource(url, dir) {
@@ -573,13 +623,24 @@ export async function POST(request) {
         return;
       }
       // Tell the client right away that work has started; setup happens below.
+      const startedAt = Date.now();
       send({ type: 'start', total: count });
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
-      ctx.transcript = await fetchTranscript(videoUrl);
+      const cachedTr = await getCachedTranscript(videoUrl).catch(() => null);
+      ctx.transcript = cachedTr || await fetchTranscript(videoUrl);
       try {
         if (process.env.RENDERIO_API_KEY) {
-          // RenderIO handles download + cut. Skip Tunelio.
+          // RenderIO handles download + cut. If YouTube captions were blocked, get
+          // word timestamps from the audio via RenderIO + Groq Whisper instead.
+          if (!ctx.transcript?.segments?.length) {
+            send({ type: 'status', step: 'transcript', detail: 'audio' });
+            const budget = Math.max(20000, 150000 - (Date.now() - startedAt));
+            ctx.transcript = await audioTranscript(videoUrl, budget).catch((e) => {
+              console.warn('audio transcript failed', e?.message);
+              return ctx.transcript || EMPTY_TRANSCRIPT;
+            });
+          }
         } else if (ctx.dir) {
           send({ type: 'status', step: 'download' });
           const dl = await downloadSource(videoUrl, ctx.dir);
@@ -598,8 +659,12 @@ export async function POST(request) {
         }
       } catch {}
 
+      if (!cachedTr && ctx.transcript?.segments?.length) setCachedTranscript(videoUrl, ctx.transcript).catch(() => {});
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
-      const scored = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count) : null;
+      let scored = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count) : null;
+      if (!scored && ctx.transcript?.text && Date.now() - startedAt < 170000) {
+        scored = await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count); // one retry
+      }
       const base = scored?.clips?.length ? scored.clips.slice(0, count).map(c => ({ ...c, scored: true })) : unscoredClips(count);
 
       send({ type: 'status', step: 'cutting', total: base.length });
