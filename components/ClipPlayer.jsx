@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import ViralScoreMeter, { scoreTier } from './ViralScoreMeter';
+import ClipEditor from './ClipEditor';
 
 const FORMAT_LABEL = { shorts_9_16: '9:16', landscape_16_9: '16:9', square_1_1: '1:1' };
 const ASPECT = { shorts_9_16: 'aspect-[9/12]', landscape_16_9: 'aspect-[16/10]', square_1_1: 'aspect-square' };
@@ -48,8 +49,10 @@ export default function ClipPlayer({ clip, compact = false }) {
   const [socialCaption, setSocialCaption] = useState(clip.socialCaption || clip.caption || '');
   const [aiPrompt, setAiPrompt] = useState(clip.aiPrompt || clip.hook || '');
   const videoRef = useRef(null);
+  const [renderedUrl, setRenderedUrl] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
 
-  const videoSrc = srcIndex === 0 && clip.videoUrl ? clip.videoUrl : SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
+  const videoSrc = renderedUrl || (srcIndex === 0 && clip.videoUrl ? clip.videoUrl : null) || SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
 
   const copy = (text, key) => {
     if (!text) return;
@@ -169,7 +172,10 @@ export default function ClipPlayer({ clip, compact = false }) {
           <p className="line-clamp-2 text-xs font-bold text-white">{title}</p>
           <div className="flex items-center justify-between text-[10px] text-muted">
             <span style={{ color }}>{label}</span>
-            <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
+            <span className="flex gap-2">
+              {clip.source && !clip.preview && <button type="button" onClick={() => setEditorOpen(true)} className="font-semibold text-soft hover:text-lime">Edit</button>}
+              <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
+            </span>
           </div>
         </div>
       ) : (
@@ -236,6 +242,7 @@ export default function ClipPlayer({ clip, compact = false }) {
         </div>
       </div>
       )}
+      {editorOpen && <ClipEditor clip={clip} videoUrl={videoSrc} onRendered={(u) => { setRenderedUrl(u); setSrcIndex(0); videoRef.current?.load?.(); }} onClose={() => setEditorOpen(false)} />}
     </article>
   );
 }

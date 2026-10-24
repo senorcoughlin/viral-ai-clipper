@@ -182,7 +182,7 @@ function HomeInner() {
           res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, faceCrop }),
+          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
           });
         } catch {
           throw new Error('Could not reach the server. Check your connection and retry.');
