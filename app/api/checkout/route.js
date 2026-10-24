@@ -4,6 +4,7 @@ const CREDIT_PACKS = {
   credits_10: { priceEnv: 'STRIPE_PRICE_CREDITS_10', credits: 10, mode: 'payment' },
   credits_25: { priceEnv: 'STRIPE_PRICE_CREDITS_25', credits: 25, mode: 'payment' },
   credits_50: { priceEnv: 'STRIPE_PRICE_CREDITS_50', credits: 50, mode: 'payment' },
+  credits_100: { priceEnv: 'STRIPE_PRICE_CREDITS_100', credits: 100, mode: 'payment' },
 };
 
 export async function POST(request) {

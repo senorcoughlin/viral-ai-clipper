@@ -28,7 +28,7 @@ const LENGTHS = [
 ];
 const CLIP_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }));
 const HOOKS = ['“Nobody tells you this about…”', '“I was wrong about…”', '“The $40k mistake”', '“Watch till the end”', '“This changed everything”', '“POV: you finally…”', '“Stop doing this”', '“3 things I wish I knew”'];
-const PRICE = { monthly: { amount: '$29.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly' } };
+const PRICE = { monthly: { amount: '$19.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly' } };
 
 /* ---------- small icons (inline SVG, no deps) ---------- */
 const Bolt = ({ className = '', fill = '#0A0A0F', size = 18 }) => (
@@ -694,7 +694,7 @@ function HomeInner() {
             <div className="mt-2 inline-flex rounded-full border border-line2 bg-surface p-1">
               <button type="button" onClick={() => setBilling('monthly')} className={`chip h-[34px] border-0 ${billing === 'monthly' ? 'chip-on' : ''}`}>Monthly</button>
               <button type="button" onClick={() => setBilling('yearly')} className={`chip h-[34px] border-0 ${billing === 'yearly' ? 'chip-on' : ''}`}>
-                Yearly <span className="ml-1 inline-flex h-5 items-center rounded-full bg-lime px-1.5 text-[11px] font-bold text-ink">−43%</span>
+                Yearly <span className="ml-1 inline-flex h-5 items-center rounded-full bg-lime px-1.5 text-[11px] font-bold text-ink">−17%</span>
               </button>
             </div>
           </div>
@@ -768,15 +768,16 @@ function HomeInner() {
                 <li className="flex items-center gap-2"><Check />All AI styles</li>
               </ul>
               <div className="flex flex-col gap-2.5 sm:flex-row">
-                <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 44%</span></button>
-                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$29.99 / month</button>
+                <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
+                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>
               </div>
               <div className="border-t border-line pt-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · under $30</p>
-                <div className="grid grid-cols-3 gap-2">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · from $9</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <button onClick={() => handleUpgrade('credits_10')} className="btn-ghost h-16 flex-col text-xs">10 credits<span className="text-[11px] text-muted">$9</span><span className="text-[10px] text-muted">base</span></button>
                   <button onClick={() => handleUpgrade('credits_25')} className="btn-ghost h-16 flex-col text-xs">25 credits<span className="text-[11px] text-muted">$19</span><span className="text-[10px] font-bold text-lime">save 16%</span></button>
                   <button onClick={() => handleUpgrade('credits_50')} className="btn-ghost h-16 flex-col text-xs">50 credits<span className="text-[11px] text-muted">$29</span><span className="text-[10px] font-bold text-lime">save 36%</span></button>
+                  <button onClick={() => handleUpgrade('credits_100')} className="btn-ghost h-16 flex-col text-xs">100 credits<span className="text-[11px] text-muted">$49</span><span className="text-[10px] font-bold text-lime">save 46%</span></button>
                 </div>
                 <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation after your free clips. Bigger packs cost less per clip.</p>
               </div>
