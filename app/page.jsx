@@ -384,8 +384,8 @@ function HomeInner() {
 
       <main id="top" className="relative mx-auto max-w-6xl px-5">
         {/* HERO */}
-        <section className="grid items-center gap-12 pb-20 pt-16 md:grid-cols-[1.1fr_.9fr]">
-          <div className="flex flex-col gap-6">
+        <section className="grid grid-cols-1 items-center gap-12 pb-20 pt-16 md:grid-cols-[1.1fr_.9fr]">
+          <div className="flex min-w-0 flex-col gap-6">
             <div className="inline-flex h-8 items-center gap-2 self-start rounded-full border border-line2 bg-surface pl-1.5 pr-3 text-[13px] font-medium text-soft">
               <span className="inline-flex h-[22px] items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">NEW</span>
               Batch mode · paste up to 10 links at once
