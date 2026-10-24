@@ -8,6 +8,8 @@ export default function EasterEgg({ children, onUnlocked }) {
   const [pw, setPw] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [needEmail, setNeedEmail] = useState(false);
+  const [email, setEmail] = useState('');
   const tap = () => {
     const now = Date.now();
     taps.current = [...taps.current.filter(t => now - t < 2500), now];
@@ -17,6 +19,7 @@ export default function EasterEgg({ children, onUnlocked }) {
     e.preventDefault(); setBusy(true);
     const d = await fetch('/api/egg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) }).then(r => r.json()).catch(() => ({ message: 'Something went wrong' }));
     setBusy(false); setMsg(d.message || '');
+    if (d.needEmail) { setNeedEmail(true); if (d.email) setEmail(d.email); }
     if (d.success) onUnlocked?.();
   };
   return (
@@ -29,6 +32,12 @@ export default function EasterEgg({ children, onUnlocked }) {
             <p className="mb-4 text-sm text-soft">Enter the secret password.</p>
             <input type="password" autoFocus value={pw} onChange={e => setPw(e.target.value)} className="mb-3 h-11 w-full rounded-xl border border-line2 bg-ink px-3 text-white outline-none" />
             {msg && <p className="mb-3 text-sm text-lime">{msg}</p>}
+            {needEmail && (
+              <div className="mb-3 flex gap-2">
+                <input type="email" placeholder="you@email.com" value={email} onChange={e => setEmail(e.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border border-line2 bg-ink px-3 text-sm text-white outline-none" />
+                <button type="button" disabled={busy || !email} onClick={async () => { setBusy(true); const d = await fetch('/api/auth/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(r => r.json()).catch(() => ({})); setBusy(false); setMsg(d.success ? `Link sent to ${email}. Open it on this phone, then tap the bolt 7 times again.` : (d.message || 'Could not send the link')); }} className="btn-ghost h-10 px-3 text-xs">Send link</button>
+              </div>
+            )}
             <div className="flex gap-2">
               <button disabled={busy || !pw} className="btn-lime h-10 flex-1 text-sm">{busy ? 'Checking…' : 'Unlock'}</button>
               <button type="button" onClick={() => setOpen(false)} className="btn-ghost h-10 px-4 text-sm">Close</button>

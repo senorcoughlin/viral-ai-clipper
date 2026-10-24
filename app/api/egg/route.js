@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { paidEmail } from '../../../lib/session';
+import { paidEmail, getSession } from '../../../lib/session';
 import { addCredits } from '../../../lib/billing';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 
@@ -15,7 +15,10 @@ export async function POST(request) {
   const { password } = await request.json().catch(() => ({}));
   if (!same(password || '', secret)) return NextResponse.json({ success: false, message: 'Wrong password' }, { status: 401 });
   const email = paidEmail(request);
-  if (!email) return NextResponse.json({ success: false, message: 'Correct! Sign in with your email first (⚡ menu), then try again to claim it.' }, { status: 401 });
+  if (!email) {
+    const s = getSession(request);
+    return NextResponse.json({ success: false, needEmail: true, email: s?.email || '', message: 'Correct! To claim it, confirm your email: we\'ll send you a sign-in link. Open it, then come back and unlock again.' }, { status: 401 });
+  }
   const r = await addCredits(email, 500, `egg:${email}`);
   if (r.duplicate) return NextResponse.json({ success: false, message: 'You already claimed this one.', credits: r.credits }, { status: 409 });
   return NextResponse.json({ success: true, message: '500 free generations unlocked!', credits: r.credits });
