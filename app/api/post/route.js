@@ -11,6 +11,32 @@ const TARGETS = {
   x: 'https://x.com/compose/post',
 };
 const MAX_BYTES = 256 * 1024 * 1024;
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+// Offset (ms) of a time zone at a given instant.
+function tzOffset(tz, date) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(date).map(x => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - date.getTime();
+}
+
+// "Tue 7pm" -> next such moment (at least 30 min out) in the viewer's time zone, as a Date.
+function nextBestTime(bestTime, tz) {
+  const m = String(bestTime || '').toLowerCase().match(/(sun|mon|tue|wed|thu|fri|sat)[a-z]*\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (!m) return null;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch { tz = 'America/New_York'; }
+  let hour = Number(m[2]) % 12 + (m[4] === 'pm' ? 12 : 0);
+  if (!m[4] && Number(m[2]) >= 12) hour = Number(m[2]);
+  const min = Number(m[3] || 0);
+  const now = new Date();
+  const localNow = new Date(now.getTime() + tzOffset(tz, now)); // wall clock as UTC fields
+  for (let add = 0; add <= 7; add++) {
+    const d = new Date(Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate() + add, hour, min));
+    if (d.getUTCDay() !== DAYS.indexOf(m[1])) continue;
+    const utc = new Date(d.getTime() - tzOffset(tz, d));
+    if (utc.getTime() > now.getTime() + 30 * 60000) return utc;
+  }
+  return null;
+}
 
 // One-click post prep. When the visitor connected YouTube (httpOnly cookies), the
 // clip is uploaded server-side as a private video and the Studio edit link is
@@ -18,7 +44,9 @@ const MAX_BYTES = 256 * 1024 * 1024;
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { platform = 'youtube', caption = '', videoUrl = '', title = 'Clip' } = body;
+    const { platform = 'youtube', caption = '', videoUrl = '', title = 'Clip', schedule = false, bestTime = '', tz = 'America/New_York' } = body;
+    const publishAt = schedule ? nextBestTime(bestTime, tz) : null;
+    if (schedule && !publishAt) return NextResponse.json({ success: false, message: 'Could not read the best time for this clip.' }, { status: 400 });
     if (!videoUrl) return NextResponse.json({ success: false, message: 'Missing video' }, { status: 400 });
     const open = NextResponse.json({ success: true, data: { mode: 'open', url: TARGETS[platform] || TARGETS.youtube, caption } });
     if (platform !== 'youtube') return open;
@@ -50,7 +78,7 @@ export async function POST(request) {
       },
       body: JSON.stringify({
         snippet: { title: String(title).slice(0, 90), description: String(caption).slice(0, 4000), categoryId: '22' },
-        status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
+        status: { privacyStatus: 'private', selfDeclaredMadeForKids: false, ...(publishAt ? { publishAt: publishAt.toISOString() } : {}) },
       }),
     });
     const uploadUrl = init.headers.get('location');
@@ -64,7 +92,7 @@ export async function POST(request) {
       console.warn('youtube upload failed', up.status);
       return open;
     }
-    const res = NextResponse.json({ success: true, data: { mode: 'youtube-uploaded', videoId: video.id, url: `https://studio.youtube.com/video/${video.id}/edit`, caption } });
+    const res = NextResponse.json({ success: true, data: { mode: publishAt ? 'youtube-scheduled' : 'youtube-uploaded', videoId: video.id, publishAt: publishAt?.toISOString() || null, url: `https://studio.youtube.com/video/${video.id}/edit`, caption } });
     if (refreshed?.access_token) res.cookies.set('yt_access', refreshed.access_token, { ...COOKIE_OPTS, maxAge: Math.max(60, Number(refreshed.expires_in || 3600) - 60) });
     return res;
   } catch (e) {
