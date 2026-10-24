@@ -628,18 +628,21 @@ export async function POST(request) {
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
       const cachedTr = await getCachedTranscript(videoUrl).catch(() => null);
-      ctx.transcript = cachedTr || await fetchTranscript(videoUrl);
+      // Cold run: start the RenderIO audio -> Whisper path at the same time as the
+      // YouTube caption fetch (captions are usually blocked from Vercel). If captions
+      // win, the audio result is simply ignored.
+      let audioP = null;
+      if (!cachedTr && process.env.RENDERIO_API_KEY && process.env.GROQ_API_KEY) {
+        audioP = audioTranscript(videoUrl, 150000).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
+      }
+      ctx.transcript = cachedTr || (ytId ? await fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT);
       try {
         if (process.env.RENDERIO_API_KEY) {
-          // RenderIO handles download + cut. If YouTube captions were blocked, get
-          // word timestamps from the audio via RenderIO + Groq Whisper instead.
-          if (!ctx.transcript?.segments?.length) {
+          // RenderIO handles download + cut. If captions were blocked, use the
+          // Whisper word timestamps that are already being produced.
+          if (!ctx.transcript?.segments?.length && audioP) {
             send({ type: 'status', step: 'transcript', detail: 'audio' });
-            const budget = Math.max(20000, 150000 - (Date.now() - startedAt));
-            ctx.transcript = await audioTranscript(videoUrl, budget).catch((e) => {
-              console.warn('audio transcript failed', e?.message);
-              return ctx.transcript || EMPTY_TRANSCRIPT;
-            });
+            ctx.transcript = await audioP;
           }
         } else if (ctx.dir) {
           send({ type: 'status', step: 'download' });
