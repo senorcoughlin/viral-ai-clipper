@@ -1,4 +1,5 @@
 'use client';
+import FeedbackNudge from '../components/FeedbackNudge';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import SeeItWork from '../components/SeeItWork';
@@ -630,6 +631,7 @@ function HomeInner() {
                   </div>
                 </div>
               )}
+              {justFinished && !isProcessing && <FeedbackNudge />}
               {notice && !isProcessing && (
                 <p role="status" className="rounded-card border border-line2 bg-surface p-3 text-sm text-soft">{notice}</p>
               )}
@@ -819,7 +821,7 @@ function HomeInner() {
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14] pb-24 md:pb-0">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
           <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
-          <span className="flex gap-5"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
+          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
 
