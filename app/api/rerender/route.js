@@ -26,9 +26,19 @@ export async function POST(request) {
     .filter(x => x.w.trim() && Number.isFinite(x.a) && Number.isFinite(x.b) && x.a >= 0 && x.b >= x.a && x.a <= len);
   const vertical = (body.format || 'shorts_9_16') === 'shorts_9_16';
   const crop = typeof body.crop === 'string' && SAFE_CROP.test(body.crop) ? body.crop : null;
+  const hook = String(body.hook || '').slice(0, 60);
+  // Facecam/reaction overlay: only our own Blob uploads or direct https .mp4/.mov/.webm files.
+  let overlayUrl = null;
+  if (body.overlayUrl) {
+    const o = validateVideoUrl(body.overlayUrl);
+    if (!o || !o.startsWith('https://') || !(isBlobUrl(o) || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(o))) {
+      return NextResponse.json({ success: false, message: 'Facecam must be an uploaded video or a direct https link to an MP4/MOV/WebM file.' }, { status: 400 });
+    }
+    overlayUrl = toFetchable(o);
+  }
   try {
     const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, {
-      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), direct: isBlobUrl(source), timeoutMs: 105000,
+      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), hook, overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000,
     });
     return NextResponse.json({ success: true, videoUrl: url });
   } catch (e) {

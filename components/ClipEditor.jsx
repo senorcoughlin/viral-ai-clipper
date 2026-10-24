@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { withCredit, reuseRisks, PreUploadWarning } from './PostCheck';
 
 export const BRAND_COLORS = { white: '#FFFFFF', yellow: '#FFE600', lime: '#C6FF3D', cyan: '#3DE0FF', pink: '#FF4D9A', orange: '#FFB64D' };
 
@@ -20,7 +21,32 @@ function retime(original, text) {
   return next.map((w, i) => ({ w, a: +(a0 + i * step).toFixed(2), b: +(a0 + (i + 1) * step).toFixed(2) }));
 }
 
-export default function ClipEditor({ clip, videoUrl, onRendered, onClose }) {
+export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onTransform, onRendered, onClose }) {
+  const [hook, setHook] = useState(transform.hook || '');
+  const [overlayUrl, setOverlayUrl] = useState('');
+  const [script, setScript] = useState('');
+  const [commentary, setCommentary] = useState(!!transform.commentary);
+  const [warn, setWarn] = useState(null);
+  const setT = patch => onTransform?.({ ...transform, ...patch });
+  const writeCommentary = async () => {
+    setBusy('script'); setMsg('');
+    try {
+      const input = [clip.title, clip.hook, (Array.isArray(clip.words) ? clip.words.map(w => w.w).join(' ') : clip.caption)].filter(Boolean).join('\n').slice(0, 3500);
+      const d = await (await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'commentary', input: input || 'a short stream clip' }) })).json();
+      if (!d.success) throw new Error(d.message || 'Could not write a script');
+      setScript(d.result?.script || d.result?.text || '');
+      if (!hook && d.result?.hook) setHook(String(d.result.hook).slice(0, 60));
+    } catch (e) { setMsg(e.message); } finally { setBusy(''); }
+  };
+  const uploadCam = async (file) => {
+    if (!file) return;
+    setBusy('cam'); setMsg('Uploading facecam…');
+    try {
+      const { upload } = await import('@vercel/blob/client');
+      const blob = await upload(`uploads/cam_${file.name.replace(/[^\w.-]+/g, '_')}`, file, { access: 'private', handleUploadUrl: '/api/upload' });
+      setOverlayUrl(blob.url); setMsg('Facecam ready. Re-render to add it.');
+    } catch (e) { setMsg(e.message || 'Upload failed'); } finally { setBusy(''); }
+  };
   const words = Array.isArray(clip.words) ? clip.words : [];
   const [text, setText] = useState(words.map(w => w.w).join(' '));
   const [brand, setBrand] = useState({ color: 'white', size: 'm', position: 'bottom', upper: true });
@@ -44,21 +70,25 @@ export default function ClipEditor({ clip, videoUrl, onRendered, onClose }) {
     try {
       const res = await fetch('/api/rerender', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: clip.source, startSec: clip.startSec, endSec: clip.endSec, format: clip.format, style: clip.style, crop: clip.crop, caption: words.length ? '' : text, words: retime(words, text), brand }),
+        body: JSON.stringify({ source: clip.source, startSec: clip.startSec, endSec: clip.endSec, format: clip.format, style: clip.style, crop: clip.crop, caption: words.length ? '' : text, words: retime(words, text), brand, hook: hook.trim(), overlayUrl: overlayUrl.trim() || undefined }),
       });
       const d = await res.json();
       if (!d.success) throw new Error(d.message || 'Re-render failed');
       onRendered?.(d.videoUrl);
+      setT({ hook: hook.trim(), overlay: !!overlayUrl.trim() || transform.overlay });
       setMsg('Done — the clip now uses your edited captions.');
     } catch (e) { setMsg(e.message); } finally { setBusy(''); }
   };
 
-  const schedule = async () => {
+  const schedule = async (checked = false) => {
+    const risks = reuseRisks(clip, { ...transform, commentary });
+    if (!checked && risks.length) { setWarn(risks); return; }
+    setWarn(null);
     setBusy('schedule'); setMsg('Scheduling on YouTube…');
     try {
       const res = await fetch('/api/post', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'youtube', schedule: true, bestTime: clip.bestTime, caption: [clip.socialCaption || clip.caption, clip.hashtags].filter(Boolean).join('\n\n'), videoUrl, title: clip.title, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        body: JSON.stringify({ platform: 'youtube', schedule: true, bestTime: clip.bestTime, caption: withCredit([clip.socialCaption || clip.caption, clip.hashtags].filter(Boolean).join('\n\n'), credit, !!credit), videoUrl, title: clip.title, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       });
       const d = await res.json();
       if (d?.data?.mode === 'youtube-scheduled') {
@@ -93,11 +123,24 @@ export default function ClipEditor({ clip, videoUrl, onRendered, onClose }) {
             <Chip on={brand.upper} onClick={() => setBrand({ ...brand, upper: !brand.upper })}>UPPERCASE</Chip></div>
           <button type="button" onClick={saveBrand} className="btn-ghost h-9 self-start px-3 text-xs">Save as my brand kit</button>
         </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[.08em] text-muted">Transform (helps with YouTube&apos;s reused content rules)</span>
+          <input value={hook} maxLength={60} onChange={e => setHook(e.target.value)} placeholder="Hook text pinned at the top (optional)" className="rounded-input border border-line2 bg-ink px-3 py-2 text-sm text-fg outline-none focus:border-lime" />
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={overlayUrl} onChange={e => setOverlayUrl(e.target.value)} placeholder="Facecam / reaction video link (optional)" className="min-w-0 flex-1 rounded-input border border-line2 bg-ink px-3 py-2 text-xs text-fg outline-none focus:border-lime" />
+            <label className="btn-ghost h-9 cursor-pointer px-3 text-xs leading-9">{busy === 'cam' ? 'Uploading…' : 'Upload facecam'}<input type="file" accept="video/mp4,video/quicktime,video/webm" className="hidden" onChange={e => uploadCam(e.target.files?.[0])} /></label>
+          </div>
+          <button type="button" disabled={!!busy} onClick={writeCommentary} className="btn-ghost h-9 self-start px-3 text-xs">{busy === 'script' ? 'Writing…' : 'Write a commentary script with AI'}</button>
+          {script && <textarea value={script} onChange={e => setScript(e.target.value)} rows={5} className="rounded-input border border-line2 bg-ink px-3 py-2 text-xs text-fg outline-none" />}
+          {script && <p className="text-[11px] text-muted">Record this in your own voice (or rewrite it) and add it as a voiceover in your editor before posting.</p>}
+          <label className="flex items-center gap-2 text-xs text-soft"><input type="checkbox" checked={commentary} onChange={e => { setCommentary(e.target.checked); setT({ commentary: e.target.checked }); }} /> I added my own commentary to this clip</label>
+        </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={!!busy} onClick={rerender} className="btn-lime h-10 flex-1 text-sm">{busy === 'render' ? 'Rendering…' : 'Re-render clip'}</button>
-          {clip.bestTime && <button type="button" disabled={!!busy} onClick={schedule} className="btn-ghost h-10 flex-1 text-sm">{busy === 'schedule' ? 'Scheduling…' : `Post at best time (${clip.bestTime})`}</button>}
+          {clip.bestTime && <button type="button" disabled={!!busy} onClick={() => schedule()} className="btn-ghost h-10 flex-1 text-sm">{busy === 'schedule' ? 'Scheduling…' : `Post at best time (${clip.bestTime})`}</button>}
         </div>
         {msg && <p role="status" className="text-xs text-soft">{msg}</p>}
+        {warn && <PreUploadWarning risks={warn} onCancel={() => setWarn(null)} onProceed={() => schedule(true)} />}
       </div>
     </div>
   );

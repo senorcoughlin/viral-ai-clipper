@@ -13,6 +13,7 @@ const TOOLS = {
   titles: 'Generate 10 punchy titles under 60 characters. Return a JSON array of strings only.',
   rewrite: 'Rewrite the text to be sharper, more spoken, and more viral. Return JSON: {"versions":["...","...","..."]}',
   cta: 'Write 6 strong CTAs for the end of a short. Return a JSON array of strings only.',
+  commentary: 'Write an original commentary voiceover script (about 20-40 seconds spoken) a clipper can record over this clip: add context, a personal take, and reaction, not a transcript repeat. Return JSON: {"script":"...","hook":"on-screen hook under 8 words"}',
   thumbnails: 'Write 5 image prompts for a high-click YouTube/TikTok thumbnail. Return JSON: {"prompts":["..."]}',
 };
 

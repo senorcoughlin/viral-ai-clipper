@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ViralScoreMeter, { scoreTier } from './ViralScoreMeter';
 import ClipEditor from './ClipEditor';
+import { useCredit, withCredit, autoCreditOn, setAutoCredit, creditLine, reuseRisks, PreUploadWarning } from './PostCheck';
 
 const FORMAT_LABEL = { shorts_9_16: '9:16', landscape_16_9: '16:9', square_1_1: '1:1' };
 const ASPECT = { shorts_9_16: 'aspect-[9/12]', landscape_16_9: 'aspect-[16/10]', square_1_1: 'aspect-square' };
@@ -51,6 +52,11 @@ export default function ClipPlayer({ clip, compact = false }) {
   const videoRef = useRef(null);
   const [renderedUrl, setRenderedUrl] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
+  const [transform, setTransform] = useState({ hook: '', overlay: false, commentary: false });
+  const [pendingPost, setPendingPost] = useState(null);
+  const [creditOn, setCreditOn] = useState(true);
+  const credit = useCredit(clip.source);
+  useEffect(() => { setCreditOn(autoCreditOn()); }, []);
 
   const videoSrc = renderedUrl || (srcIndex === 0 && clip.videoUrl ? clip.videoUrl : null) || SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
 
@@ -90,13 +96,17 @@ export default function ClipPlayer({ clip, compact = false }) {
     }
   };
 
-  const postClip = async (platform) => {
+  const postClip = async (platform, checked = false) => {
+    const risks = platform === 'youtube' ? reuseRisks(clip, transform) : [];
+    if (!checked && risks.length) { setPendingPost({ platform, risks }); return; }
+    setPendingPost(null);
+    const text = withCredit(socialCaption, credit, creditOn);
     try {
-      copy(socialCaption, platform);
+      copy(text, platform);
       const res = await fetch('/api/post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform, caption: socialCaption, videoUrl: videoSrc, title }),
+        body: JSON.stringify({ platform, caption: text, videoUrl: videoSrc, title }),
       });
       const data = await res.json();
       if (data.success && data.data?.url) window.open(data.data.url, '_blank');
@@ -223,13 +233,13 @@ export default function ClipPlayer({ clip, compact = false }) {
         <Bar label="Pacing" pct={pacePct} color={color} />
 
         <div className="flex flex-wrap gap-2 pt-1">
-          <button type="button" onClick={() => copy(socialCaption, 'cap')} className="btn-lime h-10 flex-1 text-sm">
+          <button type="button" onClick={() => copy(withCredit(socialCaption, credit, creditOn), 'cap')} className="btn-lime h-10 flex-1 text-sm">
             {copied === 'cap' ? 'Copied!' : 'Copy caption'}
           </button>
           <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-10 px-3 text-xs">TikTok</button>
-          <button type="button" onClick={() => { copy(socialCaption, 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
+          <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
           <button type="button" onClick={() => postClip('youtube')} className="btn-ghost h-10 px-3 text-xs">Shorts</button>
-          <button type="button" onClick={() => { copy(socialCaption, 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
+          <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
           <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}
           </a>
@@ -242,7 +252,14 @@ export default function ClipPlayer({ clip, compact = false }) {
         </div>
       </div>
       )}
-      {editorOpen && <ClipEditor clip={clip} videoUrl={videoSrc} onRendered={(u) => { setRenderedUrl(u); setSrcIndex(0); videoRef.current?.load?.(); }} onClose={() => setEditorOpen(false)} />}
+      {credit && (
+        <label className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-[11px] text-muted">
+          <input type="checkbox" checked={creditOn} onChange={e => { setCreditOn(e.target.checked); setAutoCredit(e.target.checked); }} />
+          <span>Add credit when posting: <span className="text-soft">{creditLine(credit)}</span></span>
+        </label>
+      )}
+      {pendingPost && <PreUploadWarning risks={pendingPost.risks} onCancel={() => setPendingPost(null)} onProceed={() => postClip(pendingPost.platform, true)} />}
+      {editorOpen && <ClipEditor clip={clip} videoUrl={videoSrc} credit={creditOn ? credit : null} transform={transform} onTransform={setTransform} onRendered={(u) => { setRenderedUrl(u); setSrcIndex(0); videoRef.current?.load?.(); }} onClose={() => setEditorOpen(false)} />}
     </article>
   );
 }
