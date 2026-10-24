@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'edge';
-export const alt = 'Viral AI Clipper — turn one video into ten viral clips';
+export const alt = 'Viral AI Clipper — turn one video into up to 8 viral clips';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
