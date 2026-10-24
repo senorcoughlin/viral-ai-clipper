@@ -300,7 +300,7 @@ async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false) {
     const data = await res.json();
     meterGemini('face', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
-    const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x >= 0 && x <= 1).sort((a, b) => a - b);
+    const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x > 0.02 && x < 0.98) // 0/1 = model's "no face".sort((a, b) => a - b);
     console.log('face track', { ms: Date.now() - t0, xs });
     if (!xs.length) return null;
     const cx = xs[Math.floor(xs.length / 2)];
