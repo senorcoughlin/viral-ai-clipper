@@ -28,7 +28,8 @@ async function youtubeDuration(id) {
     clearTimeout(t);
     if (!r.ok) return null;
     const html = await r.text();
-    if (/"playabilityStatus":\{"status":"(ERROR|LOGIN_REQUIRED|UNPLAYABLE)"/.test(html) && !/"lengthSeconds"/.test(html)) return 0;
+    // Only a hard ERROR means the video is gone; LOGIN_REQUIRED is often YouTube bot-checking our server IP.
+    if (/"playabilityStatus":\{"status":"ERROR"/.test(html) && !/"lengthSeconds"/.test(html)) return 0;
     const m = html.match(/"lengthSeconds":"(\d+)"/);
     return m ? Number(m[1]) : null;
   } catch { return null; }
