@@ -16,7 +16,7 @@ export async function syncClips(clips) {
   });
 }
 
-export default function AccountBar({ onChange }) {
+export default function AccountBar({ onChange, inline = false }) {
   const [session, setSession] = useState(null);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState('login');
@@ -25,7 +25,32 @@ export default function AccountBar({ onChange }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { setSession(readSession()); }, []);
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    const local = readSession();
+    setSession(local);
+    const q = new URLSearchParams(window.location.search);
+    const flag = q.get('signin');
+    if (flag) {
+      if (flag === 'expired') { setNotice('That sign-in link has expired or was already used. Request a new one.'); setMode('email'); setOpen(true); }
+      q.delete('signin');
+      const qs = q.toString();
+      window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+    }
+    if (!local) {
+      // Email-link sign-ins only set the httpOnly session cookie, so ask the server.
+      fetch('/api/account', { cache: 'no-store' }).then(r => r.json()).then(d => {
+        if (d?.signedIn && d.email) {
+          const next = { email: d.email, cookie: true };
+          localStorage.setItem('viral_account', JSON.stringify(next));
+          setSession(next);
+          if (flag === 'ok') setNotice('');
+          onChange?.(next);
+        }
+      }).catch(() => {});
+    }
+  }, []);
 
   function save(next) {
     if (next) localStorage.setItem('viral_account', JSON.stringify(next));
@@ -65,8 +90,8 @@ export default function AccountBar({ onChange }) {
 
   if (session) {
     return (
-      <div className="flex items-center gap-3 text-sm">
-        <span className="hidden max-w-[160px] truncate text-soft sm:inline">{session.email}</span>
+      <div className={`flex items-center gap-3 text-sm ${inline ? 'justify-between' : ''}`}>
+        <span className={`${inline ? '' : 'hidden sm:inline'} min-w-0 max-w-[180px] truncate text-soft`} title={session.email}>Signed in as <span className="text-fg">{session.email}</span></span>
         <button type="button" onClick={() => { fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout', email: session.email }) }).catch(() => {}).finally(() => save(null)); }} className="text-muted hover:text-fg">Log out</button>
       </div>
     );
@@ -74,10 +99,11 @@ export default function AccountBar({ onChange }) {
 
   return (
     <div className="relative">
+      {notice && <p className="mb-2 text-xs text-red-400">{notice}</p>}
       <button type="button" onClick={() => setOpen(v => !v)} className="text-sm font-medium text-soft hover:text-fg">Account</button>
       {open && (
-        <form onSubmit={submit} className="absolute right-0 top-9 z-30 w-72 rounded-card border border-line bg-surface p-4 shadow-card">
-          <div className="mb-3 flex gap-2 text-xs">
+        <form onSubmit={submit} className={inline ? 'mt-2 w-full rounded-card border border-line bg-surface p-3' : 'absolute right-0 top-9 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-line bg-surface p-4 shadow-card'}>
+          <div className="mb-3 flex flex-wrap gap-2 text-xs">
             <button type="button" onClick={() => setMode('login')} className={mode === 'login' ? 'text-lime' : 'text-muted'}>Log in</button>
             <button type="button" onClick={() => setMode('register')} className={mode === 'register' ? 'text-lime' : 'text-muted'}>Create account</button>
             <button type="button" onClick={() => setMode('email')} className={mode === 'email' ? 'text-lime' : 'text-muted'}>Email link</button>

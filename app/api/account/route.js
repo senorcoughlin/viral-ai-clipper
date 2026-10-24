@@ -106,3 +106,9 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'Something went wrong. Try again.' }, { status: 500 });
   }
 }
+
+// Who is signed in via the httpOnly session cookie (email-link / checkout sign-ins).
+export async function GET(request) {
+  const s = getSession(request);
+  return NextResponse.json(s ? { signedIn: true, email: s.email, verified: s.verified } : { signedIn: false }, { headers: { 'Cache-Control': 'no-store' } });
+}
