@@ -75,6 +75,35 @@ function HomeInner() {
   const [notice, setNotice] = useState('');
   const [expected, setExpected] = useState(0);
   const [billingEmail, setBillingEmail] = useState('');
+  const [uploading, setUploading] = useState(0);
+
+  // Upload straight from the browser to Vercel Blob, then use the blob URL as the source.
+  const handleUploadFile = async (file) => {
+    setError(null);
+    if (file.size > 500 * 1024 * 1024) { setError({ message: 'That file is over 500 MB. Trim it or export at a lower bitrate.' }); return; }
+    const secs = await new Promise(res => {
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.onloadedmetadata = () => { res(v.duration); URL.revokeObjectURL(v.src); };
+      v.onerror = () => res(0);
+      v.src = URL.createObjectURL(file);
+    });
+    if (secs > 120 * 60) { setError({ message: `That video is ${Math.round(secs / 60)} minutes long. The limit is 120 minutes.` }); return; }
+    try {
+      setUploading(1);
+      const { upload } = await import('@vercel/blob/client');
+      const blob = await upload(`uploads/${file.name.replace(/[^\w.-]+/g, '_')}`, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+        onUploadProgress: (p) => setUploading(Math.max(1, Math.round(p.percentage))),
+      });
+      setVideoUrl(blob.url);
+    } catch (e) {
+      setError({ message: e?.message || 'Upload failed. Try again.' });
+    } finally {
+      setUploading(0);
+    }
+  };
   const formRef = useRef(null);
 
   const searchParams = useSearchParams();
@@ -383,6 +412,10 @@ function HomeInner() {
                     aria-describedby="urls-hint"
                     className="min-w-0 flex-1 resize-none bg-transparent text-[15px] text-fg outline-none placeholder:text-muted"
                   />
+                  <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title="Upload an MP4 (up to 500 MB, 2 hours)">
+                    {uploading ? `Uploading ${uploading}%` : 'Upload MP4'}
+                    <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
+                  </label>
                 </div>
                 <button type="submit" disabled={isProcessing} className="btn-lime h-[52px] whitespace-nowrap px-5 text-[15px]">
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
