@@ -32,6 +32,7 @@ export async function POST(request) {
     return NextResponse.json({ success: true, videoUrl: url });
   } catch (e) {
     console.warn('rerender failed', e?.message);
+    if (e?.capacity) return NextResponse.json({ success: false, message: e.message }, { status: 503 });
     return NextResponse.json({ success: false, message: 'Re-render failed. Try again.' }, { status: 502 });
   }
 }

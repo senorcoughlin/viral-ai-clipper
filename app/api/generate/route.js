@@ -12,6 +12,7 @@ import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/r
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioCut, sanitizeBrand } from '../../../lib/render';
+import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept. Long sources make RenderIO's download+cut slower and
@@ -416,6 +417,11 @@ export async function POST(request) {
     }
   }
 
+  // Capacity pre-check (before charging usage): a run needs ~1 cut per clip plus audio and face jobs.
+  if (process.env.RENDERIO_API_KEY && (await renderioLeft()) < count + 2) {
+    return NextResponse.json({ success: false, message: CAPACITY_MESSAGE, capacity: true }, { status: 503 });
+  }
+
   // Identity comes only from the signed session cookie, never from the request body.
   const ip = clientIp(request);
   const email = paidEmail(request);
@@ -479,13 +485,15 @@ export async function POST(request) {
         const timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
         // Track the speaker for vertical clips while there's time left in the 300s budget.
         let crop = null;
-        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 150000) crop = await faceCropFor(videoUrl, start, len);
+        // Skip face tracking when the monthly RenderIO budget is getting tight.
+        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 150000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(videoUrl, start, len);
         playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop, brand });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
       } catch (e) {
         ctx.downloadError = e?.message || String(e);
+        if (e?.capacity) ctx.capacity = true;
       }
     } else if (ctx.source) {
       const out = path.join(ctx.dir, `clip_${i}.mp4`);
@@ -643,7 +651,7 @@ export async function POST(request) {
       if (!real) {
         await refundUsage();
         const why = ctx.downloadError || 'Video processing is unavailable right now.';
-        send({ type: 'error', message: `No clips could be made from that video (${String(why).slice(0, 200)}). This run was not counted.` });
+        send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `No clips could be made from that video (${String(why).slice(0, 200)}). This run was not counted.` });
         send({ type: 'done', total: 0, real: 0, preview: 0, failed: base.length, refunded: true, reason: why });
         controller.close();
         return;
