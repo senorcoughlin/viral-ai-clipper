@@ -12,7 +12,7 @@ const SITE = 'https://viralaiclipper.com';
 
 export function guideMetadata({ path, title, description }) {
   return {
-    title,
+    title: { absolute: title },
     description,
     alternates: { canonical: path },
     openGraph: { type: 'article', url: `${SITE}${path}`, siteName: 'Viral AI Clipper', title, description },
