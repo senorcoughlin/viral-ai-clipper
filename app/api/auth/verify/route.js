@@ -5,6 +5,8 @@ import { setSessionCookie } from '../../../../lib/session';
 import { routeGuard } from '../../../../lib/ratelimit';
 import { kvEnabled, kvCommand } from '../../../../lib/kv';
 import crypto from 'crypto';
+import { readCookie } from '../../../../lib/session';
+import { applyReferral, REF_COOKIE } from '../../../../lib/referral';
 
 const SITE = 'https://viralaiclipper.com';
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,5 +40,11 @@ export async function POST(request) {
       if (r === 'OK') flag = 'new';
     } catch {}
   }
-  return setSessionCookie(NextResponse.redirect(`${SITE}/?signin=${flag}`, 303), { email, verified: true });
+  let refOk = false;
+  if (flag === 'new') {
+    try { refOk = await applyReferral(email, String(readCookie(request, REF_COOKIE) || '').toLowerCase()); } catch {}
+  }
+  const res = setSessionCookie(NextResponse.redirect(`${SITE}/?signin=${flag}${refOk ? '&ref_bonus=1' : ''}`, 303), { email, verified: true });
+  if (flag === 'new') res.cookies.set(REF_COOKIE, '', { path: '/', maxAge: 0 });
+  return res;
 }

@@ -467,6 +467,7 @@ export async function POST(request) {
     creditSpent = await consumeCredit(email).catch(() => false);
   }
   const tier = pro ? 'pro' : creditSpent ? 'credits' : 'free';
+  const watermark = tier === 'free'; // Pro and credit-paid runs are never watermarked.
   const limit = await checkLimit(ip, tier);
   if (!limit.ok) {
     if (creditSpent) await refundCredit(email).catch(() => {});
@@ -548,7 +549,7 @@ export async function POST(request) {
         // Skip face tracking when the monthly RenderIO budget is getting tight.
         const src = ctx.srcP ? await ctx.srcP : { url: rioUrl, direct: false };
         if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(src.url, start, len, src.direct ? 30000 : 45000, src.direct);
-        playUrl = await renderioCut(src.url, start, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct });
+        playUrl = await renderioCut(src.url, start, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
@@ -620,7 +621,7 @@ export async function POST(request) {
         try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
       };
       try {
-      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2']);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean']);
       const hit = await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;

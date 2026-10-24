@@ -6,6 +6,8 @@ import { validateVideoUrl } from '../../../lib/validate';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 import { routeGuard } from '../../../lib/ratelimit';
+import { paidEmail } from '../../../lib/session';
+import { getEntitlement } from '../../../lib/billing';
 
 const SAFE_CROP = /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)(\/5|\*[01]\.\d{3})$/;
 
@@ -39,9 +41,13 @@ export async function POST(request) {
     }
     overlayUrl = toFetchable(o);
   }
+  // Free accounts keep the watermark on re-renders; Pro and credit holders don't.
+  const email = paidEmail(request);
+  const ent = email ? await getEntitlement(email).catch(() => null) : null;
+  const watermark = !(ent?.pro || ent?.credits > 0);
   try {
     const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, {
-      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), hook, overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000,
+      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), hook, overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000, watermark,
     });
     return NextResponse.json({ success: true, videoUrl: url });
   } catch (e) {

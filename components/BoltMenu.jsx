@@ -2,11 +2,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useInstall } from './PwaInstall';
 import AccountBar from './AccountBar';
+import ReferralCard from './ReferralCard';
 
 const LINKS = [
   ['Home', '/#top'], ['Generations remaining', '/#remaining'], ['Your clips', '/#clips'], ['Tutorial', '/tutorial'],
   ['Connect YouTube', '/api/youtube/start'], ['Connectors', '/connectors'],
-  ['AI Tools', '/tools'], ['My Assets', '/assets'], ['Channel', '/channel'], ['Monetize', '/monetize'], ['Permissions', '/permissions'], ['Clipping programs', '/programs'], ['Pricing', '/#pricing'], ['Feedback', '/feedback'],
+  ['AI Tools', '/tools'], ['My Assets', '/assets'], ['Channel', '/channel'], ['Monetize', '/monetize'], ['Permissions', '/permissions'], ['Clipping programs', '/programs'], ['Pricing', '/#pricing'], ['Feedback', '/feedback'], ['Guides', '/free-ai-clip-maker'],
 ];
 
 export default function BoltMenu({ icon, onAccountChange }) {
@@ -28,6 +29,7 @@ export default function BoltMenu({ icon, onAccountChange }) {
           <div className="border-b border-line/60 px-3 pb-3 pt-2 text-sm">
             <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted">Account</div>
             <AccountBar inline onChange={onAccountChange} />
+            <div className="mt-3"><ReferralCard compact /></div>
           </div>
           <nav className="flex flex-col py-1">
             {LINKS.map(([label, href]) => (

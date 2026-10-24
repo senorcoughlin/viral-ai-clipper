@@ -35,6 +35,8 @@ export default function AccountBar({ onChange, inline = false }) {
     const flag = q.get('signin');
     if (flag) {
       if (flag === 'new') trackConversion('sign_up', { method: 'email_link' });
+      if (flag === 'new' && q.get('ref_bonus') === '1') { trackConversion('referral_signup'); }
+      q.delete('ref_bonus');
       if (flag === 'expired') { setNotice('That sign-in link has expired or was already used. Request a new one.'); setMode('email'); setOpen(true); }
       q.delete('signin');
       const qs = q.toString();
