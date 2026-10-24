@@ -285,7 +285,9 @@ async function renderioCut(url, start, length, key, caption, vertical, opts = {}
   const text = captionText(caption);
   const styled = styleCaption(caption, opts.style);
   const words = opts.wordCaptions ? wordFilters(caption, length, opts.timedWords, opts.style) : '';
-  const vf = words ? `${frame},${words}` : `${frame},${styled}`;
+  // No spoken words and no hook text (e.g. subtitles off, or an unscored clip): burn nothing.
+  const hasText = !!String(caption || '').trim() || (Array.isArray(opts.timedWords) && opts.timedWords.length >= 3);
+  const vf = !hasText ? frame : words ? `${frame},${words}` : `${frame},${styled}`;
   // B-roll overlay is optional and off by default for speed.
   const useBroll = !!opts.broll;
   const broll = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
@@ -494,7 +496,7 @@ export async function POST(request) {
     const rio = process.env.RENDERIO_API_KEY;
     if (rio) {
       try {
-        const label = autoSubtitles !== false ? (c.hook || c.title || '') : '';
+        const label = autoSubtitles !== false && c.scored !== false ? (c.hook || c.title || '') : '';
         const timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
         playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: faceCrop });
         real = true;
