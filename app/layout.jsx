@@ -1,5 +1,7 @@
 import './globals.css'
 import PwaInstall from '../components/PwaInstall'
+import { Analytics } from '@vercel/analytics/next'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Syne, Inter, JetBrains_Mono } from 'next/font/google'
 
 const display = Syne({ subsets: ['latin'], weight: ['700', '800'], variable: '--font-display', display: 'swap' })
@@ -33,7 +35,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body>{children}<PwaInstall /></body>
+      <body>{children}<PwaInstall /><Analytics /><SpeedInsights /></body>
     </html>
   )
 }

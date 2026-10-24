@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
+import SeeItWork from '../components/SeeItWork';
 import { useSearchParams } from 'next/navigation';
 import ClipPlayer from '../components/ClipPlayer';
 import { detectFaceBox, cropFromFace } from '../lib/face';
@@ -671,6 +672,8 @@ function HomeInner() {
             </div>
           )}
         </section>
+
+        <SeeItWork />
 
         {/* HOW IT WORKS */}
         <section id="how" className="flex flex-col gap-10 pb-24">

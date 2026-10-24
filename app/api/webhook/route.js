@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { reportError } from '../../../lib/alerts';
 import { markPro } from '../../../lib/pro';
 import { addCredits, setPro, emailForCustomer } from '../../../lib/billing';
 
@@ -65,6 +66,7 @@ export async function POST(request) {
     return NextResponse.json({ received: true });
   } catch (e) {
     console.error(e);
+    await reportError('webhook', e);
     return NextResponse.json({ error: 'Webhook error' }, { status: 500 });
   }
 }

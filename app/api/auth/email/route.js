@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
+import { reportError } from '../../../../lib/alerts';
 import { createMagicToken } from '../../../../lib/magic';
 import { allowAttempt, clientIp } from '../../../../lib/ratelimit';
 import { routeGuard } from '../../../../lib/ratelimit';
@@ -33,12 +34,14 @@ export async function POST(request) {
       }),
     });
     if (!res.ok) {
+      await reportError('auth-email', `Resend returned ${res.status}`);
       console.warn('resend failed', res.status, (await res.text().catch(() => '')).slice(0, 200));
       return NextResponse.json({ success: false, message: 'Could not send the email. Try again later.' }, { status: 502 });
     }
     return NextResponse.json({ success: true, message: 'Check your inbox for a sign-in link.' });
   } catch (e) {
     console.error('magic link error', e?.message);
+    await reportError('auth-email', e);
     return NextResponse.json({ success: false, message: 'Could not send the email. Try again later.' }, { status: 500 });
   }
 }

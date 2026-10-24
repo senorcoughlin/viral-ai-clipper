@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { reportError } from '../../../lib/alerts';
 import { routeGuard } from '../../../lib/ratelimit';
 
 const CREDIT_PACKS = {
@@ -63,6 +64,7 @@ export async function POST(request) {
     return NextResponse.json({ success: true, data: { checkoutUrl: session.url } });
   } catch (error) {
     console.error(error);
+    await reportError('checkout', error);
     return NextResponse.json({ success: false, message: error.message || 'Checkout error' }, { status: 500 });
   }
 }

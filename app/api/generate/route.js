@@ -2,6 +2,7 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { reportError } from '../../../lib/alerts';
 import { put } from '@vercel/blob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -706,6 +707,7 @@ export async function POST(request) {
       const real = clips.length;
       if (!real) {
         await refundUsage();
+        await reportError('generate', ctx.capacity ? 'at RenderIO capacity' : (ctx.downloadError || 'no clips produced'), videoUrl);
         const why = ctx.downloadError || 'Video processing is unavailable right now.';
         send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `No clips could be made from that video (${String(why).slice(0, 200)}). This run was not counted.` });
         send({ type: 'done', total: 0, real: 0, preview: 0, failed: base.length, refunded: true, reason: why });
@@ -724,6 +726,7 @@ export async function POST(request) {
       controller.close();
       } catch (e) {
         console.error('generate stream failed', e);
+        await reportError('generate', e, videoUrl);
         await refundUsage().catch(() => {});
         send({ type: 'error', message: e?.message || 'generate failed' });
         send({ type: 'done', note: 'Stopped early.', total: 0 });
@@ -749,6 +752,7 @@ export async function POST(request) {
   });
   } catch (e) {
     console.error('generate failed', e);
+    await reportError('generate', e);
     return NextResponse.json({ success: false, message: e?.message || 'generate failed' }, { status: 500 });
   }
 }
