@@ -6,6 +6,7 @@ import ClipPlayer from '../components/ClipPlayer';
 import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 import AccountBar, { syncClips } from '../components/AccountBar';
+import BoltMenu from '../components/BoltMenu';
 
 const FREE_DAILY_LIMIT = 3;
 
@@ -351,10 +352,10 @@ function HomeInner() {
       {/* NAV */}
       <header className="sticky top-0 z-20 border-b border-line/60 bg-ink/70 backdrop-blur-md">
         <div className="mx-auto flex h-[68px] max-w-6xl items-center justify-between px-5">
-          <a href="#top" className="flex items-center gap-2.5 text-fg no-underline">
-            <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-lime"><Bolt size={20} /></span>
-            <span className="font-display text-lg font-extrabold tracking-tight">Viral AI Clipper</span>
-          </a>
+          <div className="flex items-center gap-2.5">
+            <BoltMenu icon={<Bolt size={20} />} onAccountChange={() => refreshBilling()} />
+            <a href="#top" className="font-display text-lg font-extrabold tracking-tight text-fg no-underline">Viral AI Clipper</a>
+          </div>
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
             <a href="/tutorial" className="hover:text-fg">Tutorial</a>
             <a href="/api/youtube/start" className="hover:text-fg" title="Lets the Shorts button upload clips to your channel as private videos">Connect YouTube</a>
