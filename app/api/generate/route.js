@@ -343,6 +343,52 @@ async function audioTranscript(url, timeoutMs) {
   return tr;
 }
 
+// Server-side face tracking for vertical crops. One RenderIO job grabs 3 frames
+// across the clip window as a single 3x1 contact sheet; Gemini vision returns the
+// speaker's horizontal face center in each frame; we crop around the median.
+async function faceCropFor(url, start, len, timeoutMs = 45000) {
+  const rio = process.env.RENDERIO_API_KEY;
+  const gkey = process.env.GEMINI_API_KEY;
+  if (!rio || !gkey) return null;
+  try {
+    const t0 = Date.now();
+    const sheetUrl = await renderioRun({
+      input_urls: { in_video: url },
+      ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(len) || 30} -vf "fps=3/${Number(len) || 30},scale=480:-2,tile=3x1" -frames:v 1 -q:v 4 {{out_img}}`,
+      output_files: { out_img: 'sheet.jpg' },
+    }, 'out_img', rio, timeoutMs);
+    const img = await fetch(sheetUrl, { cache: 'no-store' });
+    if (!img.ok) return null;
+    const b64 = Buffer.from(await img.arrayBuffer()).toString('base64');
+    const prompt = 'This image is 3 video frames side by side (left, middle, right). For each frame, find the main speaker\'s face (the person talking or most prominent). Return ONLY JSON {"faces":[x1,x2,x3]} where each x is the horizontal center of that face as a fraction 0-1 of THAT frame\'s width, or null if no face.';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(gkey)}`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+      }),
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
+    const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x >= 0 && x <= 1).sort((a, b) => a - b);
+    console.log('face track', { ms: Date.now() - t0, xs });
+    if (!xs.length) return null;
+    const cx = xs[Math.floor(xs.length / 2)];
+    // After scaling a 16:9 source to 1280 tall it is ~2276 wide; centre a 720 window on the face.
+    const W = 2276;
+    const f = Math.max(0, Math.min(1, (cx * W - 360) / (W - 720)));
+    return `scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=(iw-720)*${f.toFixed(3)}:y=(ih-1280)/5`;
+  } catch (e) {
+    console.warn('face track failed', e?.message);
+    return null;
+  }
+}
+
 // Transcripts are cached per video for a week so repeat runs skip extraction.
 const trKey = (url) => 'tr:' + (youtubeId(url) || String(url).trim());
 async function getCachedTranscript(url) {
@@ -469,6 +515,8 @@ async function mapLimit(items, limit, fn) {
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipCount = 1, faceCrop } = body;
+  // The browser may suggest a crop filter; only accept the exact shape cropFromFace() builds.
+  const safeClientCrop = typeof faceCrop === 'string' && /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)\*[01]\.\d{3}$/.test(faceCrop) ? faceCrop : null;
   const clipLength = Math.min(90, Math.max(5, Math.round(Number(body.clipLength)) || 30));
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
@@ -548,7 +596,10 @@ export async function POST(request) {
       try {
         const label = autoSubtitles !== false && c.scored !== false ? (c.hook || c.title || '') : '';
         const timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
-        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: faceCrop });
+        // Track the speaker for vertical clips while there's time left in the 300s budget.
+        let crop = null;
+        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 150000) crop = await faceCropFor(videoUrl, start, len);
+        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop });
         real = true;
       } catch (e) {
         ctx.downloadError = e?.message || String(e);
@@ -624,6 +675,7 @@ export async function POST(request) {
       }
       // Tell the client right away that work has started; setup happens below.
       const startedAt = Date.now();
+      ctx.startedAt = startedAt;
       send({ type: 'start', total: count });
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
