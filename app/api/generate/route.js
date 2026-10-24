@@ -8,8 +8,31 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { checkLimit, clientIp } from '../../../lib/ratelimit';
-import { getEntitlement, consumeCredit } from '../../../lib/billing';
+import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
+import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
+import { paidEmail } from '../../../lib/session';
+
+// Longest source we accept. Long sources make RenderIO's download+cut slower and
+// risk the 300s function limit (seen in production). Override with MAX_SOURCE_MINUTES.
+const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
+
+// Best-effort YouTube duration lookup (seconds) from the public watch page.
+async function youtubeDuration(id) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(id)}&hl=en`, {
+      headers: { 'Accept-Language': 'en-US,en;q=0.9', 'User-Agent': 'Mozilla/5.0' },
+      signal: ctrl.signal, cache: 'no-store',
+    });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const html = await r.text();
+    if (/"playabilityStatus":\{"status":"(ERROR|LOGIN_REQUIRED|UNPLAYABLE)"/.test(html) && !/"lengthSeconds"/.test(html)) return 0;
+    const m = html.match(/"lengthSeconds":"(\d+)"/);
+    return m ? Number(m[1]) : null;
+  } catch { return null; }
+}
 import { validateVideoUrl } from '../../../lib/validate';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 
@@ -291,24 +314,49 @@ async function mapLimit(items, limit, fn) {
 
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1, proEmail, hasCredits, useCredit, faceCrop } = body;
+  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipCount = 1, faceCrop } = body;
+  const clipLength = Math.min(90, Math.max(5, Math.round(Number(body.clipLength)) || 30));
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
   const videoUrl = validateVideoUrl(rawUrl);
   if (!videoUrl) {
     return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
   }
-  const ent = proEmail ? await getEntitlement(proEmail).catch(() => null) : null;
-  const pro = !!ent?.pro;
-  let creditTier = !!hasCredits;
-  if (ent && !pro && useCredit) {
-    // Server record is authoritative when we have one: spend a credit up front.
-    creditTier = ent.credits > 0 ? await consumeCredit(proEmail).catch(() => false) : false;
+  const ytId = youtubeId(videoUrl);
+  if (ytId) {
+    const secs = await youtubeDuration(ytId);
+    if (secs === 0) {
+      return NextResponse.json({ success: false, message: 'That YouTube video is unavailable (private, removed, or region-locked). Try another link.' }, { status: 400 });
+    }
+    if (secs && secs > MAX_SOURCE_SECONDS) {
+      return NextResponse.json({ success: false, message: `That video is ${Math.round(secs / 60)} minutes long. The limit is ${Math.round(MAX_SOURCE_SECONDS / 60)} minutes — trim it or use a shorter upload.` }, { status: 400 });
+    }
   }
-  const limit = await checkLimit(clientIp(request), pro ? 'pro' : creditTier ? 'credits' : 'free');
+
+  // Identity comes only from the signed session cookie, never from the request body.
+  const ip = clientIp(request);
+  const email = paidEmail(request);
+  const ent = email ? await getEntitlement(email).catch(() => null) : null;
+  const pro = !!ent?.pro;
+  let creditSpent = false;
+  if (!pro && ent?.credits > 0 && (await freeUsed(ip)) >= FREE_DAILY_LIMIT) {
+    // Free allowance is used up: spend one server-side credit up front (atomic).
+    creditSpent = await consumeCredit(email).catch(() => false);
+  }
+  const tier = pro ? 'pro' : creditSpent ? 'credits' : 'free';
+  const limit = await checkLimit(ip, tier);
   if (!limit.ok) {
+    if (creditSpent) await refundCredit(email).catch(() => {});
     return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached }, { status: limit.status });
   }
+  // Give the usage slot (and credit) back when the run produces no real clips.
+  let refunded = false;
+  const refundUsage = async () => {
+    if (refunded) return;
+    refunded = true;
+    await limit.refund?.();
+    if (creditSpent) await refundCredit(email).catch(() => {});
+  };
 
   try {
   const vertical = clipFormat === 'shorts_9_16';
@@ -397,7 +445,8 @@ export async function POST(request) {
       try {
       const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook]);
       const hit = await getCached(key);
-      const cached = hit && hit.length >= count ? hit.slice(0, count) : null;
+      const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
+      const cached = realHit.length >= count ? realHit.slice(0, count) : null;
       if (cached && cached.length) {
         send({ type: 'start', total: cached.length, cached: true });
         for (let i = 0; i < cached.length; i++) {
@@ -444,6 +493,11 @@ export async function POST(request) {
       const results = await mapLimit(base, 4, async (c, i) => {
         try {
           const clip = await runOne(c, i);
+          if (clip.preview) {
+            // Never ship a stock sample as if it were the user's clip.
+            send({ type: 'error', index: i, message: ctx.downloadError || 'cut failed' });
+            return null;
+          }
           send({ type: 'clip', index: i, total: base.length, clip });
           return clip;
         } catch (e) {
@@ -452,9 +506,17 @@ export async function POST(request) {
         }
       });
       const clips = results.filter(Boolean);
-      if (clips.some(c => !c.preview)) await setCached(key, clips);
+      if (clips.length) await setCached(key, clips);
       try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
-      const real = clips.filter(c => !c.preview).length;
+      const real = clips.length;
+      if (!real) {
+        await refundUsage();
+        const why = ctx.downloadError || 'Video processing is unavailable right now.';
+        send({ type: 'error', message: `No clips could be made from that video (${String(why).slice(0, 200)}). This run was not counted.` });
+        send({ type: 'done', total: 0, real: 0, preview: 0, failed: base.length, refunded: true, reason: why });
+        controller.close();
+        return;
+      }
       send({
         type: 'done',
         note: real ? 'Cut from your source video.' : (ctx.downloadError || 'Preview clips.'),
@@ -467,6 +529,7 @@ export async function POST(request) {
       controller.close();
       } catch (e) {
         console.error('generate stream failed', e);
+        await refundUsage().catch(() => {});
         send({ type: 'error', message: e?.message || 'generate failed' });
         send({ type: 'done', note: 'Stopped early.', total: 0 });
         try { controller.close(); } catch {}

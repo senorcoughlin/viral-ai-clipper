@@ -61,7 +61,7 @@ export default function AccountBar({ onChange }) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <span className="hidden max-w-[160px] truncate text-soft sm:inline">{session.email}</span>
-        <button type="button" onClick={() => save(null)} className="text-muted hover:text-fg">Log out</button>
+        <button type="button" onClick={() => { fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout', email: session.email }) }).catch(() => {}).finally(() => save(null)); }} className="text-muted hover:text-fg">Log out</button>
       </div>
     );
   }
@@ -76,7 +76,7 @@ export default function AccountBar({ onChange }) {
             <button type="button" onClick={() => setMode('register')} className={mode === 'register' ? 'text-lime' : 'text-muted'}>Create account</button>
           </div>
           <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className="mb-2 w-full rounded-input border border-line2 bg-ink px-3 py-2 text-sm outline-none focus:border-lime" />
-          <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="mb-3 w-full rounded-input border border-line2 bg-ink px-3 py-2 text-sm outline-none focus:border-lime" />
+          <input type="password" required value={password} onChange={e => setPassword(e.target.value)} minLength={mode === 'register' ? 8 : undefined} placeholder={mode === 'register' ? 'Password (8+ characters)' : 'Password'} className="mb-3 w-full rounded-input border border-line2 bg-ink px-3 py-2 text-sm outline-none focus:border-lime" />
           {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
           <button type="submit" disabled={busy} className="btn-lime h-9 w-full text-sm">{busy ? 'Working…' : mode === 'login' ? 'Log in' : 'Create account'}</button>
           <p className="mt-2 text-[11px] text-muted">Clips save to your account and show up on any device.</p>

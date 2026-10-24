@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { markPro, isProEmail } from '../../../lib/pro';
+import { paidEmail } from '../../../lib/session';
 
 // Marking someone Pro is only allowed from trusted server code (the Stripe webhook
 // now calls lib/pro directly). External callers must present the internal key.
@@ -13,9 +14,9 @@ export async function POST(request) {
   return NextResponse.json({ success: true, count });
 }
 
+// Pro status for the signed-in session only; no lookups by arbitrary email.
 export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const email = searchParams.get('email')?.toLowerCase();
+  const email = paidEmail(request);
   const isPro = email ? await isProEmail(email) : false;
-  return NextResponse.json({ isPro, email });
+  return NextResponse.json({ isPro });
 }

@@ -74,6 +74,7 @@ function HomeInner() {
   const [error, setError] = useState(null); // { message, retry }
   const [notice, setNotice] = useState('');
   const [expected, setExpected] = useState(0);
+  const [billingEmail, setBillingEmail] = useState('');
   const formRef = useRef(null);
 
   const searchParams = useSearchParams();
@@ -93,20 +94,7 @@ function HomeInner() {
       else localStorage.setItem('viral_daily', JSON.stringify({ date: today, count: 0 }));
     }
 
-    const pro = localStorage.getItem('viral_pro') === 'true';
-    setIsPro(pro);
-    setCredits(Number(localStorage.getItem('viral_credits') || 0));
-    const em = localStorage.getItem('viral_pro_email');
-    if (em) {
-      fetch(`/api/billing?email=${encodeURIComponent(em)}`).then(r => r.json()).then(d => {
-        if (!d?.success) return;
-        setIsPro(!!d.pro || pro);
-        if (d.pro) localStorage.setItem('viral_pro', 'true');
-        else if (pro) { setIsPro(false); localStorage.removeItem('viral_pro'); }
-        setCredits(d.credits);
-        localStorage.setItem('viral_credits', String(d.credits));
-      }).catch(() => {});
-    }
+    refreshBilling();
   }, []);
 
   useEffect(() => {
@@ -128,6 +116,15 @@ function HomeInner() {
     const id = setTimeout(() => setJustFinished(false), 4000);
     return () => clearTimeout(id);
   }, [justFinished]);
+
+  // Pro and credits come only from the server, keyed by the signed session cookie.
+  const refreshBilling = () => fetch('/api/billing', { cache: 'no-store' }).then(r => r.json()).then(d => {
+    if (!d?.success) return;
+    setIsPro(!!d.pro);
+    setCredits(Number(d.credits) || 0);
+    setBillingEmail(d.signedIn && d.verified ? d.email : '');
+    ['viral_pro', 'viral_credits', 'viral_pro_email'].forEach(k => localStorage.removeItem(k));
+  }).catch(() => {});
 
   const incrementDaily = () => {
     const today = new Date().toDateString();
@@ -185,7 +182,7 @@ function HomeInner() {
           res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, faceCrop, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0, useCredit: !isPro && dailyCount >= FREE_DAILY_LIMIT && credits > 0 }),
+          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, faceCrop }),
           });
         } catch {
           throw new Error('Could not reach the server. Check your connection and retry.');
@@ -278,13 +275,8 @@ function HomeInner() {
       setClips([...all]);
       setJustFinished(true);
       if (!isPro) {
-        if (dailyCount >= FREE_DAILY_LIMIT && credits > 0) {
-          const next = credits - 1;
-          setCredits(next);
-          localStorage.setItem('viral_credits', String(next));
-        } else {
-          incrementDaily();
-        }
+        if (!(dailyCount >= FREE_DAILY_LIMIT && credits > 0)) incrementDaily();
+        refreshBilling();
       }
       setHistory(prev => [{ id: Date.now(), url: runUrl, format: fmt, aiStyle: style, clips: all }, ...prev].slice(0, 5));
     } catch (e) {
@@ -314,11 +306,6 @@ function HomeInner() {
     }
   };
 
-  const unlockPro = () => {
-    localStorage.setItem('viral_pro', 'true');
-    setIsPro(true);
-    setShowPricing(false);
-  };
 
   const freeLeft = Math.max(0, FREE_DAILY_LIMIT - dailyCount);
   const myAssets = history.flatMap(h => (h.clips || []).map(c => ({ ...c, sourceUrl: h.url, createdAt: h.id })));
@@ -341,13 +328,13 @@ function HomeInner() {
           </a>
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
             <a href="/tutorial" className="hover:text-fg">Tutorial</a>
-            <a href="/api/youtube/start" className="hover:text-fg">Connect YouTube</a>
+            <a href="/api/youtube/start" className="hover:text-fg" title="Lets the Shorts button upload clips to your channel as private videos">Connect YouTube</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
             <a href="/connectors" className="hover:text-fg">Connectors</a>
             <a href="/tools" className="hover:text-fg">AI Tools</a>
             <a href="/assets" className="hover:text-fg">My Assets</a>
             <a href="/channel" className="hover:text-fg">Channel</a>
-            <AccountBar />
+            <AccountBar onChange={() => refreshBilling()} />
             <a href="#pricing" className="hover:text-fg">Pricing</a>
           </nav>
           <div className="flex items-center gap-2.5">
@@ -745,6 +732,11 @@ function HomeInner() {
               <span className="text-center text-xs text-muted">Cancel anytime · Secure checkout via Stripe</span>
             </article>
           </div>
+          <p className="text-center text-xs text-muted">
+            {billingEmail
+              ? <>Purchases are linked to <span className="text-soft">{billingEmail}</span>. Create an account (or log in) with this email to keep them on other devices.</>
+              : <>Already paid? Open your purchase confirmation link on this device, or log in to the account you linked after buying.</>}
+          </p>
         </section>
       </main>
 

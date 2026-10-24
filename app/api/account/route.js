@@ -3,6 +3,8 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { put, list } from '@vercel/blob';
 import crypto from 'crypto';
+import { getSession, setSessionCookie, clearSessionCookie } from '../../../lib/session';
+import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 
 function emailKey(email) {
   return crypto.createHash('sha256').update(String(email).trim().toLowerCase()).digest('hex').slice(0, 24);
@@ -37,6 +39,7 @@ export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
     const { action, email, password, token, clips } = body;
+    if (action === 'logout') return clearSessionCookie(NextResponse.json({ success: true }));
     const clean = String(email || '').trim().toLowerCase();
     if (!clean || !clean.includes('@')) {
       return NextResponse.json({ success: false, message: 'Enter a valid email' }, { status: 400 });
@@ -45,16 +48,30 @@ export async function POST(request) {
       return NextResponse.json({ success: false, message: 'Storage is not configured' }, { status: 500 });
     }
 
+    // A signed-in Stripe-verified session for this same email links the account,
+    // so later logins on other devices can restore Pro/credits.
+    const cur = getSession(request);
+    const linkVerified = !!(cur?.verified && cur.email === clean);
+
+    if (action === 'register' || action === 'login') {
+      const ip = clientIp(request);
+      const okIp = await allowAttempt(`acct:ip:${ip}`, 30, 15 * 60);
+      const okEmail = await allowAttempt(`acct:email:${emailKey(clean)}`, 10, 15 * 60);
+      if (!okIp || !okEmail) {
+        return NextResponse.json({ success: false, message: 'Too many attempts. Wait 15 minutes and try again.' }, { status: 429 });
+      }
+    }
+
     if (action === 'register') {
-      if (!password || String(password).length < 6) {
-        return NextResponse.json({ success: false, message: 'Password must be at least 6 characters' }, { status: 400 });
+      if (!password || String(password).length < 8) {
+        return NextResponse.json({ success: false, message: 'Password must be at least 8 characters' }, { status: 400 });
       }
       const existing = await readAccount(clean);
       if (existing) return NextResponse.json({ success: false, message: 'Account already exists. Log in.' }, { status: 409 });
       const salt = crypto.randomBytes(16).toString('hex');
       const session = crypto.randomBytes(24).toString('hex');
-      await writeAccount(clean, { email: clean, salt, hash: hashPassword(password, salt), session, clips: [], createdAt: Date.now() });
-      return NextResponse.json({ success: true, email: clean, token: session });
+      await writeAccount(clean, { email: clean, salt, hash: hashPassword(password, salt), session, clips: [], createdAt: Date.now(), verified: linkVerified });
+      return setSessionCookie(NextResponse.json({ success: true, email: clean, token: session, verified: linkVerified }), { email: clean, verified: linkVerified });
     }
 
     if (action === 'login') {
@@ -65,8 +82,10 @@ export async function POST(request) {
       }
       const session = crypto.randomBytes(24).toString('hex');
       account.session = session;
+      if (linkVerified) account.verified = true;
       await writeAccount(clean, account);
-      return NextResponse.json({ success: true, email: clean, token: session, clips: account.clips || [] });
+      const verified = !!account.verified;
+      return setSessionCookie(NextResponse.json({ success: true, email: clean, token: session, verified, clips: account.clips || [] }), { email: clean, verified });
     }
 
     if (action === 'save' || action === 'load') {
@@ -83,6 +102,7 @@ export async function POST(request) {
 
     return NextResponse.json({ success: false, message: 'Unknown action' }, { status: 400 });
   } catch (e) {
-    return NextResponse.json({ success: false, message: String(e?.message || e), stack: String(e?.stack || '').slice(0, 300) }, { status: 500 });
+    console.error('account error', e);
+    return NextResponse.json({ success: false, message: 'Something went wrong. Try again.' }, { status: 500 });
   }
 }
