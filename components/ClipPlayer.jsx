@@ -130,6 +130,14 @@ export default function ClipPlayer({ clip, compact = false }) {
     }
   };
 
+  const postStatus = postMsg && (
+          <div role="status" className={`rounded-input border px-3 py-2 text-xs leading-relaxed ${postMsg.ok ? 'border-lime text-lime' : 'border-line2 text-soft'}`}>
+            {postMsg.text}{' '}
+            {postMsg.url && <a href={postMsg.url} target="_blank" rel="noreferrer" className="underline">Open Studio</a>}
+            {postMsg.connect && <> {postMsg.url ? '· ' : ''}<a href="/api/youtube/start" className="underline">Connect YouTube</a></>}
+          </div>
+        );
+
   const unscored = clip.scored === false;
   const score = unscored ? 0 : (clip.viralScore || clip.score || 70);
   const tier = scoreTier(score);
@@ -201,6 +209,8 @@ export default function ClipPlayer({ clip, compact = false }) {
               <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
             </span>
           </div>
+          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Post to Shorts'}</button>
+          {postStatus && <div className="break-words text-[10px] [&>div]:px-2 [&>div]:py-1.5 [&>div]:text-[10px]">{postStatus}</div>}
         </div>
       ) : (
       <div className="flex flex-col gap-3 p-4">
@@ -250,13 +260,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           </>
         )}
 
-        {postMsg && (
-          <div role="status" className={`rounded-input border px-3 py-2 text-xs leading-relaxed ${postMsg.ok ? 'border-lime text-lime' : 'border-line2 text-soft'}`}>
-            {postMsg.text}{' '}
-            {postMsg.url && <a href={postMsg.url} target="_blank" rel="noreferrer" className="underline">Open Studio</a>}
-            {postMsg.connect && <> {postMsg.url ? '· ' : ''}<a href="/api/youtube/start" className="underline">Connect YouTube</a></>}
-          </div>
-        )}
+        {postStatus}
         <Bar label="Hook" pct={hookPct} color={color} />
         <Bar label="Pacing" pct={pacePct} color={color} />
 
