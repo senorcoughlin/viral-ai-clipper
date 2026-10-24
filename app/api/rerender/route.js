@@ -5,12 +5,15 @@ import { renderioCut, sanitizeBrand } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
+import { routeGuard } from '../../../lib/ratelimit';
 
 const SAFE_CROP = /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)(\/5|\*[01]\.\d{3})$/;
 
 // Re-render one clip with edited caption words and/or a brand kit.
 // Body: { source, startSec, endSec, format, style, words:[{w,a,b}], brand, crop }
 export async function POST(request) {
+  const limited = await routeGuard(request, 'rerender', 120, 3600);
+  if (limited) return limited;
   const body = await request.json().catch(() => ({}));
   const rio = process.env.RENDERIO_API_KEY;
   if (!rio) return NextResponse.json({ success: false, message: 'Rendering is not configured' }, { status: 500 });

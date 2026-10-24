@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 import { NextResponse } from 'next/server';
+import { routeGuard } from '../../../lib/ratelimit';
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 
@@ -18,6 +19,8 @@ const TOOLS = {
 };
 
 export async function POST(request) {
+  const limited = await routeGuard(request, 'ai', 120, 3600);
+  if (limited) return limited;
   const { tool, input } = await request.json().catch(() => ({}));
   const instruction = TOOLS[tool];
   if (!instruction || !String(input || '').trim()) {

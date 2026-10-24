@@ -6,7 +6,7 @@ const body = Inter({ subsets: ['latin'], weight: ['400', '500', '600'], variable
 const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['600'], variable: '--font-mono', display: 'swap' })
 
 const SITE = 'https://viralaiclipper.com'
-const TITLE = 'Viral AI Clipper — Turn one video into ten clips that go viral'
+const TITLE = 'Viral AI Clipper — Turn one video into up to 8 viral-ready clips'
 const DESC = 'Paste a link. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.'
 
 export const metadata = {

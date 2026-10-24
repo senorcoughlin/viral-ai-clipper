@@ -2,11 +2,14 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { handleUpload } from '@vercel/blob/client';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
+import { routeGuard } from '../../../lib/ratelimit';
 
 const MAX_BYTES = 500 * 1024 * 1024;
 
 // Issues short-lived client-upload tokens so browsers upload MP4s straight to Vercel Blob.
 export async function POST(request) {
+  const limited = await routeGuard(request, 'upload', 60, 3600);
+  if (limited) return limited;
   const body = await request.json().catch(() => null);
   if (!body) return NextResponse.json({ error: 'Bad request' }, { status: 400 });
   const ip = clientIp(request);

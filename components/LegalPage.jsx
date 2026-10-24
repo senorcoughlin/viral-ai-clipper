@@ -7,7 +7,7 @@ export default function LegalPage({ title, updated, children }) {
         <h1 className="font-display text-3xl font-extrabold tracking-tight text-fg">{title}</h1>
         <p className="text-muted">Last updated: {updated}</p>
         {children}
-        <p className="mt-10 text-muted"><a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p>
+        <p className="mt-10 text-muted"><a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a> · <a href="/dmca">DMCA</a></p>
       </article>
     </main>
   );

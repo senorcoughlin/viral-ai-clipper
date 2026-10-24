@@ -16,12 +16,6 @@ const FORMATS = [
   { value: 'landscape_16_9', label: '16:9' },
   { value: 'square_1_1', label: '1:1' },
 ];
-const STYLES = [
-  { value: 'character_swap', label: 'Character Swap' },
-  { value: 'anime_action', label: 'Anime Action' },
-  { value: 'kids_3d', label: '3D Kids' },
-  { value: 'clean_viral', label: 'Clean 4K' },
-];
 const PACKS = [
   { value: '', label: 'Default' },
   { value: 'bold', label: 'Bold captions' },
@@ -61,7 +55,7 @@ const Download = () => (
 function HomeInner() {
   const [videoUrl, setVideoUrl] = useState('');
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
-  const [aiStyle, setAiStyle] = useState('character_swap');
+  const [aiStyle, setAiStyle] = useState('clean_viral');
   const [pack, setPack] = useState('');
   const [clipLength, setClipLength] = useState(30);
   const [clipCount, setClipCount] = useState(1);
@@ -398,7 +392,7 @@ function HomeInner() {
               Batch mode · paste up to 10 links at once
             </div>
             <h1 className="font-display text-[48px] font-extrabold leading-[.98] tracking-tight text-white md:text-[72px]">
-              Turn one video into <span className="text-lime">ten clips</span> that actually go viral.
+              Turn one video into <span className="text-lime">up to 8 clips</span> that are built to go viral.
             </h1>
             <p className="max-w-[520px] text-lg leading-relaxed text-soft">
               Paste a YouTube, podcast or stream link. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
@@ -433,7 +427,6 @@ function HomeInner() {
               <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
                 {[
                   { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
-                  { label: 'Style', options: STYLES, value: aiStyle, set: setAiStyle },
                   { label: 'Pack', options: PACKS, value: pack, set: setPack },
                   { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
                   { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
@@ -821,7 +814,7 @@ function HomeInner() {
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14] pb-24 md:pb-0">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
           <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
-          <span className="flex gap-5"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
+          <span className="flex gap-5"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
 

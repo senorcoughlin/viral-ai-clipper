@@ -14,7 +14,7 @@ export default function Terms() {
         <li>You may only clip content you own or have permission to use. You retain whatever rights you have in content you submit and the clips you create; we claim no ownership.</li>
         <li>You must respect copyright and other laws, and comply with the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a> and community guidelines.</li>
         <li>You grant us a limited license to process your content solely to provide the Service.</li>
-        <li>We may remove content or suspend accounts that infringe rights or violate these Terms. Copyright notices can be sent to the contact below.</li>
+        <li>We may remove content or suspend accounts that infringe rights or violate these Terms. Copyright notices can be sent per our <a href="/dmca">DMCA policy</a>.</li>
       </ul>
       <h2>Acceptable use</h2>
       <p>Do not misuse the Service, including attempting to bypass limits, abuse, reverse engineer, overload, or use it for unlawful, harmful, or spam content.</p>

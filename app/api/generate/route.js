@@ -40,6 +40,7 @@ async function youtubeDuration(id) {
 }
 import { validateVideoUrl } from '../../../lib/validate';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
+import { routeGuard } from '../../../lib/ratelimit';
 
 const exec = promisify(execFile);
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
@@ -420,13 +421,16 @@ async function mapLimit(items, limit, fn) {
 }
 
 export async function POST(request) {
+  const limited = await routeGuard(request, 'generate', 60, 3600);
+  if (limited) return limited;
   const body = await request.json().catch(() => ({}));
-  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipCount = 1, faceCrop } = body;
+  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle: rawStyle, autoSubtitles, aiHook, clipCount = 1, faceCrop } = body;
   const pack = ['bold', 'podcast', 'gameplay'].includes(body.pack) ? body.pack : null;
   // The browser may suggest a crop filter; only accept the exact shape cropFromFace() builds.
   const brand = sanitizeBrand(body.brand);
   const safeClientCrop = typeof faceCrop === 'string' && /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)\*[01]\.\d{3}$/.test(faceCrop) ? faceCrop : null;
   const clipLength = Math.min(90, Math.max(5, Math.round(Number(body.clipLength)) || 30));
+  const aiStyle = ['clean_viral','character_swap','anime_action','kids_3d'].includes(rawStyle) ? rawStyle : 'clean_viral';
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
   const videoUrl = validateVideoUrl(rawUrl);

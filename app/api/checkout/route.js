@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { routeGuard } from '../../../lib/ratelimit';
 
 const CREDIT_PACKS = {
   credits_10: { priceEnv: 'STRIPE_PRICE_CREDITS_10', credits: 10, mode: 'payment' },
@@ -8,6 +9,8 @@ const CREDIT_PACKS = {
 };
 
 export async function POST(request) {
+  const limited = await routeGuard(request, 'checkout', 30, 3600);
+  if (limited) return limited;
   try {
     const body = await request.json();
     const planType = body.planType || 'pro_monthly';

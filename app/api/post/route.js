@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { readCookie } from '../../../lib/session';
 import { refreshAccessToken, COOKIE_OPTS } from '../../../lib/youtube';
 import { validateVideoUrl } from '../../../lib/validate';
+import { routeGuard } from '../../../lib/ratelimit';
 
 const TARGETS = {
   youtube: 'https://studio.youtube.com/',
@@ -42,6 +43,8 @@ function nextBestTime(bestTime, tz) {
 // clip is uploaded server-side as a private video and the Studio edit link is
 // returned so they can review and publish. Otherwise returns the upload page URL.
 export async function POST(request) {
+  const limited = await routeGuard(request, 'post', 60, 3600);
+  if (limited) return limited;
   try {
     const body = await request.json().catch(() => ({}));
     const { platform = 'youtube', caption = '', videoUrl = '', title = 'Clip', schedule = false, bestTime = '', tz = 'America/New_York' } = body;

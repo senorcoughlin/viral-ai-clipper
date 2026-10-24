@@ -14,7 +14,7 @@ export default function OgImage() {
           <div style={{ fontSize: 40, fontWeight: 800 }}>Viral AI Clipper</div>
         </div>
         <div style={{ fontSize: 76, fontWeight: 800, lineHeight: 1.05, display: 'flex', flexWrap: 'wrap' }}>
-          Turn one video into&nbsp;<span style={{ color: '#C6FF3D' }}>ten clips</span>&nbsp;that go viral.
+          Turn one video into&nbsp;<span style={{ color: '#C6FF3D' }}>up to 8 clips</span>&nbsp;that go viral.
         </div>
         <div style={{ fontSize: 30, color: '#B9B9C8', marginTop: 36 }}>Hooks, captions and viral scores for TikTok, Reels and Shorts.</div>
       </div>

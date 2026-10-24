@@ -2,9 +2,12 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createMagicToken } from '../../../../lib/magic';
 import { allowAttempt, clientIp } from '../../../../lib/ratelimit';
+import { routeGuard } from '../../../../lib/ratelimit';
 
 // POST { email } -> emails a one-time sign-in link (via Resend).
 export async function POST(request) {
+  const limited = await routeGuard(request, 'auth_email', 30, 3600);
+  if (limited) return limited;
   const { email } = await request.json().catch(() => ({}));
   const clean = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean) || clean.length > 200) {
