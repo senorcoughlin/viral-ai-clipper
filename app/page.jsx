@@ -444,18 +444,23 @@ function HomeInner() {
                   <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} /> Captions</label>
                   <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={aiHook} onChange={e => setAiHook(e.target.checked)} /> Hook overlay</label>
                 </div>
-                {!isPro && (
-                  <span className="flex items-center gap-2">
-                    {freeLeft} free generation{freeLeft === 1 ? '' : 's'} left today
-                    <span className="inline-flex gap-1">
-                      {Array.from({ length: FREE_DAILY_LIMIT }, (_, i) => (
-                        <i key={i} className={`h-1 w-7 rounded-sm ${i < freeLeft ? 'bg-lime' : 'bg-line2'}`} />
-                      ))}
-                    </span>
-                  </span>
-                )}
               </div>
             </form>
+            <div id="remaining" className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-line2 bg-surface/80 px-4 py-3 text-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Generations remaining</span>
+              {isPro ? (
+                <span className="flex items-center gap-1.5 font-semibold text-lime"><Bolt size={13} fill="#C6FF3D" />Unlimited with Pro</span>
+              ) : (
+                <>
+                  <span className="flex items-center gap-2 text-soft"><b className="text-white">{freeLeft}</b> of {FREE_DAILY_LIMIT} free today
+                    <span className="inline-flex gap-1">{Array.from({ length: FREE_DAILY_LIMIT }, (_, k) => <i key={k} className={`h-1 w-6 rounded-sm ${k < freeLeft ? 'bg-lime' : 'bg-line2'}`} />)}</span>
+                  </span>
+                  <span className="text-soft"><b className="text-white">{credits}</b> credit{credits === 1 ? '' : 's'}</span>
+                  <span className="text-soft">Total: <b className="text-lime">{freeLeft + credits}</b></span>
+                  <button type="button" onClick={() => setShowPricing(true)} className="ml-auto text-xs font-semibold text-lime">Get more →</button>
+                </>
+              )}
+            </div>
  {error && !error.retry && (
               <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
                 <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
