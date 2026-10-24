@@ -798,7 +798,6 @@ function HomeInner() {
               </div>
               <div className="flex items-center justify-between text-xs text-muted">
                 <span>Secure checkout via Stripe · cancel anytime</span>
-                <button onClick={unlockPro} className="text-muted/70 hover:text-muted">Demo unlock (local)</button>
               </div>
             </div>
           </div>
