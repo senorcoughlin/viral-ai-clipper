@@ -171,14 +171,14 @@ Transcript:
 ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcript || '').slice(0, 14000)}`;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const timer = setTimeout(() => ctrl.abort(), 55000);
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
       method: 'POST',
       signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 8192, responseMimeType: 'application/json' },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
       }),
     });
     clearTimeout(timer);
@@ -194,7 +194,7 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
     if (!Array.isArray(parsed?.clips)) { console.warn('gemini no clips', data?.candidates?.[0]?.finishReason, text.slice(0, 200)); return null; }
     parsed.clips = parsed.clips
       .filter(c => c && typeof c === 'object')
-      .map(c => ({ ...c, reasons: cleanReasons(c.reasons), startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Math.round(Number(c.score)) || 60)) }));
+      .map(c => ({ ...c, reasons: cleanReasons(c.reasons), startSec: Math.max(0, Number(c.startSec) || 0), score: (() => { let n = Number(c.score); if (n > 0 && n <= 10) n *= 10; return Math.min(99, Math.max(1, Math.round(n) || 60)); })() }));
     console.log('gemini scores', parsed.clips.map(c => [c.startSec, c.score]));
     return parsed.clips.length ? parsed : null;
   } catch (e) {
@@ -499,12 +499,38 @@ export async function POST(request) {
       caption: '',
       hashtags: '',
       bestTime: '',
-      score: 0,
-      scored: false,
+      ...heuristicScore(5 + i * gap),
+      scored: true,
+      estimated: true,
       startSec: 5 + i * gap,
-      reason: 'No transcript was available, so this clip was not scored. Use a video with speech or captions to get AI-chosen moments.',
     }));
   };
+  // Fallback score from signals we have: speech density (energy), whether the
+  // window opens on a hook-like line, and how close it is to the start.
+  function heuristicScore(start) {
+    const len = Number(clipLength) || 30;
+    const segs = ctx.transcript?.segments || [];
+    const inWin = segs.filter(s => s.start >= start && s.start < start + len);
+    const words = inWin.reduce((n, s) => n + String(s.text).split(/\s+/).filter(Boolean).length, 0);
+    const wps = words / len;
+    const text = inWin.map(s => s.text).join(' ');
+    const first = inWin.slice(0, 6).map(s => s.text).join(' ');
+    let score = 58;
+    if (segs.length) {
+      score += Math.min(12, Math.round(wps * 4));
+      if (/[?!]|\b(never|nobody|secret|why|how|stop|biggest|worst|best|\d+)\b/i.test(first)) score += 6;
+      if (/!/.test(text)) score += 3;
+      if (wps < 0.5) score -= 6;
+    } else {
+      score += 4; // music/action footage with no speech
+    }
+    score += Math.max(0, 4 - Math.floor(start / 120));
+    score = Math.max(35, Math.min(82, score));
+    const reason = segs.length
+      ? `Estimated score (AI scoring unavailable): ${wps.toFixed(1)} words/sec of speech${score >= 70 ? ' with a strong opening' : ''}.`
+      : 'Estimated score: no speech detected, so this is based on clip position and length rather than dialogue.';
+    return { score, reason, reasons: { hook: segs.length ? 'Estimated from opening line' : 'Visual-only opening', pacing: `${wps.toFixed(1)} words/sec`, emotion: 'Estimate, not AI-rated' } };
+  }
 
   async function runOne(c, i) {
     const start = Number(c.startSec || 0);
@@ -678,6 +704,7 @@ export async function POST(request) {
       if (!scored && ctx.transcript?.text && Date.now() - startedAt < 170000) {
         scored = await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count); // one retry
       }
+      if (!scored?.clips?.length) reportError('generate:score', new Error(ctx.transcript?.text ? 'Gemini scoring failed twice; used heuristic scores' : 'No transcript; used heuristic scores'), videoUrl).catch(() => {});
       const base = scored?.clips?.length ? scored.clips.slice(0, count).map(c => ({ ...c, scored: true })) : unscoredClips(count);
 
       send({ type: 'status', step: 'cutting', total: base.length });
