@@ -51,24 +51,80 @@ function youtubeId(url) {
   return null;
 }
 
+// Transcript shape used everywhere below: { text, segments: [{ start, end, text }] }
+// Timestamps are what let the AI cut at the right second and let captions
+// land on the spoken word instead of being spread evenly across the clip.
+const EMPTY_TRANSCRIPT = { text: '', segments: [] };
+
 async function fetchTranscript(url) {
   const id = youtubeId(url);
-  if (!id) return '';
+  if (!id) return EMPTY_TRANSCRIPT;
   try {
     const { YouTubeTranscriptApi } = await import('extract-youtube');
     const api = new YouTubeTranscriptApi();
     const tr = await api.fetch(id);
     const raw = typeof tr.toRawData === 'function' ? tr.toRawData() : tr;
     const snippets = raw?.snippets || raw?.transcript || raw || [];
-    if (Array.isArray(snippets)) {
-      return snippets.map(s => s.text || s).filter(Boolean).join(' ');
-    }
-    return String(raw || '');
+    if (!Array.isArray(snippets)) return { text: String(raw || ''), segments: [] };
+    const segments = snippets
+      .map(s => {
+        const text = String(s?.text ?? s ?? '').replace(/\s+/g, ' ').trim();
+        const start = Number(s?.start ?? s?.offset ?? NaN);
+        const dur = Number(s?.duration ?? s?.dur ?? 0);
+        return text && Number.isFinite(start) ? { start, end: start + (dur > 0 ? dur : 2), text } : null;
+      })
+      .filter(Boolean);
+    return { text: segments.map(s => s.text).join(' '), segments };
   } catch (e) {
     // Many videos simply have no captions; this is expected, not an error.
     console.warn('transcript unavailable:', String(e?.message || e).split('\n')[0].slice(0, 160));
-    return '';
+    return EMPTY_TRANSCRIPT;
   }
+}
+
+function fmtTime(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// "[00:12] text" lines, trimmed to a token budget. Merges short caption
+// fragments into ~4s lines so the model sees phrases, not word confetti.
+function timestampedTranscript(transcript, maxChars = 24000) {
+  const segs = transcript?.segments || [];
+  if (!segs.length) return (transcript?.text || '').slice(0, maxChars);
+  const lines = [];
+  let cur = null;
+  for (const s of segs) {
+    if (cur && s.start - cur.start < 4) { cur.text += ' ' + s.text; cur.end = s.end; }
+    else { if (cur) lines.push(cur); cur = { ...s }; }
+  }
+  if (cur) lines.push(cur);
+  let out = '';
+  for (const l of lines) {
+    const line = `[${fmtTime(l.start)}] ${l.text}\n`;
+    if (out.length + line.length > maxChars) break;
+    out += line;
+  }
+  return out;
+}
+
+// Words spoken inside [start, start+len], with times relative to the clip start.
+function wordsInWindow(transcript, start, len) {
+  const segs = transcript?.segments || [];
+  const end = start + len;
+  const out = [];
+  for (const s of segs) {
+    if (s.end <= start || s.start >= end) continue;
+    const words = s.text.split(/\s+/).filter(Boolean);
+    if (!words.length) continue;
+    const step = Math.max(0.12, (s.end - s.start) / words.length);
+    words.forEach((w, i) => {
+      const a = s.start + i * step;
+      const b = a + step;
+      if (a >= start && a < end) out.push({ w, a: a - start, b: Math.min(b, end) - start });
+    });
+  }
+  return out;
 }
 
 
@@ -81,15 +137,24 @@ const SAMPLE_VIDEOS = [
 async function scoreWithGemini(transcript, videoUrl, format, style, length, count = 1) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  const prompt = `You are a viral short-form editor. From this transcript, pick the ${count} best moments of about ${length} seconds for TikTok/Reels/Shorts.
+  const timed = !!transcript?.segments?.length;
+  const prompt = `You are a top short-form editor who has studied what gets replayed and shared on TikTok, Reels and Shorts.
+From this ${timed ? 'timestamped ' : ''}transcript, pick the ${count} best self-contained moments of about ${length} seconds.
+
+How to choose:
+- The first 1-2 seconds must be a hook: a bold claim, a question, a number, a contradiction, or the middle of a story. Never start on "so", "um", "and", or a sentence that needs earlier context.
+- Each clip must make sense with zero context and end on a complete thought, punchline, or payoff. Cut before the next topic starts.
+- Prefer concrete, emotional, surprising, or contrarian moments over summaries and transitions.
+- Score 1-99 for how likely this clip is to stop the scroll and get shared. Be honest: most moments are 60-80. Reserve 90+ for exceptional ones.
+${timed ? `- startSec MUST be a second where a sentence begins, taken from the [mm:ss] markers (convert to seconds). Do not invent times outside the transcript range.` : ''}
 Return ONLY valid JSON with ${count} clip${count === 1 ? '' : 's'}, ranked best first:
-{"clips":[{"title":"...","hook":"...","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":90,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"..."}]}
+{"clips":[{"title":"short punchy title","hook":"on-screen hook, under 8 words","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":72,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"one sentence on why this moment works"}]}
 Clips must not overlap. startSec/endSec are seconds from the start of the video.
 Video: ${videoUrl}
 Format: ${format}
 Style: ${style}
 Transcript:
-${(transcript || '').slice(0, 14000)}`;
+${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcript || '').slice(0, 14000)}`;
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12000);
@@ -129,16 +194,24 @@ async function transcribe(audioPath) {
     const form = new FormData();
     form.append('file', new Blob([buf]), 'audio.mp3');
     form.append('model', 'whisper-large-v3');
+    // Word-level timestamps: this is what makes captions land on the spoken word.
+    form.append('response_format', 'verbose_json');
+    form.append('timestamp_granularities[]', 'word');
+    form.append('timestamp_granularities[]', 'segment');
     const res = await fetch(GROQ_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
       body: form,
     });
-    if (!res.ok) return '';
+    if (!res.ok) return EMPTY_TRANSCRIPT;
     const data = await res.json();
-    return data.text || '';
+    const words = Array.isArray(data.words) ? data.words : [];
+    const segments = words.length
+      ? words.map(w => ({ start: Number(w.start) || 0, end: Number(w.end) || (Number(w.start) || 0) + 0.3, text: String(w.word || '').trim() })).filter(w => w.text)
+      : (Array.isArray(data.segments) ? data.segments.map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() })).filter(s => s.text) : []);
+    return { text: data.text || segments.map(s => s.text).join(' '), segments };
   } catch {
-    return '';
+    return EMPTY_TRANSCRIPT;
   }
 }
 
@@ -151,16 +224,44 @@ function captionText(s) {
     .slice(0, 52) || 'Watch this';
 }
 
-function wordFilters(caption, length) {
+// Caption look per style. Hormozi = big yellow; podcast = clean white; default = bold white.
+function captionLook(style) {
+  const s = String(style || '').toLowerCase();
+  if (s.includes('hormozi') || s.includes('bold')) return { size: 60, color: 'yellow', border: 7, y: 'h-240' };
+  if (s.includes('podcast') || s.includes('clean')) return { size: 42, color: 'white', border: 4, y: 'h-170' };
+  return { size: 52, color: 'white', border: 6, y: 'h-200' };
+}
+
+// Word-synced captions from real timings: groups spoken words into 2-3 word
+// chunks that pop on screen the moment they are said. Falls back to spreading
+// the hook across the clip when there is no timed transcript.
+function wordFilters(caption, length, timedWords, style) {
+  const look = captionLook(style);
+  const draw = (text, a, b) =>
+    `drawtext=text='${captionText(text).toUpperCase()}':fontsize=${look.size}:fontcolor=${look.color}:borderw=${look.border}:bordercolor=black:x=(w-text_w)/2:y=${look.y}:enable='between(t,${a.toFixed(2)},${b.toFixed(2)})'`;
+
+  if (Array.isArray(timedWords) && timedWords.length >= 3) {
+    const chunks = [];
+    let cur = null;
+    for (const w of timedWords) {
+      const clean = w.w.replace(/'/g, '\u2019').replace(/[\\":%]/g, '');
+      if (!clean) continue;
+      const endsSentence = /[.!?]$/.test(clean);
+      if (!cur) cur = { text: clean, a: w.a, b: w.b, n: 1 };
+      else if (cur.n < 3 && w.a - cur.b < 0.6 && !/[.!?,]$/.test(cur.text)) { cur.text += ' ' + clean; cur.b = w.b; cur.n++; }
+      else { chunks.push(cur); cur = { text: clean, a: w.a, b: w.b, n: 1 }; }
+      if (endsSentence) { chunks.push(cur); cur = null; }
+    }
+    if (cur) chunks.push(cur);
+    // Hold each chunk until the next one starts so there are no flickering gaps.
+    return chunks.slice(0, 120).map((c, i) => draw(c.text, c.a, Math.max(c.b, (chunks[i + 1]?.a ?? c.b + 0.4) - 0.02))).join(',');
+  }
+
   const words = captionText(caption).split(' ').filter(Boolean).slice(0, 12);
   if (!words.length) return '';
   const dur = Math.max(Number(length) || 15, 5);
   const step = dur / words.length;
-  return words.map((w, i) => {
-    const a = (i * step).toFixed(2);
-    const b = ((i + 1) * step).toFixed(2);
-    return `drawtext=text='${w}':fontsize=48:fontcolor=white:borderw=5:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='between(t,${a},${b})'`;
-  }).join(',');
+  return words.map((w, i) => draw(w, i * step, (i + 1) * step)).join(',');
 }
 
 function styleCaption(caption, style) {
@@ -182,7 +283,7 @@ async function renderioCut(url, start, length, key, caption, vertical, opts = {}
     : 'scale=1280:-2');
   const text = captionText(caption);
   const styled = styleCaption(caption, opts.style);
-  const words = opts.wordCaptions ? wordFilters(caption, length) : '';
+  const words = opts.wordCaptions ? wordFilters(caption, length, opts.timedWords, opts.style) : '';
   const vf = words ? `${frame},${words}` : `${frame},${styled}`;
   // B-roll overlay is optional and off by default for speed.
   const useBroll = !!opts.broll;
@@ -361,17 +462,27 @@ export async function POST(request) {
   try {
   const vertical = clipFormat === 'shorts_9_16';
   // Shared state filled in by the setup steps inside the stream.
-  const ctx = { dir: null, source: null, transcript: '', downloadError: null };
-  const FALLBACK = [
-        { title: 'The moment everyone missed', hook: 'Wait for the last 3 seconds', hooks: ['Wait for the last 3 seconds', 'Nobody talks about this', 'Watch till the end'], caption: 'This changed everything. Save it.', hashtags: '#viral #shorts #fyp', bestTime: 'Tue 7pm', score: 94, startSec: 5 },
-        { title: 'Unexpected reaction', hook: 'I did not expect that', hooks: ['I did not expect that', 'The ending got me', 'POV you saw it too'], caption: 'The algorithm will love this.', hashtags: '#viral #reaction #fyp', bestTime: 'Thu 6pm', score: 87, startSec: 40 },
-        { title: 'Quick tip that hits', hook: 'Do this next time', hooks: ['Do this next time', 'Stop doing it the hard way', 'One change, better result'], caption: 'Save this for later.', hashtags: '#tips #howto #shorts', bestTime: 'Sun 11am', score: 81, startSec: 80 },
-        { title: 'The line that landed', hook: 'Say this instead', hooks: ['Say this instead', 'The line that landed', 'Copy this'], caption: 'Use this today.', hashtags: '#advice #viral #fyp', bestTime: 'Wed 8pm', score: 78, startSec: 120 },
-        { title: 'Proof it works', hook: 'Here is the proof', hooks: ['Here is the proof', 'Results in 10 seconds', 'Watch the numbers'], caption: 'Proof over promises.', hashtags: '#results #proof #shorts', bestTime: 'Fri 5pm', score: 76, startSec: 160 },
-        { title: 'The mistake to skip', hook: 'Stop doing this', hooks: ['Stop doing this', 'This is the mistake', 'Fix it in one step'], caption: 'Skip the mistake.', hashtags: '#mistake #tips #viral', bestTime: 'Mon 9am', score: 74, startSec: 200 },
-        { title: 'A better way', hook: 'There is a better way', hooks: ['There is a better way', 'Try this instead', 'Do it like this'], caption: 'A better way.', hashtags: '#better #howto #fyp', bestTime: 'Sat 10am', score: 72, startSec: 240 },
-        { title: 'The closer', hook: 'Remember this', hooks: ['Remember this', 'Take this with you', 'One thing to keep'], caption: 'Remember this.', hashtags: '#mindset #viral #shorts', bestTime: 'Sun 8pm', score: 70, startSec: 280 },
-      ];
+  const ctx = { dir: null, source: null, transcript: EMPTY_TRANSCRIPT, downloadError: null };
+  // When the AI can't score (no transcript, or the model call failed) we still
+  // cut evenly spaced clips, but we say so instead of inventing viral scores.
+  const unscoredClips = (n) => {
+    const segs = ctx.transcript?.segments || [];
+    const lastSec = segs.length ? segs[segs.length - 1].end : 0;
+    const span = Math.max(Number(clipLength) * n + 10, lastSec - Number(clipLength));
+    const gap = Math.max(Number(clipLength) + 2, Math.floor(span / n));
+    return Array.from({ length: n }, (_, i) => ({
+      title: `Clip ${i + 1}`,
+      hook: '',
+      hooks: [],
+      caption: '',
+      hashtags: '',
+      bestTime: '',
+      score: 0,
+      scored: false,
+      startSec: 5 + i * gap,
+      reason: 'No transcript was available, so this clip was not scored. Use a video with speech or captions to get AI-chosen moments.',
+    }));
+  };
 
   async function runOne(c, i) {
     const start = Number(c.startSec || 0);
@@ -383,7 +494,8 @@ export async function POST(request) {
     if (rio) {
       try {
         const label = autoSubtitles !== false ? (c.hook || c.title || '') : '';
-        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, broll: false, style: aiStyle, crop: faceCrop });
+        const timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
+        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: faceCrop });
         real = true;
       } catch (e) {
         ctx.downloadError = e?.message || String(e);
@@ -418,8 +530,9 @@ export async function POST(request) {
       title: c.title,
       hook: aiHook ? (c.hook || '') : '',
       hooks: Array.isArray(c.hooks) ? c.hooks.slice(0, 3) : [c.hook].filter(Boolean),
-      score: c.score || 80,
-      viralScore: c.score || 80,
+      score: c.scored === false ? 0 : (c.score || 70),
+      viralScore: c.scored === false ? 0 : (c.score || 70),
+      scored: c.scored !== false,
       duration: `${len}s`,
       format: clipFormat,
       style: aiStyle,
@@ -482,9 +595,9 @@ export async function POST(request) {
         }
       } catch {}
 
-      send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript });
-      const scored = await scoreWithGemini(ctx.transcript || `Video about ${videoUrl}. No transcript available.`, videoUrl, clipFormat, aiStyle, clipLength, count);
-      const base = scored?.clips?.length ? scored.clips.slice(0, count) : FALLBACK.slice(0, count);
+      send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
+      const scored = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count) : null;
+      const base = scored?.clips?.length ? scored.clips.slice(0, count).map(c => ({ ...c, scored: true })) : unscoredClips(count);
 
       send({ type: 'status', step: 'cutting', total: base.length });
       // Cut all requested clips in parallel; each one streams to the client the

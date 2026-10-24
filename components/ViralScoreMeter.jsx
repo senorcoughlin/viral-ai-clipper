@@ -6,8 +6,9 @@ const C = 264; // circumference for r=42 in a 100-unit viewBox
 
 export function scoreTier(score) {
   if (score >= 95) return { color: '#C6FF3D', label: 'Post this one' };
-  if (score >= 90) return { color: '#7C5CFF', label: 'Strong' };
-  return { color: '#FFB64D', label: 'Good — sharpen the hook' };
+  if (score >= 85) return { color: '#7C5CFF', label: 'Strong' };
+  if (score >= 70) return { color: '#FFB64D', label: 'Good — sharpen the hook' };
+  return { color: '#8A8A99', label: 'Needs a better hook' };
 }
 
 export default function ViralScoreMeter({ score = 0, size = 56, stroke = 11 }) {

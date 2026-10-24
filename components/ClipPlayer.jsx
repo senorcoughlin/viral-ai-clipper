@@ -103,8 +103,11 @@ export default function ClipPlayer({ clip, compact = false }) {
     }
   };
 
-  const score = clip.viralScore || clip.score || 90;
-  const { color, label } = scoreTier(score);
+  const unscored = clip.scored === false;
+  const score = unscored ? 0 : (clip.viralScore || clip.score || 70);
+  const tier = scoreTier(score);
+  const color = unscored ? '#8A8A99' : tier.color;
+  const label = unscored ? 'Not scored' : tier.label;
   const hookText = (socialCaption || '').replace(/#\S+/g, '').replace(/[^\w\s'!?.,-]/g, '').trim();
   const hookPct = Math.min(100, score + 2);
   const pacePct = Math.max(60, score - 5);
@@ -147,7 +150,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           <span className="rounded-full border border-line2 bg-ink/85 px-2 py-1 font-mono text-[11px]">{timestamp}</span>
           <span className="rounded-full border border-line2 bg-ink/85 px-2 py-1 text-[11px] font-semibold">{FORMAT_LABEL[clip.format] || '9:16'}</span>
         </div>
-        <div className="absolute right-3.5 top-3.5 pointer-events-none"><ViralScoreMeter score={score} size={56} /></div>
+        {!unscored && <div className="absolute right-3.5 top-3.5 pointer-events-none"><ViralScoreMeter score={score} size={56} /></div>}
         {clip.hookEnabled && !isPlaying && (
           <div className="absolute left-1/2 top-[22%] -translate-x-1/2 rounded-md bg-hot px-2 py-1 font-display text-[11px] font-extrabold uppercase tracking-wide text-white pointer-events-none">
             Wait for it
