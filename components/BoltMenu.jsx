@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { useInstall } from './PwaInstall';
 import AccountBar from './AccountBar';
 
 const LINKS = [
@@ -10,6 +11,7 @@ const LINKS = [
 
 export default function BoltMenu({ icon, onAccountChange }) {
   const [open, setOpen] = useState(false);
+  const install = useInstall();
   const ref = useRef(null);
   useEffect(() => {
     const close = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -32,6 +34,10 @@ export default function BoltMenu({ icon, onAccountChange }) {
               <a key={href} href={href} onClick={() => setOpen(false)}
                 className="rounded-lg px-3 py-2 text-sm font-medium text-soft no-underline hover:bg-ink hover:text-fg">{label}</a>
             ))}
+            {!install.standalone && (
+              <button type="button" onClick={async () => { setOpen(false); if (!(await install.prompt())) window.dispatchEvent(new Event('vac:install-hint')); }}
+                className="rounded-lg px-3 py-2 text-left text-sm font-medium text-lime hover:bg-ink">Install app</button>
+            )}
           </nav>
         </div>
       )}

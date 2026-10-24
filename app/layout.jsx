@@ -1,4 +1,5 @@
 import './globals.css'
+import PwaInstall from '../components/PwaInstall'
 import { Syne, Inter, JetBrains_Mono } from 'next/font/google'
 
 const display = Syne({ subsets: ['latin'], weight: ['700', '800'], variable: '--font-display', display: 'swap' })
@@ -19,6 +20,9 @@ export const metadata = {
   openGraph: { type: 'website', url: SITE, siteName: 'Viral AI Clipper', title: TITLE, description: DESC },
   twitter: { card: 'summary_large_image', title: TITLE, description: DESC },
   robots: { index: true, follow: true },
+  appleWebApp: { capable: true, title: 'AI Clipper', statusBarStyle: 'black-translucent' },
+  icons: { apple: '/apple-touch-icon.png' },
+  other: { 'mobile-web-app-capable': 'yes' },
 }
 
 export const viewport = {
@@ -29,7 +33,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body>{children}</body>
+      <body>{children}<PwaInstall /></body>
     </html>
   )
 }
