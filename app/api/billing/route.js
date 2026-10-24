@@ -34,7 +34,7 @@ export async function GET(request) {
         } catch (e) { console.warn('billing: subscription lookup failed', e?.message); }
       }
       const ent = await getEntitlement(email);
-      const res = NextResponse.json({ success: true, signedIn: true, email, type: s.metadata?.type === 'credits' ? 'credits' : 'pro', purchased: Number(s.metadata?.credits) || 0, ...ent });
+      const res = NextResponse.json({ success: true, signedIn: true, email, type: s.metadata?.type === 'credits' ? 'credits' : 'pro', purchased: Number(s.metadata?.credits) || 0, sessionId: s.id, plan: s.metadata?.plan || null, amount: typeof s.amount_total === 'number' ? s.amount_total / 100 : null, currency: String(s.currency || 'usd').toUpperCase(), ...ent });
       return setSessionCookie(res, { email, verified: true });
     }
     const sess = getSession(request);

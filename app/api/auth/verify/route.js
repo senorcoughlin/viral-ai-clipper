@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { consumeMagicToken } from '../../../../lib/magic';
 import { setSessionCookie } from '../../../../lib/session';
 import { routeGuard } from '../../../../lib/ratelimit';
+import { kvEnabled, kvCommand } from '../../../../lib/kv';
+import crypto from 'crypto';
 
 const SITE = 'https://viralaiclipper.com';
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -27,5 +29,14 @@ export async function POST(request) {
   const email = await consumeMagicToken(t).catch(() => null);
   // 303 so the browser follows with a GET.
   if (!email) return NextResponse.redirect(`${SITE}/?signin=expired`, 303);
-  return setSessionCookie(NextResponse.redirect(`${SITE}/?signin=ok`, 303), { email, verified: true });
+  // First verified sign-in for this email -> ?signin=new so the client fires the sign_up conversion once.
+  let flag = 'ok';
+  if (kvEnabled) {
+    try {
+      const k = 'seen_user:' + crypto.createHash('sha256').update(String(email).toLowerCase()).digest('hex').slice(0, 32);
+      const r = await kvCommand(['SET', k, '1', 'NX']);
+      if (r === 'OK') flag = 'new';
+    } catch {}
+  }
+  return setSessionCookie(NextResponse.redirect(`${SITE}/?signin=${flag}`, 303), { email, verified: true });
 }

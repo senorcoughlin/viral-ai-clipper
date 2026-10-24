@@ -1,5 +1,6 @@
 import './globals.css'
 import PwaInstall from '../components/PwaInstall'
+import GoogleAds from '../components/GoogleAds'
 import { Analytics } from '@vercel/analytics/next'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Syne, Inter, JetBrains_Mono } from 'next/font/google'
@@ -35,7 +36,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body>{children}<PwaInstall /><Analytics /><SpeedInsights /></body>
+      <body>{children}<PwaInstall /><GoogleAds /><Analytics /><SpeedInsights /></body>
     </html>
   )
 }

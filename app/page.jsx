@@ -8,6 +8,7 @@ import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 import AccountBar, { syncClips } from '../components/AccountBar';
 import BoltMenu from '../components/BoltMenu';
+import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
 
 const FREE_DAILY_LIMIT = 3;
@@ -322,6 +323,7 @@ function HomeInner() {
   };
 
   const handleUpgrade = async (plan) => {
+    trackConversion('begin_checkout', { plan, value: PLAN_VALUES[plan], currency: 'USD' });
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',

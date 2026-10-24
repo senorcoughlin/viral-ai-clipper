@@ -27,6 +27,14 @@ export default function Privacy() {
         <li><b>Resend</b> – delivers sign-in emails.</li>
       </ul>
       <p>These providers process data only to deliver the service to you. Google user data (your YouTube token) is not shared with these AI or rendering providers.</p>
+      <h2>Analytics, advertising and cookies</h2>
+      <ul>
+        <li><b>Vercel Analytics and Speed Insights</b> – privacy-friendly, cookie-less page view and performance measurement (pages visited, referrer, country, device type).</li>
+        <li><b>Google Ads conversion tracking</b> – if you arrive from one of our ads, Google’s tag (gtag.js) may set cookies so we can measure whether the ad led to a sign-up, checkout or purchase. We report only the event and purchase amount to Google; we never send your Google/YouTube data or clip content.</li>
+        <li><b>Attribution cookie</b> – a first-party cookie (<code>vac_attr</code>, 90 days) stores ad click IDs (such as <code>gclid</code>) and campaign UTM tags from the link you arrived on. They are attached to your Stripe checkout so we know which campaign led to a purchase.</li>
+        <li><b>Essential cookies</b> – a signed session cookie keeps you signed in.</li>
+      </ul>
+      <p>You can block or delete cookies in your browser settings, and manage Google ad personalization at <a href="https://adssettings.google.com">adssettings.google.com</a>. Blocking them does not affect how the app works.</p>
       <h2>We do not sell your data</h2>
       <p>We do not sell, rent, or trade your personal information to anyone.</p>
       <h2>Retention and security</h2>

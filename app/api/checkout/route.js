@@ -9,6 +9,20 @@ const CREDIT_PACKS = {
   credits_100: { priceEnv: 'STRIPE_PRICE_CREDITS_100', credits: 100, mode: 'payment' },
 };
 
+// gclid/utm captured on landing (components/GoogleAds.jsx) -> Stripe metadata for attribution.
+function readAttribution(request) {
+  const out = {};
+  try {
+    const raw = request.cookies.get('vac_attr')?.value;
+    if (!raw) return out;
+    const a = JSON.parse(decodeURIComponent(raw));
+    for (const k of ['gclid', 'gbraid', 'wbraid', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'landing']) {
+      if (a[k]) out[k] = String(a[k]).slice(0, 200);
+    }
+  } catch {}
+  return out;
+}
+
 export async function POST(request) {
   const limited = await routeGuard(request, 'checkout', 30, 3600);
   if (limited) return limited;
@@ -22,6 +36,7 @@ export async function POST(request) {
     }
 
     const stripe = require('stripe')(secret);
+    const attr = readAttribution(request);
     const origin = request.headers.get('origin') || 'https://viralaiclipper.com';
 
     // One-time credit packs
@@ -37,7 +52,7 @@ export async function POST(request) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}&type=credits`,
         cancel_url: `${origin}/cancel`,
-        metadata: { type: 'credits', credits: String(pack.credits) },
+        metadata: { type: 'credits', credits: String(pack.credits), plan: planType, ...attr },
         managed_payments: { enabled: false },
       });
 
@@ -58,6 +73,8 @@ export async function POST(request) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/cancel`,
+      metadata: { plan: planType, ...attr },
+      subscription_data: { metadata: { plan: planType, ...attr } },
       managed_payments: { enabled: false },
     });
 

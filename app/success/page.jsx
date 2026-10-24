@@ -1,6 +1,18 @@
 'use client';
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { trackConversion, PLAN_VALUES } from '../../lib/conversions';
+
+// Fires once per Stripe session (transaction_id also dedupes on Google's side).
+function firePurchase(d, sid) {
+  try {
+    const key = 'vac_conv_' + sid;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
+  } catch {}
+  const value = typeof d.amount === 'number' ? d.amount : (PLAN_VALUES[d.plan] ?? (d.type === 'credits' ? undefined : 19.99));
+  trackConversion('purchase', { transaction_id: d.sessionId || sid, value, currency: d.currency || 'USD', plan: d.plan || d.type });
+}
 
 function SuccessContent() {
   const params = useSearchParams();
@@ -13,6 +25,7 @@ function SuccessContent() {
     if (!sid) { setState({ status: 'error', message: 'Missing checkout session. Open the link from your purchase again.' }); return; }
     fetch(`/api/billing?session_id=${encodeURIComponent(sid)}`, { cache: 'no-store' })
       .then(r => r.json())
+      .then(d => { if (d?.success) firePurchase(d, sid); return d; })
       .then(d => d?.success ? setState({ status: 'ok', ...d }) : setState({ status: 'error', message: d?.message || 'Could not confirm this purchase.' }))
       .catch(() => setState({ status: 'error', message: 'Network error. Refresh this page to try again.' }));
   }, [params]);

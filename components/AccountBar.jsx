@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { trackConversion } from '../lib/conversions';
 
 export function readSession() {
   try { return JSON.parse(localStorage.getItem('viral_account') || 'null'); } catch { return null; }
@@ -33,6 +34,7 @@ export default function AccountBar({ onChange, inline = false }) {
     const q = new URLSearchParams(window.location.search);
     const flag = q.get('signin');
     if (flag) {
+      if (flag === 'new') trackConversion('sign_up', { method: 'email_link' });
       if (flag === 'expired') { setNotice('That sign-in link has expired or was already used. Request a new one.'); setMode('email'); setOpen(true); }
       q.delete('signin');
       const qs = q.toString();
@@ -77,6 +79,7 @@ export default function AccountBar({ onChange, inline = false }) {
       });
       const data = await res.json();
       if (!data.success) { setError(data.message || 'Could not sign in'); return; }
+      if (mode === 'register') trackConversion('sign_up', { method: 'password' });
       save({ email: data.email, token: data.token });
       if (Array.isArray(data.clips)) localStorage.setItem('viral_clipper_cloud', JSON.stringify(data.clips));
       setOpen(false);
