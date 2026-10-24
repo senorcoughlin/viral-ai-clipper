@@ -255,6 +255,19 @@ async function audioTranscript(url, timeoutMs) {
 // Server-side face tracking for vertical crops. One RenderIO job grabs 3 frames
 // across the clip window as a single 3x1 contact sheet; Gemini vision returns the
 // speaker's horizontal face center in each frame; we crop around the median.
+// Width/height from a JPEG's SOF marker.
+function jpegSize(buf) {
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xFF) { i++; continue; }
+    const m = buf[i + 1];
+    const len = buf.readUInt16BE(i + 2);
+    if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+    i += 2 + len;
+  }
+  return null;
+}
+
 async function faceCropFor(url, start, len, timeoutMs = 45000) {
   const rio = process.env.RENDERIO_API_KEY;
   const gkey = process.env.GEMINI_API_KEY;
@@ -268,7 +281,9 @@ async function faceCropFor(url, start, len, timeoutMs = 45000) {
     }, 'out_img', rio, timeoutMs);
     const img = await fetch(sheetUrl, { cache: 'no-store' });
     if (!img.ok) return null;
-    const b64 = Buffer.from(await img.arrayBuffer()).toString('base64');
+    const jpg = Buffer.from(await img.arrayBuffer());
+    const dims = jpegSize(jpg);
+    const b64 = jpg.toString('base64');
     const prompt = 'This image is 3 video frames side by side (left, middle, right). For each frame, find the main speaker\'s face (the person talking or most prominent). Return ONLY JSON {"faces":[x1,x2,x3]} where each x is the horizontal center of that face as a fraction 0-1 of THAT frame\'s width, or null if no face.';
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 20000);
@@ -277,7 +292,7 @@ async function faceCropFor(url, start, len, timeoutMs = 45000) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+        generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
       }),
     });
     clearTimeout(timer);
@@ -289,8 +304,10 @@ async function faceCropFor(url, start, len, timeoutMs = 45000) {
     console.log('face track', { ms: Date.now() - t0, xs });
     if (!xs.length) return null;
     const cx = xs[Math.floor(xs.length / 2)];
-    // After scaling a 16:9 source to 1280 tall it is ~2276 wide; centre a 720 window on the face.
-    const W = 2276;
+    // Width of one frame once scaled to 1280 tall (from the contact sheet's real aspect).
+    const aspect = dims ? (dims.w / 3) / dims.h : 16 / 9;
+    if (aspect <= 9 / 16 + 0.01) return null; // already vertical: nothing to pan
+    const W = 1280 * aspect;
     const f = Math.max(0, Math.min(1, (cx * W - 360) / (W - 720)));
     return `scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=(iw-720)*${f.toFixed(3)}:y=(ih-1280)/5`;
   } catch (e) {
