@@ -13,7 +13,7 @@ import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billin
 import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioCut, sanitizeBrand } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
-import { toFetchable } from '../../../lib/media';
+import { toFetchable, isBlobUrl } from '../../../lib/media';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept. Long sources make RenderIO's download+cut slower and
@@ -233,12 +233,12 @@ async function transcribeBuffer(buf) {
 
 const AUDIO_CAP_SEC = 90 * 60;
 const GROQ_MAX_BYTES = 25 * 1024 * 1024;
-async function audioTranscript(url, timeoutMs) {
+async function audioTranscript(url, timeoutMs, direct = false) {
   const rio = process.env.RENDERIO_API_KEY;
   if (!rio || !process.env.GROQ_API_KEY) return EMPTY_TRANSCRIPT;
   const t0 = Date.now();
   const audioUrl = await renderioRun({
-    input_urls: { in_video: url },
+    [direct ? 'input_files' : 'input_urls']: { in_video: url },
     ffmpeg_command: `-i {{in_video}} -t ${AUDIO_CAP_SEC} -map 0:a:0 -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k {{out_audio}}`,
     output_files: { out_audio: 'audio.mp3' },
   }, 'out_audio', rio, timeoutMs);
@@ -268,14 +268,14 @@ function jpegSize(buf) {
   return null;
 }
 
-async function faceCropFor(url, start, len, timeoutMs = 45000) {
+async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false) {
   const rio = process.env.RENDERIO_API_KEY;
   const gkey = process.env.GEMINI_API_KEY;
   if (!rio || !gkey) return null;
   try {
     const t0 = Date.now();
     const sheetUrl = await renderioRun({
-      input_urls: { in_video: url },
+      [direct ? 'input_files' : 'input_urls']: { in_video: url },
       ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(len) || 30} -vf "fps=3/${Number(len) || 30},scale=480:-2,tile=3x1" -frames:v 1 -q:v 4 {{out_img}}`,
       output_files: { out_img: 'sheet.jpg' },
     }, 'out_img', rio, timeoutMs);
@@ -438,7 +438,7 @@ export async function POST(request) {
   }
 
   // Capacity pre-check (before charging usage): a run needs ~1 cut per clip plus audio and face jobs.
-  if (process.env.RENDERIO_API_KEY && (await renderioLeft()) < count + 2) {
+  if (process.env.RENDERIO_API_KEY && (await renderioLeft()) < count + 3) {
     return NextResponse.json({ success: false, message: CAPACITY_MESSAGE, capacity: true }, { status: 503 });
   }
 
@@ -506,8 +506,9 @@ export async function POST(request) {
         // Track the speaker for vertical clips while there's time left in the 300s budget.
         let crop = null;
         // Skip face tracking when the monthly RenderIO budget is getting tight.
-        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 150000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(rioUrl, start, len);
-        playUrl = await renderioCut(rioUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop, brand });
+        const src = ctx.srcP ? await ctx.srcP : { url: rioUrl, direct: false };
+        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(src.url, start, len, src.direct ? 30000 : 45000, src.direct);
+        playUrl = await renderioCut(src.url, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop, brand, direct: src.direct });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
@@ -602,9 +603,20 @@ export async function POST(request) {
       // Cold run: start the RenderIO audio -> Whisper path at the same time as the
       // YouTube caption fetch (captions are usually blocked from Vercel). If captions
       // win, the audio result is simply ignored.
+      // Download the source once (720p) right away; audio, face frames and cuts then run
+      // as plain ffmpeg jobs on that file (fast seeks) instead of each re-downloading it.
+      // Uploads are already direct files. If the download fails, fall back to per-job yt-dlp.
+      const rioKey = process.env.RENDERIO_API_KEY;
+      if (rioKey) {
+        ctx.srcP = isBlobUrl(videoUrl)
+          ? Promise.resolve({ url: rioUrl, direct: true })
+          : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 180000)
+              .then(u => ({ url: u, direct: true }))
+              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; return { url: rioUrl, direct: false }; });
+      }
       let audioP = null;
-      if (!cachedTr && process.env.RENDERIO_API_KEY && process.env.GROQ_API_KEY) {
-        audioP = audioTranscript(rioUrl, 150000).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
+      if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
+        audioP = ctx.srcP.then(src => audioTranscript(src.url, 120000, src.direct)).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }
       ctx.transcript = cachedTr || (ytId ? await fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT);
       ctx.transcriptSource = cachedTr ? 'cache' : ctx.transcript?.segments?.length ? 'youtube' : null;
