@@ -12,6 +12,7 @@ import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/r
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioCut, sanitizeBrand } from '../../../lib/render';
+import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept. Long sources make RenderIO's download+cut slower and
 // risk the 300s function limit (seen in production). Override with MAX_SOURCE_MINUTES.
@@ -172,6 +173,7 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
     clearTimeout(timer);
     if (!res.ok) { console.warn('gemini failed', res.status, (await res.text().catch(() => '')).slice(0, 200)); return null; }
     const data = await res.json();
+    meterGemini('score', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
     let parsed = null;
     try { parsed = JSON.parse(text); } catch {
@@ -215,6 +217,7 @@ async function transcribeBuffer(buf) {
       return EMPTY_TRANSCRIPT;
     }
     const data = await res.json();
+    meterWhisper(data.duration);
     const words = Array.isArray(data.words) ? data.words : [];
     const segments = words.length
       ? words.map(w => ({ start: Number(w.start) || 0, end: Number(w.end) || (Number(w.start) || 0) + 0.3, text: String(w.word || '').trim() })).filter(w => w.text)
@@ -278,6 +281,7 @@ async function faceCropFor(url, start, len, timeoutMs = 45000) {
     clearTimeout(timer);
     if (!res.ok) return null;
     const data = await res.json();
+    meterGemini('face', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
     const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x >= 0 && x <= 1).sort((a, b) => a - b);
     console.log('face track', { ms: Date.now() - t0, xs });
@@ -537,7 +541,10 @@ export async function POST(request) {
   }
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
-    async start(controller) {
+    start(controller) {
+      const meter = newMeter();
+      const t0 = Date.now();
+      return withMeter(meter, async () => {
       const send = (obj) => {
         try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
       };
@@ -547,6 +554,8 @@ export async function POST(request) {
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
       if (cached && cached.length) {
+        ctx.cachedHit = true;
+        ctx.runClips = cached;
         send({ type: 'start', total: cached.length, cached: true });
         for (let i = 0; i < cached.length; i++) {
           send({ type: 'clip', index: i, total: cached.length, clip: cached[i] });
@@ -570,6 +579,7 @@ export async function POST(request) {
         audioP = audioTranscript(videoUrl, 150000).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }
       ctx.transcript = cachedTr || (ytId ? await fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT);
+      ctx.transcriptSource = cachedTr ? 'cache' : ctx.transcript?.segments?.length ? 'youtube' : null;
       try {
         if (process.env.RENDERIO_API_KEY) {
           // RenderIO handles download + cut. If captions were blocked, use the
@@ -577,6 +587,7 @@ export async function POST(request) {
           if (!ctx.transcript?.segments?.length && audioP) {
             send({ type: 'status', step: 'transcript', detail: 'audio' });
             ctx.transcript = await audioP;
+            ctx.transcriptSource = ctx.transcript?.segments?.length ? 'whisper' : null;
           }
         } else if (ctx.dir) {
           send({ type: 'status', step: 'download' });
@@ -624,6 +635,8 @@ export async function POST(request) {
         }
       });
       const clips = results.filter(Boolean);
+      ctx.runClips = clips;
+      ctx.runFailed = base.length - clips.length;
       if (clips.length) await setCached(key, clips);
       try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
       const real = clips.length;
@@ -652,6 +665,14 @@ export async function POST(request) {
         send({ type: 'done', note: 'Stopped early.', total: 0 });
         try { controller.close(); } catch {}
       }
+      }).finally(() => saveRun({
+        at: t0, ms: Date.now() - t0, video: youtubeId(videoUrl) || String(videoUrl).slice(0, 120),
+        requested: count, clipLength, tier, cached: !!ctx.cachedHit,
+        transcript: ctx.transcriptSource || null,
+        clips: (ctx.runClips || []).map(c => ({ score: c.viralScore || 0, scored: c.scored !== false })),
+        failed: ctx.runFailed || 0,
+        meter,
+      }));
     },
   });
 
