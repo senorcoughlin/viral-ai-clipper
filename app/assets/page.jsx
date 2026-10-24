@@ -45,11 +45,11 @@ export default function AssetsPage() {
             <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-lime text-ink font-extrabold">V</span>
             <span className="font-display text-lg font-extrabold tracking-tight">Viral AI Clipper</span>
           </a>
-          <nav className="flex items-center gap-6 text-sm font-medium text-soft">
-            <a href="/" className="hover:text-fg">Home</a>
-            <a href="/connectors" className="hover:text-fg">Connectors</a>
-            <a href="/tools" className="hover:text-fg">AI Tools</a>
-            <a href="/assets" className="text-lime">My Assets</a>
+          <nav className="flex items-center gap-3 text-sm md:gap-6 font-medium text-soft">
+            <a href="/" className="hidden hover:text-fg md:inline">Home</a>
+            <a href="/connectors" className="hidden hover:text-fg md:inline">Connectors</a>
+            <a href="/tools" className="hidden hover:text-fg md:inline">AI Tools</a>
+            <a href="/assets" className="hidden text-lime sm:inline">My Assets</a>
             <AccountBar onChange={load} />
           </nav>
         </div>
