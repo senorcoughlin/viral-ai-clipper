@@ -714,8 +714,8 @@ function HomeInner() {
               </button>
             </div>
           </div>
-          <div className="grid w-full max-w-[860px] gap-5 md:grid-cols-2">
-            <article className="card flex flex-col gap-5 p-8">
+          <div className="grid w-full max-w-[860px] grid-cols-1 gap-5 md:grid-cols-2">
+            <article className="card flex min-w-0 flex-col gap-5 p-6 sm:p-8">
               <div className="flex flex-col gap-1.5">
                 <span className="font-display text-xl font-extrabold">Free</span>
                 <span className="text-sm text-muted">Try it on your next upload.</span>
