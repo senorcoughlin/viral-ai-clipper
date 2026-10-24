@@ -15,6 +15,7 @@ export default function PermissionsPage() {
   const [msg, setMsg] = useState('');
 
   const apply = d => { if (d?.success) { setItems(d.items || []); if ('signedIn' in d) setSignedIn(d.signedIn); } else setMsg(d?.message || 'Something went wrong'); };
+  useEffect(() => { const q = new URLSearchParams(location.search); if (q.get('name')) setForm(f => ({ ...f, name: q.get('name').slice(0, 80), channelUrl: (q.get('url') || '').slice(0, 300) })); }, []);
   useEffect(() => { fetch('/api/permissions').then(r => r.json()).then(apply).catch(() => setMsg('Could not load')); }, []);
 
   async function submit(e) {

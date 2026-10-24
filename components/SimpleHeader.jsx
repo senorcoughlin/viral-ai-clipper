@@ -7,6 +7,7 @@ export default function SimpleHeader() {
           <span className="font-display text-lg font-extrabold tracking-tight">Viral AI Clipper</span>
         </a>
         <nav className="flex gap-5 text-sm font-medium text-soft">
+          <a href="/monetize" className="hover:text-fg">Monetize</a>
           <a href="/permissions" className="hover:text-fg">Permissions</a>
           <a href="/programs" className="hover:text-fg">Programs</a>
         </nav>

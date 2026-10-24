@@ -56,7 +56,9 @@ export default function ClipPlayer({ clip, compact = false }) {
   const [pendingPost, setPendingPost] = useState(null);
   const [creditOn, setCreditOn] = useState(true);
   const credit = useCredit(clip.source);
-  useEffect(() => { setCreditOn(autoCreditOn()); }, []);
+  const [showMonetize, setShowMonetize] = useState(false);
+  useEffect(() => { setCreditOn(autoCreditOn()); try { setShowMonetize(localStorage.getItem('viral_hide_monetize') !== '1' && localStorage.getItem('viral_hide_monetize_' + clip.id) !== '1'); } catch {} }, [clip.id]);
+  const monetizeHref = '/monetize?' + new URLSearchParams({ clip: String(clip.id || ''), src: clip.source || '', title: clip.title || '' });
 
   const videoSrc = renderedUrl || (srcIndex === 0 && clip.videoUrl ? clip.videoUrl : null) || SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
 
@@ -251,6 +253,13 @@ export default function ClipPlayer({ clip, compact = false }) {
           </button>
         </div>
       </div>
+      )}
+      {showMonetize && clip.videoUrl && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-4 py-2 text-[11px]">
+          <a href={monetizeHref} className="font-semibold text-lime no-underline">Monetize this clip →</a>
+          <button type="button" onClick={() => { try { localStorage.setItem('viral_hide_monetize_' + clip.id, '1'); } catch {} setShowMonetize(false); }} className="text-muted hover:text-fg" aria-label="Dismiss">✕</button>
+          <button type="button" onClick={() => { try { localStorage.setItem('viral_hide_monetize', '1'); } catch {} setShowMonetize(false); }} className="text-muted hover:text-fg">Don&apos;t show again</button>
+        </div>
       )}
       {credit && (
         <label className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-[11px] text-muted">

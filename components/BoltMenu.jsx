@@ -5,7 +5,7 @@ import AccountBar from './AccountBar';
 const LINKS = [
   ['Home', '/#top'], ['Your clips', '/#clips'], ['Tutorial', '/tutorial'],
   ['Connect YouTube', '/api/youtube/start'], ['Connectors', '/connectors'],
-  ['AI Tools', '/tools'], ['My Assets', '/assets'], ['Channel', '/channel'], ['Permissions', '/permissions'], ['Clipping programs', '/programs'], ['Pricing', '/#pricing'],
+  ['AI Tools', '/tools'], ['My Assets', '/assets'], ['Channel', '/channel'], ['Monetize', '/monetize'], ['Permissions', '/permissions'], ['Clipping programs', '/programs'], ['Pricing', '/#pricing'],
 ];
 
 export default function BoltMenu({ icon, onAccountChange }) {
