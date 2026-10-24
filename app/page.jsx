@@ -601,26 +601,7 @@ function HomeInner() {
           )}
 
           {isProcessing && clips.length === 0 && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/80 p-4 backdrop-blur-sm sm:items-center">
-              <div role="dialog" aria-modal="true" aria-labelledby="progress-title" className="w-full max-w-md rounded-3xl border border-line2 bg-surface p-7 shadow-modal animate-fadeup">
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="h-3 w-3 animate-pulse rounded-full bg-lime" />
-                  <span id="progress-title" className="text-sm font-semibold text-white">Clipping in progress</span>
-                </div>
-                <p aria-live="polite" className="mb-5 text-sm text-soft">{progressLabel || 'Working…'}</p>
-                <div className="mb-4 h-2 overflow-hidden rounded-full bg-ink">
-                  <div className="h-full bg-lime transition-all duration-500" style={{ width: `${Math.min(100, (progressStep + 1) * 20)}%` }} />
-                </div>
-                <ul className="space-y-2 text-sm">
-                  {['Downloading video', 'Analyzing audio', 'Scoring moments', 'Cutting clips', 'Ready'].map((label, i) => (
-                    <li key={label} className={`flex items-center gap-2 ${i <= progressStep ? 'text-lime' : 'text-muted'}`}>
-                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${i <= progressStep ? 'bg-lime text-ink' : 'bg-ink text-muted'}`}>{i < progressStep ? '✓' : i + 1}</span>
-                      {label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+            <ProgressDock label={progressLabel} step={progressStep} />
           )}
 
           {clips.length > 0 && (
@@ -849,5 +830,40 @@ export default function Home() {
     <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-ink text-muted">Loading…</div>}>
       <HomeInner />
     </Suspense>
+  );
+}
+
+
+function ProgressDock({ label, step }) {
+  const [min, setMin] = useState(false);
+  const pct = Math.min(100, (step + 1) * 20);
+  if (min) {
+    return (
+      <button type="button" onClick={() => setMin(false)} aria-label="Show clipping progress"
+        className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full border border-line2 bg-surface/90 px-4 py-2.5 text-xs font-semibold text-white shadow-modal backdrop-blur">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-lime" />Clipping… {pct}%
+      </button>
+    );
+  }
+  return (
+    <div role="status" aria-live="polite" className="fixed bottom-4 left-4 right-4 z-50 rounded-2xl border border-line2 bg-surface/85 p-5 shadow-modal backdrop-blur animate-fadeup sm:left-auto sm:w-[360px]">
+      <div className="mb-3 flex items-center gap-3">
+        <div className="h-3 w-3 animate-pulse rounded-full bg-lime" />
+        <span className="text-sm font-semibold text-white">Clipping in progress</span>
+        <button type="button" onClick={() => setMin(true)} aria-label="Minimize" className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-soft hover:bg-ink hover:text-white">–</button>
+      </div>
+      <p className="mb-3 text-sm text-soft">{label || 'Working…'}</p>
+      <div className="mb-3 h-2 overflow-hidden rounded-full bg-ink">
+        <div className="h-full bg-lime transition-all duration-500" style={{ width: `${pct}%` }} />
+      </div>
+      <ul className="space-y-1.5 text-xs">
+        {['Downloading video', 'Analyzing audio', 'Scoring moments', 'Cutting clips', 'Ready'].map((l, i) => (
+          <li key={l} className={`flex items-center gap-2 ${i <= step ? 'text-lime' : 'text-muted'}`}>
+            <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${i <= step ? 'bg-lime text-ink' : 'bg-ink text-muted'}`}>{i < step ? '✓' : i + 1}</span>{l}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-[11px] text-muted">Keep browsing this page. Opening another page will stop the clipping.</p>
+    </div>
   );
 }
