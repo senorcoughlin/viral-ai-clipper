@@ -154,9 +154,9 @@ function styleCaption(caption, style) {
 
 async function renderioCut(url, start, length, key, caption, vertical, opts = {}) {
   // Face-biased crop: prefer the upper-center of the frame where speakers usually sit.
-  const frame = vertical
+  const frame = opts.crop || (vertical
     ? 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=(iw-720)/2:y=(ih-1280)/5'
-    : 'scale=1280:-2';
+    : 'scale=1280:-2');
   const text = captionText(caption);
   const styled = styleCaption(caption, opts.style);
   const words = opts.wordCaptions ? wordFilters(caption, length) : '';
@@ -291,7 +291,7 @@ async function mapLimit(items, limit, fn) {
 
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1, proEmail, hasCredits, useCredit } = body;
+  const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle = 'character_swap', autoSubtitles, aiHook, clipLength = 30, clipCount = 1, proEmail, hasCredits, useCredit, faceCrop } = body;
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
   const videoUrl = validateVideoUrl(rawUrl);
@@ -335,7 +335,7 @@ export async function POST(request) {
     if (rio) {
       try {
         const label = autoSubtitles !== false ? (c.hook || c.title || '') : '';
-        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, broll: false, style: aiStyle });
+        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, broll: false, style: aiStyle, crop: faceCrop });
         real = true;
       } catch (e) {
         ctx.downloadError = e?.message || String(e);

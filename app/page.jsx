@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ClipPlayer from '../components/ClipPlayer';
+import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 import AccountBar, { syncClips } from '../components/AccountBar';
 
@@ -166,10 +167,18 @@ function HomeInner() {
           setProgressLabel(`${label} ${secs}s`);
         }, 1000);
         try {
+        let faceCrop = null;
+        try {
+          const thumb = url.includes('youtu') ? `https://i.ytimg.com/vi/${(url.match(/(?:v=|youtu\.be\/)([\w-]{11})/) || [])[1]}/hqdefault.jpg` : null;
+          if (thumb) {
+            const face = await detectFaceBox(thumb);
+            if (face) faceCrop = cropFromFace(face, clipFormat === 'shorts_9_16');
+          }
+        } catch {}
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0, useCredit: !isPro && dailyCount >= FREE_DAILY_LIMIT && credits > 0 }),
+          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, faceCrop, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0, useCredit: !isPro && dailyCount >= FREE_DAILY_LIMIT && credits > 0 }),
         });
         if (!res.ok) {
           const text = await res.text().catch(() => '');
