@@ -165,19 +165,19 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: Math.min(8192, 600 + 450 * count), responseMimeType: 'application/json' },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192, responseMimeType: 'application/json' },
       }),
     });
     clearTimeout(timer);
     if (!res.ok) { console.warn('gemini failed', res.status, (await res.text().catch(() => '')).slice(0, 200)); return null; }
     const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
     let parsed = null;
     try { parsed = JSON.parse(text); } catch {
       const match = text.match(/\{[\s\S]*\}/);
       parsed = match ? JSON.parse(match[0]) : null;
     }
-    if (!Array.isArray(parsed?.clips)) return null;
+    if (!Array.isArray(parsed?.clips)) { console.warn('gemini no clips', data?.candidates?.[0]?.finishReason, text.slice(0, 200)); return null; }
     parsed.clips = parsed.clips
       .filter(c => c && typeof c === 'object')
       .map(c => ({ ...c, startSec: Math.max(0, Number(c.startSec) || 0), score: Math.min(99, Math.max(1, Math.round(Number(c.score)) || 60)) }));
