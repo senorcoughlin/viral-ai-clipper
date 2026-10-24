@@ -39,3 +39,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+@keyframes guide-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(5px)}}
+.guide-bounce{animation:guide-bounce 1.1s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.guide-bounce{animation:none}}

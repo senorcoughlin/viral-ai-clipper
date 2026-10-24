@@ -12,6 +12,11 @@ import AccountBar, { syncClips } from '../components/AccountBar';
 import BoltMenu from '../components/BoltMenu';
 import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
+import { track } from '@vercel/analytics';
+
+const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+const GUIDE_KEY = 'vac_gen_count';
+const ft = (e, p) => { try { track(e, p); } catch {} };
 
 const FREE_DAILY_LIMIT = 3;
 
@@ -170,6 +175,18 @@ function HomeInner() {
   };
 
   const lastRunRef = useRef(null);
+  const [genCount, setGenCount] = useState(3);
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    try { setGenCount(parseInt(localStorage.getItem(GUIDE_KEY) || '0', 10) || 0); } catch { setGenCount(0); }
+    ft('landing_view', { path: window.location.pathname, ref: document.referrer ? new URL(document.referrer).hostname : 'direct' });
+  }, []);
+  const bumpGenCount = () => { setGenCount(c => { const n = c + 1; try { localStorage.setItem(GUIDE_KEY, String(n)); } catch {} return n; }); };
+  const runExample = () => {
+    if (isProcessing) return;
+    setVideoUrl(SAMPLE_URL);
+    handleClipping(null, { videoUrl: SAMPLE_URL, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack, source: 'example' });
+  };
   const handleClipping = async (e, override) => {
     e?.preventDefault?.();
     const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack };
@@ -184,6 +201,7 @@ function HomeInner() {
     const urls = runUrl.split(/[\n,]/).map(u => u.trim()).filter(Boolean);
     if (!urls.length) return;
     lastRunRef.current = settings;
+    ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
 
     setIsProcessing(true);
     setClips([]);
@@ -310,6 +328,8 @@ function HomeInner() {
       all.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
       setClips([...all]);
       setJustFinished(true);
+      ft('generate_success', { source: settings.source || 'manual', clips: all.length });
+      bumpGenCount();
       if (!isPro) {
         if (!(dailyCount >= FREE_DAILY_LIMIT && credits > 0)) incrementDaily();
         refreshBilling();
@@ -317,6 +337,7 @@ function HomeInner() {
       setHistory(prev => [{ id: Date.now(), url: runUrl, format: fmt, aiStyle: style, clips: all }, ...prev].slice(0, 5));
     } catch (e) {
       setClips([...all]);
+      ft('generate_error', { source: settings.source || 'manual', message: String(e?.message || 'unknown').slice(0, 120) });
       setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
     } finally {
       setIsProcessing(false);
@@ -408,12 +429,20 @@ function HomeInner() {
               <label htmlFor="urls" className="px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted">Video links</label>
               <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
               <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
-                <div className="flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
+                <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
+                  {genCount < 3 && !isProcessing && !videoUrl && (
+                    <div id="url-guide" aria-hidden className="pointer-events-none absolute bottom-full right-3 z-10 mb-1.5 flex items-end gap-1.5">
+                      <span className="rounded-full bg-lime px-2.5 py-1 text-[12px] font-bold text-ink shadow-card">Paste a YouTube or video link here</span>
+                      <svg className="guide-bounce h-7 w-7 text-lime" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4c6 0 9 4 9 12" /><path d="M10.5 13l4.5 4.5 4.5-4.5" /></svg>
+                    </div>
+                  )}
                   <span aria-hidden className="mt-0.5"><Link /></span>
                   <textarea
                     id="urls"
                     value={videoUrl}
                     onChange={e => setVideoUrl(e.target.value)}
+                    onFocus={() => { if (!focusedRef.current) { focusedRef.current = true; ft('url_input_focus'); } }}
+                    onPaste={() => ft('url_pasted')}
                     placeholder="https://youtube.com/watch?v=…  (one per line for batch)"
                     rows={2}
                     required
@@ -429,6 +458,9 @@ function HomeInner() {
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
+              <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="self-start rounded-full border border-lime/60 px-3.5 py-1.5 text-[13px] font-semibold text-lime hover:bg-lime hover:text-ink disabled:opacity-50">
+                ▶ Try it free with an example
+              </button>
               <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
                 {[
                   { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
