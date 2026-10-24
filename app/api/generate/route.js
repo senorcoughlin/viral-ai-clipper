@@ -13,6 +13,7 @@ import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billin
 import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioCut, sanitizeBrand } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
+import { toFetchable } from '../../../lib/media';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept. Long sources make RenderIO's download+cut slower and
@@ -407,6 +408,8 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
   }
   const ytId = youtubeId(videoUrl);
+  // Private uploads are handed to RenderIO through a signed, expiring proxy URL.
+  const rioUrl = toFetchable(videoUrl);
   if (ytId) {
     const secs = await youtubeDuration(ytId);
     if (secs === 0) {
@@ -486,8 +489,8 @@ export async function POST(request) {
         // Track the speaker for vertical clips while there's time left in the 300s budget.
         let crop = null;
         // Skip face tracking when the monthly RenderIO budget is getting tight.
-        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 150000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(videoUrl, start, len);
-        playUrl = await renderioCut(videoUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop, brand });
+        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 150000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(rioUrl, start, len);
+        playUrl = await renderioCut(rioUrl, start, len, rio, label, vertical, { wordCaptions: true, timedWords, broll: false, style: aiStyle, crop: crop || safeClientCrop, brand });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
@@ -584,7 +587,7 @@ export async function POST(request) {
       // win, the audio result is simply ignored.
       let audioP = null;
       if (!cachedTr && process.env.RENDERIO_API_KEY && process.env.GROQ_API_KEY) {
-        audioP = audioTranscript(videoUrl, 150000).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
+        audioP = audioTranscript(rioUrl, 150000).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }
       ctx.transcript = cachedTr || (ytId ? await fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT);
       ctx.transcriptSource = cachedTr ? 'cache' : ctx.transcript?.segments?.length ? 'youtube' : null;

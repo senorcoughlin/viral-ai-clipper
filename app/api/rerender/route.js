@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { renderioCut, sanitizeBrand } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
+import { toFetchable } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 
 const SAFE_CROP = /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)(\/5|\*[01]\.\d{3})$/;
@@ -26,7 +27,7 @@ export async function POST(request) {
   const vertical = (body.format || 'shorts_9_16') === 'shorts_9_16';
   const crop = typeof body.crop === 'string' && SAFE_CROP.test(body.crop) ? body.crop : null;
   try {
-    const url = await renderioCut(source, start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, {
+    const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, {
       wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand),
     });
     return NextResponse.json({ success: true, videoUrl: url });

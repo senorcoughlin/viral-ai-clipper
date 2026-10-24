@@ -93,7 +93,7 @@ function HomeInner() {
       setUploading(1);
       const { upload } = await import('@vercel/blob/client');
       const blob = await upload(`uploads/${file.name.replace(/[^\w.-]+/g, '_')}`, file, {
-        access: 'public',
+        access: 'private',
         handleUploadUrl: '/api/upload',
         onUploadProgress: (p) => setUploading(Math.max(1, Math.round(p.percentage))),
       });
