@@ -136,22 +136,27 @@ function HomeInner() {
     localStorage.setItem('viral_daily', JSON.stringify({ date: today, count: next }));
   };
 
-  const handleClipping = async (e) => {
-    e.preventDefault();
-    if (!videoUrl.trim()) return;
+  const lastRunRef = useRef(null);
+  const handleClipping = async (e, override) => {
+    e?.preventDefault?.();
+    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount };
+    // Shadow state so a retry reuses exactly the same URL and settings.
+    const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count } = settings;
+    if (!runUrl.trim()) return;
     if (!isPro && dailyCount >= FREE_DAILY_LIMIT && credits <= 0) {
       setShowPricing(true);
       return;
     }
 
-    const urls = videoUrl.split(/[\n,]/).map(u => u.trim()).filter(Boolean);
+    const urls = runUrl.split(/[\n,]/).map(u => u.trim()).filter(Boolean);
     if (!urls.length) return;
+    lastRunRef.current = settings;
 
     setIsProcessing(true);
     setClips([]);
     setError(null);
     setNotice('');
-    setExpected(clipCount * urls.length);
+    setExpected(count * urls.length);
     setProgressStep(0);
     setProgressLabel('Starting…');
     let all = [];
@@ -172,15 +177,20 @@ function HomeInner() {
           const thumb = url.includes('youtu') ? `https://i.ytimg.com/vi/${(url.match(/(?:v=|youtu\.be\/)([\w-]{11})/) || [])[1]}/hqdefault.jpg` : null;
           if (thumb) {
             const face = await detectFaceBox(thumb);
-            if (face) faceCrop = cropFromFace(face, clipFormat === 'shorts_9_16');
+            if (face) faceCrop = cropFromFace(face, fmt === 'shorts_9_16');
           }
         } catch {}
-        const res = await fetch('/api/generate', {
+        let res;
+        try {
+          res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, faceCrop, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0, useCredit: !isPro && dailyCount >= FREE_DAILY_LIMIT && credits > 0 }),
-        });
-        if (!res.ok) {
+          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, faceCrop, proEmail: localStorage.getItem('viral_pro_email') || undefined, hasCredits: credits > 0, useCredit: !isPro && dailyCount >= FREE_DAILY_LIMIT && credits > 0 }),
+          });
+        } catch {
+          throw new Error('Could not reach the server. Check your connection and retry.');
+        }
+        if (!res.ok || !res.body) {
           const text = await res.text().catch(() => '');
           let err = {};
           try { err = JSON.parse(text); } catch {}
@@ -190,16 +200,26 @@ function HomeInner() {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
+        let gotDone = false;
+        let badLines = 0;
+        let fatal = '';
         while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
+          let chunk;
+          try {
+            chunk = await reader.read();
+          } catch {
+            throw new Error('Connection dropped while generating. Retry to pick up where it failed.');
+          }
+          const { value, done } = chunk;
+          if (done) buf += decoder.decode();
+          else buf += decoder.decode(value, { stream: true });
           const lines = buf.split('\n');
-          buf = lines.pop() || '';
-          for (const line of lines) {
+          buf = done ? '' : (lines.pop() || '');
+          for (const raw of lines) {
+            const line = raw.replace(/^data:\s*/, '');
             if (!line.trim()) continue;
             let msg;
-            try { msg = JSON.parse(line); } catch { continue; }
+            try { msg = JSON.parse(line); } catch { badLines += 1; continue; }
             if (msg.type === 'start') {
               setProgressStep(msg.cached ? 3 : 0);
             }
@@ -209,7 +229,8 @@ function HomeInner() {
               setProgressLabel(label);
             }
             if (msg.type === 'error') {
-              failed += 1;
+              if (msg.index === undefined) fatal = msg.message || 'Generation failed on the server.';
+              else failed += 1;
               lastReason = msg.message || lastReason;
             }
             if (msg.type === 'clip' && msg.clip) {
@@ -229,11 +250,17 @@ function HomeInner() {
               setProgressLabel(label);
             }
             if (msg.type === 'done') {
+              gotDone = true;
               setProgressStep(4);
               setProgressLabel('Clips ready');
               if (msg.reason) lastReason = msg.reason;
             }
           }
+          if (done) break;
+        }
+        if (fatal) throw new Error(fatal);
+        if (!gotDone) {
+          throw new Error(badLines ? 'The server sent a garbled response and the stream ended early.' : 'The connection ended before generation finished.');
         }
         } finally {
           clearInterval(tick);
@@ -259,7 +286,7 @@ function HomeInner() {
           incrementDaily();
         }
       }
-      setHistory(prev => [{ id: Date.now(), url: videoUrl, format: clipFormat, aiStyle, clips: all }, ...prev].slice(0, 5));
+      setHistory(prev => [{ id: Date.now(), url: runUrl, format: fmt, aiStyle: style, clips: all }, ...prev].slice(0, 5));
     } catch (e) {
       setClips([...all]);
       setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
@@ -407,13 +434,10 @@ function HomeInner() {
                 )}
               </div>
             </form>
-            {error && (
+ {error && !error.retry && (
               <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
                 <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
                 <p className="flex-1 leading-relaxed text-fg">{error.message}</p>
-                {error.retry && !isProcessing && (
-                  <button type="button" onClick={() => formRef.current?.requestSubmit()} className="btn-ghost h-8 shrink-0 px-3 text-xs">Try again</button>
-                )}
                 <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
               </div>
             )}
@@ -522,7 +546,25 @@ function HomeInner() {
             </div>
           )}
 
-          {!isProcessing && clips.length === 0 && (
+          {error?.retry && !isProcessing && (
+            <div role="alert" className="card flex flex-col gap-3 border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-5 animate-fadeup">
+              <div className="flex items-start gap-3">
+                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
+                <div className="flex flex-1 flex-col gap-1">
+                  <span className="text-sm font-semibold">Generation stopped</span>
+                  <p className="text-sm leading-relaxed text-fg">{error.message}</p>
+                  {clips.length > 0 && <p className="text-xs text-muted">{clips.length} clip{clips.length === 1 ? '' : 's'} already received {clips.length === 1 ? 'is' : 'are'} kept below.</p>}
+                </div>
+                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { if (lastRunRef.current) { setError(null); setJustFinished(false); handleClipping(null, lastRunRef.current); } }} className="btn-lime h-9 px-4 text-sm">Retry</button>
+                <button type="button" onClick={() => setError(null)} className="btn-ghost h-9 px-4 text-sm">Dismiss</button>
+              </div>
+            </div>
+          )}
+
+          {!isProcessing && clips.length === 0 && !error?.retry && (
             <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 rounded-card border border-dashed border-line2 p-8 text-center">
               <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Empty clip tray" className="animate-floaty">
                 <rect x="28" y="18" width="40" height="70" rx="10" fill="#1E1E29" stroke="#2A2A36" />
