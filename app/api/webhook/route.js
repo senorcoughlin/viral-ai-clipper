@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 import { markPro } from '../../../lib/pro';
 import { addCredits, setPro, emailForCustomer } from '../../../lib/billing';
 
+async function resolveEmail(stripe, customerId) {
+  if (!customerId) return null;
+  let email = await emailForCustomer(customerId);
+  if (!email) {
+    try { email = (await stripe.customers.retrieve(customerId))?.email; } catch {}
+  }
+  return email ? String(email).toLowerCase() : null;
+}
+
 export async function POST(request) {
   try {
     const body = await request.text();
@@ -35,12 +44,23 @@ export async function POST(request) {
       }
     } else if (event.type === 'customer.subscription.deleted') {
       const sub = event.data.object;
-      let email = await emailForCustomer(sub.customer);
-      if (!email && sub.customer) {
-        try { email = (await stripe.customers.retrieve(sub.customer))?.email; } catch {}
-      }
+      const email = await resolveEmail(stripe, sub.customer);
       if (email) await setPro(email, false, sub.customer);
       console.log('Subscription ended:', sub.id, email ? 'pro removed' : 'no email');
+    } else if (event.type === 'customer.subscription.updated') {
+      const sub = event.data.object;
+      const email = await resolveEmail(stripe, sub.customer);
+      if (email) {
+        if (['active', 'trialing'].includes(sub.status)) await setPro(email, true, sub.customer);
+        else if (['past_due', 'unpaid', 'canceled', 'incomplete_expired', 'paused'].includes(sub.status)) await setPro(email, false, sub.customer);
+      }
+      console.log('Subscription updated:', sub.id, sub.status, email ? 'applied' : 'no email');
+    } else if (event.type === 'invoice.payment_failed') {
+      const inv = event.data.object;
+      const isSub = inv.subscription || inv.parent?.subscription_details?.subscription || inv.billing_reason?.startsWith('subscription');
+      const email = isSub ? (await resolveEmail(stripe, inv.customer)) || String(inv.customer_email || '').toLowerCase() || null : null;
+      if (email) await setPro(email, false, inv.customer);
+      console.log('Invoice payment failed:', inv.id, email ? 'pro paused' : 'skipped');
     }
     return NextResponse.json({ received: true });
   } catch (e) {
