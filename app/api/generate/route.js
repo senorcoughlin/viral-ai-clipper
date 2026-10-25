@@ -12,7 +12,7 @@ import os from 'os';
 import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
-import { renderioRun, renderioCut, sanitizeBrand } from '../../../lib/render';
+import { renderioRun, renderioCut, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
@@ -47,7 +47,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId } from '../../../lib/jobs';
-import { parseStreamUrl, resolveStream } from '../../../lib/stream';
+import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
 
 // Stream sources (Twitch/Kick) are transcribed in chunks so multi-hour VODs fit the
 // 25 MB Whisper limit and the 300s function budget. Chunks run in parallel.
@@ -57,13 +57,14 @@ const LIVE_MINUTES = [5, 10, 15];
 const fmtDur = (s) => { const h = Math.floor(s / 3600); const m = Math.round((s % 3600) / 60); return h ? `${h}h ${m}m` : `${m} min`; };
 
 // Audio for [start, start+len] of an HLS/MP4 source -> Whisper, with timestamps shifted to source time.
-async function streamChunkTranscript(audioUrl, start, len, timeoutMs) {
+async function streamChunkTranscript(audioUrl, start, len, timeoutMs, mp4 = false) {
   const rio = process.env.RENDERIO_API_KEY;
   if (!rio || !process.env.GROQ_API_KEY) return EMPTY_TRANSCRIPT;
   const t0 = Date.now();
+  const win = mp4 ? { url: audioUrl, offset: start } : await windowPlaylist(audioUrl, start, len, rio);
   const url = await renderioRun({
-    input_files: { in_video: audioUrl },
-    ffmpeg_command: `-ss ${Math.floor(start)} -i {{in_video}} -t ${Math.ceil(len)} -map 0:a:0 -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k {{out_audio}}`,
+    input_files: { in_video: win.url },
+    ffmpeg_command: `${mp4 ? '' : HLS_FLAGS}-ss ${win.offset.toFixed(2)} -i {{in_video}} -t ${Math.ceil(len)} -map 0:a:0 -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k {{out_audio}}`,
     output_files: { out_audio: 'audio.mp3' },
   }, 'out_audio', rio, timeoutMs);
   const r = await fetch(url, { cache: 'no-store' });
@@ -313,7 +314,7 @@ function jpegSize(buf) {
   return null;
 }
 
-async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false) {
+async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false, hls = false) {
   const rio = process.env.RENDERIO_API_KEY;
   const gkey = process.env.GEMINI_API_KEY;
   if (!rio || !gkey) return null;
@@ -321,7 +322,7 @@ async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false) {
     const t0 = Date.now();
     const sheetUrl = await renderioRun({
       [direct ? 'input_files' : 'input_urls']: { in_video: url },
-      ffmpeg_command: `-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(len) || 30} -vf "fps=3/${Number(len) || 30},scale=480:-2,tile=3x1" -frames:v 1 -q:v 4 {{out_img}}`,
+      ffmpeg_command: `${hls ? HLS_FLAGS : ''}-ss ${Number(start) || 0} -i {{in_video}} -t ${Number(len) || 30} -vf "fps=3/${Number(len) || 30},scale=480:-2,tile=3x1" -frames:v 1 -q:v 4 {{out_img}}`,
       output_files: { out_img: 'sheet.jpg' },
     }, 'out_img', rio, timeoutMs);
     const img = await fetch(sheetUrl, { cache: 'no-store' });
@@ -660,8 +661,11 @@ export async function POST(request) {
         let crop = null;
         // Skip face tracking when the monthly RenderIO budget is getting tight.
         const src = ctx.srcP ? await ctx.srcP : { url: rioUrl, direct: false };
-        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(src.url, start, len, src.direct ? 30000 : 45000, src.direct);
-        playUrl = await renderioCut(src.url, start, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark });
+        // HLS stream sources: a per-clip playlist with just the needed segments.
+        const hls = !!(media && !media.mp4);
+        const win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
+        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
+        playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
@@ -802,7 +806,7 @@ export async function POST(request) {
         const n = Math.max(1, Math.ceil(media.winLen / STREAM_CHUNK_SEC));
         const step = media.winLen / n;
         ctx.chunks = Array.from({ length: n }, (_, k) => ({ start: media.winStart + k * step, len: step }));
-        audioP = Promise.all(ctx.chunks.map(ch => streamChunkTranscript(media.audioUrl, ch.start, ch.len, 150000)
+        audioP = Promise.all(ctx.chunks.map(ch => streamChunkTranscript(media.audioUrl, ch.start, ch.len, 150000, !!media.mp4)
           .catch((e) => { console.warn('stream chunk failed', ch.start, e?.message); if (e?.capacity) ctx.capacity = true; return EMPTY_TRANSCRIPT; })))
           .then(parts => {
             ctx.chunkTranscripts = parts;
