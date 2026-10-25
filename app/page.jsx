@@ -48,6 +48,10 @@ const STREAM_STEPS = [
   { t: 'Post consistently', d: 'Post to TikTok, YouTube Shorts and Instagram Reels. Many clippers aim for 3\u20135 clips a day. Add your own edits or commentary, since platforms may limit reposted content.', tools: [['TikTok', 'https://www.tiktok.com/upload'], ['YouTube Shorts', 'https://studio.youtube.com'], ['Reels', 'https://www.instagram.com']] },
   { t: 'Track views, submit and scale', d: 'Submit approved posts to your campaign for view payouts. As you grow, you may qualify for YouTube Partner Program Shorts revenue or TikTok Creator Rewards (1-min+ original videos). Check each program\u2019s eligibility. Go Pro for 200 clips a day.', tools: [['YouTube Partner Program', 'https://support.google.com/youtube/answer/72851'], ['TikTok Creator Rewards', 'https://www.tiktok.com/creator-academy/en/article/creator-rewards-program'], ['Go Pro', '#pricing']] },
 ];
+const LIVE_MINUTES = [5, 10, 15];
+// twitch.tv/<channel> (not a VOD or clip link): eligible for "clip the last X minutes".
+const TWITCH_CHANNEL_RE = /^https?:\/\/(?:www\.|m\.)?twitch\.tv\/([a-zA-Z0-9_]{2,25})\/?(?:\?.*)?$/;
+const twitchChannelOf = (u) => { const m = String(u || '').trim().match(TWITCH_CHANNEL_RE); return m && !['videos', 'directory', 'downloads', 'settings', 'search', 'p'].includes(m[1].toLowerCase()) ? m[1] : null; };
 const PRICE = { monthly: { amount: '$19.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly' } };
 
 /* ---------- small icons (inline SVG, no deps) ---------- */
@@ -81,6 +85,17 @@ function HomeInner() {
   const [pack, setPack] = useState('');
   const [clipLength, setClipLength] = useState(30);
   const [clipCount, setClipCount] = useState(1);
+  const [liveMinutes, setLiveMinutes] = useState(10);
+  const [liveInfo, setLiveInfo] = useState(null); // { name, live, archive } for a pasted Twitch channel
+  const liveChannel = (() => { const lines = String(videoUrl || '').split(/[\n,]/).map(x => x.trim()).filter(Boolean); return lines.length === 1 ? twitchChannelOf(lines[0]) : null; })();
+  useEffect(() => {
+    if (!liveChannel) { setLiveInfo(null); return; }
+    let off = false;
+    const t = setTimeout(() => {
+      fetch('/api/stream?url=' + encodeURIComponent('https://www.twitch.tv/' + liveChannel)).then(r => r.json()).then(j => { if (!off) setLiveInfo(j?.data ? { ...j.data, login: liveChannel } : null); }).catch(() => {});
+    }, 400);
+    return () => { off = true; clearTimeout(t); };
+  }, [liveChannel]);
   const [autoSubtitles, setAutoSubtitles] = useState(true);
   const [aiHook, setAiHook] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -313,7 +328,7 @@ function HomeInner() {
 
   const handleClipping = async (e, override) => {
     e?.preventDefault?.();
-    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack };
+    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack, liveMinutes };
     // Shadow state so a retry reuses exactly the same URL and settings.
     const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk } = settings;
     if (!runUrl.trim()) return;
@@ -360,7 +375,7 @@ function HomeInner() {
           res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk || '', faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
+          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk || '', liveMinutes: settings.liveMinutes || 10, faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
           });
         } catch {
           throw new Error('Could not reach the server. Check your connection and retry.');
@@ -589,6 +604,20 @@ function HomeInner() {
                   </p>
                 );
               })()}
+              {liveChannel && (
+                <div id="live-picker" role="group" aria-label="Clip the last minutes of the live stream" className="flex flex-wrap items-center gap-2 rounded-input border border-line2 bg-ink px-3 py-2.5 text-sm">
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${liveInfo?.live ? 'text-[#FF4D6D]' : 'text-muted'}`}>
+                    <i aria-hidden className={`h-2 w-2 rounded-full ${liveInfo?.live ? 'bg-[#FF4D6D] animate-pulse' : 'bg-line2'}`} />
+                    {liveInfo == null ? 'Checking channel…' : liveInfo.exists === false ? 'Channel not found' : liveInfo.live ? `${liveInfo.name || liveChannel} is live` : `${liveInfo.name || liveChannel} is offline`}
+                  </span>
+                  <span className="text-xs text-muted">Clip the last</span>
+                  {LIVE_MINUTES.map(m => (
+                    <button key={m} type="button" aria-pressed={liveMinutes === m} onClick={() => setLiveMinutes(m)} className={`chip shrink-0 ${liveMinutes === m ? 'chip-on' : ''}`}>{m} min</button>
+                  ))}
+                  {liveInfo?.live && liveInfo.archive === false && <span className="w-full text-xs text-[#FFB64D]">This channel doesn&apos;t save broadcasts, so recent minutes can&apos;t be grabbed.</span>}
+                  {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
+                </div>
+              )}
               <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="self-start rounded-full border border-lime/60 px-3.5 py-1.5 text-[13px] font-semibold text-lime hover:bg-lime hover:text-ink disabled:opacity-50">
                 ▶ Try it free with an example
               </button>
