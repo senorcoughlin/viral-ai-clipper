@@ -43,7 +43,7 @@ const Icon = {
 const slug = (t) => String(t || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '');
 const stamp = () => { const d = new Date(), z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`; };
 export const clipFileName = (title, n) => ['viral-clip', slug(title), n, stamp()].filter(Boolean).join('-') + '.mp4';
-const downloadHref = (src, name) => /^https:\/\/(renderio\.dev\/api\/media\/|[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/)/.test(src || '')
+export const downloadHref = (src, name) => /^https:\/\/(renderio\.dev\/api\/media\/|[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/)/.test(src || '')
   ? `/api/download?${new URLSearchParams({ u: src.split('#')[0], n: name })}` : src;
 
 export default function ClipPlayer({ clip, compact = false, index }) {

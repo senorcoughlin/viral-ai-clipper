@@ -5,7 +5,7 @@ import ReferralCard from '../components/ReferralCard';
 import { useState, useEffect, useRef, Suspense } from 'react';
 import SeeItWork from '../components/SeeItWork';
 import { useSearchParams } from 'next/navigation';
-import ClipPlayer from '../components/ClipPlayer';
+import ClipPlayer, { clipFileName, downloadHref } from '../components/ClipPlayer';
 import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 import AccountBar, { syncClips } from '../components/AccountBar';
@@ -14,6 +14,7 @@ import { parseLinks } from '../lib/links';
 import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
 import SpinWheel from '../components/SpinWheel';
+import StudioClip from '../components/StudioClip';
 import { funnel } from '../lib/funnel';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
@@ -75,7 +76,7 @@ const Download = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="#FF4D6D" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
-function HomeInner() {
+function HomeInner({ studio = false }) {
   const [videoUrl, setVideoUrl] = useState('');
   const [promoHidden, setPromoHidden] = useState(true);
   useEffect(() => {
@@ -95,6 +96,365 @@ function HomeInner() {
     const t = setTimeout(() => {
       fetch('/api/stream?url=' + encodeURIComponent('https://www.twitch.tv/' + liveChannel)).then(r => r.json()).then(j => { if (!off) setLiveInfo(j?.data ? { ...j.data, login: liveChannel } : null); }).catch(() => {});
     }, 400);
+  const formBlock = (<>
+            {/* FORM */}
+            <form id="clip-form" ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
+              <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>Or paste your own link</label>
+              <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
+              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
+                <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
+                  {genCount < 3 && !isProcessing && !videoUrl && (
+                    <div id="url-guide" aria-hidden className="pointer-events-none absolute bottom-full right-3 z-10 mb-1.5 flex items-end gap-1.5">
+                      <span className="rounded-full bg-lime px-2.5 py-1 text-[12px] font-bold text-ink shadow-card">Or paste your own link here</span>
+                      <svg className="guide-bounce h-7 w-7 text-lime" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4c6 0 9 4 9 12" /><path d="M10.5 13l4.5 4.5 4.5-4.5" /></svg>
+                    </div>
+                  )}
+                  <span aria-hidden className="mt-0.5"><Link /></span>
+                  <textarea
+                    id="urls"
+                    value={videoUrl}
+                    onChange={e => setVideoUrl(e.target.value)}
+                    onFocus={() => { if (!focusedRef.current) { focusedRef.current = true; ft('url_input_focus'); } }}
+                    onPaste={() => ft('url_pasted')}
+                    placeholder="https://youtube.com/watch?v=…  (one per line for batch)"
+                    rows={studio ? 4 : 2}
+                    required
+                    aria-describedby="urls-hint"
+                    className="min-w-0 flex-1 resize-none bg-transparent text-[15px] text-fg outline-none placeholder:text-muted"
+                  />
+                  <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title="Upload an MP4 (up to 500 MB, 2 hours)">
+                    {uploading ? `Uploading ${uploading}%` : 'Upload MP4'}
+                    <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
+                  </label>
+                </div>
+                <button type="submit" disabled={isProcessing} className={`btn-lime h-[52px] whitespace-nowrap px-5 text-[15px] ${studio ? 'hidden sm:inline-flex' : ''}`}>
+                  <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
+                </button>
+              </div>
+              {(() => {
+                const p = parseLinks(videoUrl);
+                if (p.found < 2) return null;
+                return (
+                  <p id="link-count" className="px-1 text-xs text-soft">
+                    {p.links.length} video{p.links.length === 1 ? '' : 's'} detected
+                    {p.duplicates ? ` · ${p.duplicates} duplicate${p.duplicates === 1 ? '' : 's'} removed` : ''}
+                    {p.dropped ? ` · ${p.dropped} over the 10-link limit skipped` : ''}
+                    {' '}· each is clipped separately
+                  </p>
+                );
+              })()}
+              {liveChannel && (
+                <div id="live-picker" role="group" aria-label="Clip the last minutes of the live stream" className="flex flex-wrap items-center gap-2 rounded-input border border-line2 bg-ink px-3 py-2.5 text-sm">
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${liveInfo?.live ? 'text-[#FF4D6D]' : 'text-muted'}`}>
+                    <i aria-hidden className={`h-2 w-2 rounded-full ${liveInfo?.live ? 'bg-[#FF4D6D] animate-pulse' : 'bg-line2'}`} />
+                    {liveInfo == null ? 'Checking channel…' : liveInfo.exists === false ? 'Channel not found' : liveInfo.live ? `${liveInfo.name || liveChannel} is live` : `${liveInfo.name || liveChannel} is offline`}
+                  </span>
+                  <span className="text-xs text-muted">Clip the last</span>
+                  {LIVE_MINUTES.map(m => (
+                    <button key={m} type="button" aria-pressed={liveMinutes === m} onClick={() => setLiveMinutes(m)} className={`chip shrink-0 ${liveMinutes === m ? 'chip-on' : ''}`}>{m} min</button>
+                  ))}
+                  {liveInfo?.live && liveInfo.archive === false && <span className="w-full text-xs text-[#FFB64D]">This channel doesn&apos;t save broadcasts, so recent minutes can&apos;t be grabbed.</span>}
+                  {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
+                </div>
+              )}
+              <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
+                {[
+                  { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
+                  { label: 'Pack', options: PACKS, value: pack, set: setPack },
+                  { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
+                  { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
+                ].map((g, gi) => (
+                  <div key={g.label} role="group" aria-label={g.label} className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0">
+                    {gi > 0 && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
+                    <span className="mr-1 w-12 shrink-0 text-xs text-muted sm:w-auto">{g.label}</span>
+                    {g.options.map(o => (
+                      <button key={o.value} type="button" aria-pressed={g.value === o.value} onClick={() => g.set(o.value)} className={`chip shrink-0 ${g.value === o.value ? 'chip-on' : ''}`}>{o.label}</button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
+                <div className="flex gap-4">
+                  <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} /> Captions</label>
+                  <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={aiHook} onChange={e => setAiHook(e.target.checked)} /> Hook overlay</label>
+                </div>
+              </div>
+            </form>
+            <div id="remaining" className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-line2 bg-surface/80 px-4 py-3 text-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Generations remaining</span>
+              {isPro ? (
+                <span className="flex items-center gap-1.5 font-semibold text-lime"><Bolt size={13} fill="#C6FF3D" />200/day with Pro</span>
+              ) : (
+                <>
+                  <span className="flex items-center gap-2 text-soft"><b className="text-white">{freeLeft}</b> of {FREE_DAILY_LIMIT} free today
+                    <span className="inline-flex gap-1">{Array.from({ length: FREE_DAILY_LIMIT }, (_, k) => <i key={k} className={`h-1 w-6 rounded-sm ${k < freeLeft ? 'bg-lime' : 'bg-line2'}`} />)}</span>
+                  </span>
+                  <span className="text-soft"><b className="text-white">{credits}</b> credit{credits === 1 ? '' : 's'}</span>
+                  <span className="text-soft">Total: <b className="text-lime">{freeLeft + credits}</b></span>
+                  <button type="button" onClick={() => setShowPricing(true)} className="ml-auto text-xs font-semibold text-lime">Get more →</button>
+                </>
+              )}
+            </div>
+ {error && !error.retry && (
+              <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
+                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
+                <p className="flex-1 leading-relaxed text-fg">{error.message}</p>
+                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
+              </div>
+            )}
+
+  </>);
+  const clipsBlock = (<>
+          {isProcessing && clips.length === 0 && (
+            <div className="card flex flex-col gap-4 p-5 animate-fadeup">
+              <div className="flex items-center gap-3.5 rounded-[14px] border border-line bg-[#0F0F16] p-3.5">
+                <svg className="animate-spin" width="40" height="40" viewBox="0 0 40 40" aria-hidden><circle cx="20" cy="20" r="16" fill="none" stroke="#23232E" strokeWidth="5" /><path d="M20 4a16 16 0 0 1 16 16" fill="none" stroke="#C6FF3D" strokeWidth="5" strokeLinecap="round" /></svg>
+                <div className="flex flex-1 flex-col gap-1">
+                  <span className="text-sm font-semibold">{statusMessage}</span>
+                  <span className="text-xs text-muted">Step {stage + 1} of 4 · usually under 90 seconds</span>
+                </div>
+                <div className="wave hidden h-7 items-end gap-1 sm:flex" aria-hidden>
+                  {Array.from({ length: 5 }, (_, i) => <span key={i} className="h-7" style={{ animationDelay: `${i * 150}ms` }} />)}
+                </div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-[#1E1E29]">
+                <i className="block h-full rounded-full bg-lime transition-[width] duration-700" style={{ width: `${(stage + 1) * 25}%` }} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="flex flex-col gap-2">
+                    <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />
+                    <div className="h-2.5 w-4/5 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
+                    <div className="h-2.5 w-1/2 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {error?.retry && !isProcessing && (
+            <div role="alert" className="card flex flex-col gap-3 border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-5 animate-fadeup">
+              <div className="flex items-start gap-3">
+                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
+                <div className="flex flex-1 flex-col gap-1">
+                  <span className="text-sm font-semibold">Generation stopped</span>
+                  <p className="text-sm leading-relaxed text-fg">{error.message}</p>
+                  {clips.length > 0 && <p className="text-xs text-muted">{clips.length} clip{clips.length === 1 ? '' : 's'} already received {clips.length === 1 ? 'is' : 'are'} kept below.</p>}
+                </div>
+                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { if (lastRunRef.current) { setError(null); setJustFinished(false); handleClipping(null, lastRunRef.current); } }} className="btn-lime h-9 px-4 text-sm">Retry</button>
+                <button type="button" onClick={() => setError(null)} className="btn-ghost h-9 px-4 text-sm">Dismiss</button>
+              </div>
+            </div>
+          )}
+
+          {!isProcessing && clips.length === 0 && !error?.retry && (
+            <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 rounded-card border border-dashed border-line2 p-8 text-center">
+              <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Empty clip tray" className="animate-floaty">
+                <rect x="28" y="18" width="40" height="70" rx="10" fill="#1E1E29" stroke="#2A2A36" />
+                <rect x="52" y="30" width="40" height="70" rx="10" fill="#14141C" stroke="#2A2A36" />
+                <rect x="60" y="42" width="24" height="4" rx="2" fill="#2A2A36" /><rect x="60" y="52" width="18" height="4" rx="2" fill="#2A2A36" />
+                <circle cx="36" cy="92" r="14" fill="#C6FF3D" /><path d="M31 92h10M36 87v10" stroke="#0A0A0F" strokeWidth="3" strokeLinecap="round" />
+                <path d="M96 20l3 6 6 3-6 3-3 6-3-6-6-3 6-3z" fill="#7C5CFF" />
+              </svg>
+              <h3 className="font-display text-2xl font-extrabold text-white">No clips yet</h3>
+              <p className="max-w-[300px] text-sm leading-relaxed text-soft">Paste a link above and the AI will pull the best 30–60 second moments out of it.</p>
+              <button type="button" onClick={runExample} disabled={isProcessing} className="btn-ghost h-11 px-5 text-sm">▶ See an example</button>
+            </div>
+          )}
+
+          {isProcessing && clips.length === 0 && (
+            <ProgressDock label={progressLabel} step={progressStep} />
+          )}
+
+          {clips.length > 0 && (
+            <>
+              {justFinished && !isProcessing && (
+                <div className="relative flex items-center gap-4 overflow-hidden rounded-card border border-lime bg-lime-tint p-4 animate-fadeup">
+                  <div aria-hidden className="pointer-events-none absolute inset-0">
+                    {['12%', '28%', '44%', '60%', '76%', '90%'].map((l, i) => (
+                      <i key={i} className="absolute -top-2 h-3 w-2 rounded-sm animate-confetti" style={{ left: l, background: ['#C6FF3D', '#7C5CFF', '#FF4D6D', '#FFB64D'][i % 4], animationDelay: `${i * 0.25}s` }} />
+                    ))}
+                  </div>
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-lime shadow-glow animate-pop"><Check color="#0A0A0F" /></span>
+                  <div className="relative">
+                    <p className="font-display text-lg font-extrabold text-white">{clips.length} {clips.length === 1 ? 'clip' : 'clips'} ready</p>
+                    <p className="text-sm text-soft">Top score <span className="font-mono text-lime">{topScore}</span> — sorted best first.</p>
+                  </div>
+                </div>
+              )}
+              {lastWasExample && !isProcessing && (
+                <div id="example-next" className="flex flex-col gap-3 rounded-card border border-lime bg-surface p-4 sm:flex-row sm:items-center animate-fadeup">
+                  <div className="flex-1">
+                    <p className="font-display text-lg font-extrabold text-white">That was the example. Now do your video.</p>
+                    <p className="text-sm text-soft">Paste any YouTube, Twitch or podcast link. You get {FREE_DAILY_LIMIT} free generations a day.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={focusInput} className="btn-lime h-11 flex-1 justify-center px-5 text-sm sm:flex-none">Paste my link</button>
+                    {!studio && <a href="/studio" className="btn-ghost h-11 px-4 text-sm no-underline">Open Studio</a>}
+                    {!isPro && <button type="button" onClick={() => setShowPricing(true)} className="btn-ghost h-11 px-4 text-sm">See plans</button>}
+                  </div>
+                </div>
+              )}
+              {justFinished && !isProcessing && !lastWasExample && <FeedbackNudge />}
+              {notice && !isProcessing && (
+                <p role="status" className="rounded-card border border-line2 bg-surface p-3 text-sm text-soft">{notice}</p>
+              )}
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div className="flex flex-col gap-2">
+                  <span className="eyebrow" aria-live="polite">{isProcessing ? `Your clips · ${clips.length} of ${expected} ready` : 'Your clips'}</span>
+                  <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Ranked by how likely they are to blow up.</h2>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {studio && clips.some(c => c.videoUrl) && <button type="button" onClick={downloadAll} disabled={dlAllBusy} className="btn-lime h-10 px-4 text-sm">{dlAllBusy ? 'Downloading…' : selectedIds.length ? `Download selected (${selectedIds.length})` : `Download all (${clips.filter(c => c.videoUrl).length})`}</button>}
+                  <button onClick={() => { setClips([]); setSelectedIds([]); }} className="btn-ghost h-10 px-4 text-sm">Clear</button>
+                </div>
+              </div>
+              <div className={studio ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}>
+                {clips.map((c, i) => studio
+                  ? <StudioClip key={c.id} clip={c} index={i} selected={selectedIds.includes(c.id)} onSelect={on => setSelectedIds(ids => on ? [...ids, c.id] : ids.filter(x => x !== c.id))} />
+                  : <ClipPlayer key={c.id} clip={c} index={i} compact />)}
+                {isProcessing && Array.from({ length: Math.max(0, expected - clips.length) }, (_, i) => (
+                  <div key={`pending-${i}`} aria-hidden className="flex flex-col gap-2">
+                    <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />
+                    <div className="h-2.5 w-4/5 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {myAssets.length > 0 && (
+            <a href="/assets" className="flex items-center justify-between rounded-input border border-line bg-surface px-4 py-3 text-sm hover:border-lime">
+              <span className="font-semibold text-white">View all {myAssets.length} assets</span>
+              <span className="text-lime">Open library →</span>
+            </a>
+          )}
+
+          {history.length > 0 && (
+            <div className="flex flex-col gap-3 pt-4">
+              <span className="text-xs font-semibold uppercase tracking-[.08em] text-muted">Recent</span>
+              <div className="flex flex-col gap-2">
+                {history.map(h => (
+                  <div key={h.id} className="flex items-center justify-between gap-3 rounded-input border border-line bg-surface px-3.5 py-2.5 text-sm">
+                    <span className="truncate text-soft">{h.url}</span>
+                    <span className="hidden shrink-0 text-xs text-muted sm:inline">{h.clips?.length || 0} clips</span>
+                    <button onClick={() => { setVideoUrl(h.url); setClips(h.clips || []); setJustFinished(false); setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }} className="shrink-0 text-xs font-semibold text-lime hover:text-lime-hover">Load</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+  </>);
+  const modalBlock = (<>
+      {/* UPGRADE MODAL */}
+      {showPricing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-4 backdrop-blur-sm" onClick={() => setShowPricing(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="up-title" className="relative w-full max-w-[560px] overflow-hidden rounded-3xl border border-line2 bg-surface shadow-modal animate-fadeup" onClick={e => e.stopPropagation()}>
+            <div aria-hidden className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-spotlight blur-xl" />
+            <div className="relative flex flex-col gap-5 p-7">
+              <div className="flex items-start justify-between gap-3">
+                {!isPro && dailyCount >= FREE_DAILY_LIMIT ? (
+                  <span className="inline-flex h-8 items-center gap-2 rounded-full border border-hot bg-[#2A1414] px-2.5 text-xs font-semibold text-[#FF8FA3]">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" /><path d="M12 7v6M12 16v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+                    You've used {FREE_DAILY_LIMIT} of {FREE_DAILY_LIMIT} free clips today
+                  </span>
+                ) : <span className="eyebrow pt-2">Pro</span>}
+                <button type="button" aria-label="Close" onClick={() => setShowPricing(false)} className="btn-ghost h-9 w-9 rounded-[10px] p-0">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg>
+                </button>
+              </div>
+              <h3 id="up-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[38px]">
+                Keep the clips coming.<br /><span className="text-lime">Go Pro.</span>
+              </h3>
+              <p className="text-[15px] leading-relaxed text-soft">Pro raises the daily cap to 200, removes the watermark, and saves your history so you never lose a banger.</p>
+              <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
+                <li className="flex items-center gap-2"><Check />200 generations a day</li>
+                <li className="flex items-center gap-2"><Check />No watermark</li>
+                <li className="flex items-center gap-2"><Check />Batch up to 10 links</li>
+              </ul>
+              <div className="flex flex-col gap-2.5 sm:flex-row">
+                <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
+                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>
+              </div>
+              <div className="border-t border-line pt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · from $9</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <button onClick={() => handleUpgrade('credits_10')} className="btn-ghost h-16 flex-col text-xs">10 credits<span className="text-[11px] text-muted">$9</span><span className="text-[10px] text-muted">base</span></button>
+                  <button onClick={() => handleUpgrade('credits_25')} className="btn-ghost h-16 flex-col text-xs">25 credits<span className="text-[11px] text-muted">$19</span><span className="text-[10px] font-bold text-lime">save 16%</span></button>
+                  <button onClick={() => handleUpgrade('credits_50')} className="btn-ghost h-16 flex-col text-xs">50 credits<span className="text-[11px] text-muted">$29</span><span className="text-[10px] font-bold text-lime">save 36%</span></button>
+                  <button onClick={() => handleUpgrade('credits_100')} className="btn-ghost h-16 flex-col text-xs">100 credits<span className="text-[11px] text-muted">$49</span><span className="text-[10px] font-bold text-lime">save 46%</span></button>
+                </div>
+                <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation after your free clips. Bigger packs cost less per clip.</p>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>Secure checkout via Stripe · cancel anytime</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+  </>);
+  const downloadAll = async () => {
+    const list = clips.filter(c => c.videoUrl && (!selectedIds.length || selectedIds.includes(c.id)));
+    setDlAllBusy(true);
+    for (let i = 0; i < list.length; i++) {
+      const n = clipFileName(list[i].title, clips.indexOf(list[i]) + 1);
+      const a = document.createElement('a'); a.href = downloadHref(list[i].videoUrl, n); a.download = n;
+      document.body.appendChild(a); a.click(); a.remove();
+      await new Promise(r => setTimeout(r, 900));
+    }
+    setDlAllBusy(false);
+  };
+  if (studio) return (
+    <div className="relative min-h-screen bg-ink">
+      <header className="sticky top-0 z-30 border-b border-line/60 bg-ink/90 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-3 px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <BoltMenu icon={<Bolt size={18} />} onAccountChange={() => refreshBilling()} />
+            <a href="/" className="truncate font-display text-base font-extrabold text-fg no-underline">Viral AI Clipper <span className="text-lime">Studio</span></a>
+          </div>
+          <nav className="hidden items-center gap-5 text-sm text-soft md:flex">
+            <a href="/assets" className="hover:text-fg">My Assets</a>
+            <a href="/tutorial" className="hover:text-fg">Tutorial</a>
+            <AccountBar onChange={() => refreshBilling()} />
+          </nav>
+          <div className="flex shrink-0 items-center gap-2">
+            {!isPro && <span className="text-xs text-muted">{freeLeft}/{FREE_DAILY_LIMIT} free</span>}
+            <button onClick={() => setShowPricing(true)} className="btn-lime h-9 px-3 text-xs">{isPro ? 'Manage' : 'Go Pro'}</button>
+          </div>
+        </div>
+        {!isPro && !promoHidden && (
+          <div className="flex items-center justify-center gap-2 border-t border-line/60 px-4 py-1 text-[12px] font-semibold text-lime">
+            <span className="truncate">50% off Pro with <b>LAUNCH50</b> · ends Nov 1</span>
+            <button aria-label="Dismiss" onClick={() => { setPromoHidden(true); try { localStorage.setItem('vac_promo_launch50', '1'); } catch {} }} className="text-lime/70">✕</button>
+          </div>
+        )}
+      </header>
+      <main id="top" className="mx-auto grid max-w-[1600px] grid-cols-1 gap-6 px-4 pb-32 pt-4 lg:grid-cols-[420px_1fr] lg:pb-10">
+        <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="font-display text-2xl font-extrabold text-white">New clips</h1>
+            <button type="button" onClick={runExample} disabled={isProcessing} className="text-sm font-semibold text-lime disabled:opacity-50">▶ Try an example</button>
+          </div>
+          {formBlock}
+        </aside>
+        <section id="clips" className="flex min-w-0 flex-col gap-6">
+          {clipsBlock}
+        </section>
+      </main>
+      {modalBlock}
+      <SpinWheel onWon={() => refreshBilling()} onUpgrade={() => setShowPricing(true)} />
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-ink/95 p-3 backdrop-blur sm:hidden">
+        <button type="submit" form="clip-form" disabled={isProcessing} className="btn-lime h-12 w-full text-[15px] font-extrabold">
+          <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
+        </button>
+      </div>
+    </div>
+  );
     return () => { off = true; clearTimeout(t); };
   }, [liveChannel]);
   const [autoSubtitles, setAutoSubtitles] = useState(true);
@@ -204,6 +564,8 @@ function HomeInner() {
   };
 
   const lastRunRef = useRef(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [dlAllBusy, setDlAllBusy] = useState(false);
   const [lastWasExample, setLastWasExample] = useState(false);
   const [genCount, setGenCount] = useState(3);
   const focusedRef = useRef(false);
@@ -514,6 +876,7 @@ function HomeInner() {
             <a href="#top" className="font-display text-lg font-extrabold tracking-tight text-fg no-underline">Viral AI Clipper</a>
           </div>
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
+            <a href="/studio" className="font-semibold text-lime hover:text-lime-hover">Open Studio</a>
             <a href="/tutorial" className="hover:text-fg">Tutorial</a>
             <a href="/api/youtube/start" className="hover:text-fg" title="Lets the Shorts button upload clips to your channel as private videos">Connect YouTube</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
@@ -561,118 +924,13 @@ function HomeInner() {
               <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[60px] w-full justify-center px-6 text-[18px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
                 {isProcessing && lastWasExample ? 'Making example clips…' : '▶ See it work — free, 1 tap'}
               </button>
-              <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free clips.</p>
+              <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free clips. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
             </div>
             <p className="hidden max-w-[520px] text-lg leading-relaxed text-soft sm:block">
               Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
             </p>
 
-            {/* FORM */}
-            <form ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
-              <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>Or paste your own link</label>
-              <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
-              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
-                <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
-                  {genCount < 3 && !isProcessing && !videoUrl && (
-                    <div id="url-guide" aria-hidden className="pointer-events-none absolute bottom-full right-3 z-10 mb-1.5 flex items-end gap-1.5">
-                      <span className="rounded-full bg-lime px-2.5 py-1 text-[12px] font-bold text-ink shadow-card">Or paste your own link here</span>
-                      <svg className="guide-bounce h-7 w-7 text-lime" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4c6 0 9 4 9 12" /><path d="M10.5 13l4.5 4.5 4.5-4.5" /></svg>
-                    </div>
-                  )}
-                  <span aria-hidden className="mt-0.5"><Link /></span>
-                  <textarea
-                    id="urls"
-                    value={videoUrl}
-                    onChange={e => setVideoUrl(e.target.value)}
-                    onFocus={() => { if (!focusedRef.current) { focusedRef.current = true; ft('url_input_focus'); } }}
-                    onPaste={() => ft('url_pasted')}
-                    placeholder="https://youtube.com/watch?v=…  (one per line for batch)"
-                    rows={2}
-                    required
-                    aria-describedby="urls-hint"
-                    className="min-w-0 flex-1 resize-none bg-transparent text-[15px] text-fg outline-none placeholder:text-muted"
-                  />
-                  <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title="Upload an MP4 (up to 500 MB, 2 hours)">
-                    {uploading ? `Uploading ${uploading}%` : 'Upload MP4'}
-                    <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
-                  </label>
-                </div>
-                <button type="submit" disabled={isProcessing} className="btn-lime h-[52px] whitespace-nowrap px-5 text-[15px]">
-                  <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
-                </button>
-              </div>
-              {(() => {
-                const p = parseLinks(videoUrl);
-                if (p.found < 2) return null;
-                return (
-                  <p id="link-count" className="px-1 text-xs text-soft">
-                    {p.links.length} video{p.links.length === 1 ? '' : 's'} detected
-                    {p.duplicates ? ` · ${p.duplicates} duplicate${p.duplicates === 1 ? '' : 's'} removed` : ''}
-                    {p.dropped ? ` · ${p.dropped} over the 10-link limit skipped` : ''}
-                    {' '}· each is clipped separately
-                  </p>
-                );
-              })()}
-              {liveChannel && (
-                <div id="live-picker" role="group" aria-label="Clip the last minutes of the live stream" className="flex flex-wrap items-center gap-2 rounded-input border border-line2 bg-ink px-3 py-2.5 text-sm">
-                  <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${liveInfo?.live ? 'text-[#FF4D6D]' : 'text-muted'}`}>
-                    <i aria-hidden className={`h-2 w-2 rounded-full ${liveInfo?.live ? 'bg-[#FF4D6D] animate-pulse' : 'bg-line2'}`} />
-                    {liveInfo == null ? 'Checking channel…' : liveInfo.exists === false ? 'Channel not found' : liveInfo.live ? `${liveInfo.name || liveChannel} is live` : `${liveInfo.name || liveChannel} is offline`}
-                  </span>
-                  <span className="text-xs text-muted">Clip the last</span>
-                  {LIVE_MINUTES.map(m => (
-                    <button key={m} type="button" aria-pressed={liveMinutes === m} onClick={() => setLiveMinutes(m)} className={`chip shrink-0 ${liveMinutes === m ? 'chip-on' : ''}`}>{m} min</button>
-                  ))}
-                  {liveInfo?.live && liveInfo.archive === false && <span className="w-full text-xs text-[#FFB64D]">This channel doesn&apos;t save broadcasts, so recent minutes can&apos;t be grabbed.</span>}
-                  {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
-                </div>
-              )}
-              <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
-                {[
-                  { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
-                  { label: 'Pack', options: PACKS, value: pack, set: setPack },
-                  { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
-                  { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
-                ].map((g, gi) => (
-                  <div key={g.label} role="group" aria-label={g.label} className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0">
-                    {gi > 0 && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
-                    <span className="mr-1 w-12 shrink-0 text-xs text-muted sm:w-auto">{g.label}</span>
-                    {g.options.map(o => (
-                      <button key={o.value} type="button" aria-pressed={g.value === o.value} onClick={() => g.set(o.value)} className={`chip shrink-0 ${g.value === o.value ? 'chip-on' : ''}`}>{o.label}</button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
-                <div className="flex gap-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} /> Captions</label>
-                  <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={aiHook} onChange={e => setAiHook(e.target.checked)} /> Hook overlay</label>
-                </div>
-              </div>
-            </form>
-            <div id="remaining" className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-line2 bg-surface/80 px-4 py-3 text-sm">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Generations remaining</span>
-              {isPro ? (
-                <span className="flex items-center gap-1.5 font-semibold text-lime"><Bolt size={13} fill="#C6FF3D" />200/day with Pro</span>
-              ) : (
-                <>
-                  <span className="flex items-center gap-2 text-soft"><b className="text-white">{freeLeft}</b> of {FREE_DAILY_LIMIT} free today
-                    <span className="inline-flex gap-1">{Array.from({ length: FREE_DAILY_LIMIT }, (_, k) => <i key={k} className={`h-1 w-6 rounded-sm ${k < freeLeft ? 'bg-lime' : 'bg-line2'}`} />)}</span>
-                  </span>
-                  <span className="text-soft"><b className="text-white">{credits}</b> credit{credits === 1 ? '' : 's'}</span>
-                  <span className="text-soft">Total: <b className="text-lime">{freeLeft + credits}</b></span>
-                  <button type="button" onClick={() => setShowPricing(true)} className="ml-auto text-xs font-semibold text-lime">Get more →</button>
-                </>
-              )}
-            </div>
- {error && !error.retry && (
-              <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
-                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
-                <p className="flex-1 leading-relaxed text-fg">{error.message}</p>
-                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
-              </div>
-            )}
-
+            {formBlock}
             <div className="flex flex-wrap gap-5 text-[13px] text-muted">
               <span className="flex items-center gap-1.5"><Check />No watermark on Pro</span>
               <span className="flex items-center gap-1.5"><Check />Captions burned in</span>
@@ -765,7 +1023,7 @@ function HomeInner() {
             ))}
           </ol>
           <div className="flex flex-wrap items-center gap-4">
-            <a href="#urls" onClick={focusInput} className="rounded-full bg-lime px-6 py-3 text-sm font-bold text-ink hover:bg-lime-hover">Start clipping free →</a>
+            <a href="/studio" className="rounded-full bg-lime px-6 py-3 text-sm font-bold text-ink hover:bg-lime-hover">Open Studio — clip free →</a>
             <a href="/monetize" className="text-sm font-semibold text-lime hover:text-lime-hover">Full monetization guide</a>
           </div>
         </div>
@@ -774,142 +1032,7 @@ function HomeInner() {
       <main className="relative mx-auto max-w-6xl px-5">
         {/* STATUS / RESULTS */}
         <section id="clips" className="flex flex-col gap-8 pb-20 pt-20">
-          {isProcessing && clips.length === 0 && (
-            <div className="card flex flex-col gap-4 p-5 animate-fadeup">
-              <div className="flex items-center gap-3.5 rounded-[14px] border border-line bg-[#0F0F16] p-3.5">
-                <svg className="animate-spin" width="40" height="40" viewBox="0 0 40 40" aria-hidden><circle cx="20" cy="20" r="16" fill="none" stroke="#23232E" strokeWidth="5" /><path d="M20 4a16 16 0 0 1 16 16" fill="none" stroke="#C6FF3D" strokeWidth="5" strokeLinecap="round" /></svg>
-                <div className="flex flex-1 flex-col gap-1">
-                  <span className="text-sm font-semibold">{statusMessage}</span>
-                  <span className="text-xs text-muted">Step {stage + 1} of 4 · usually under 90 seconds</span>
-                </div>
-                <div className="wave hidden h-7 items-end gap-1 sm:flex" aria-hidden>
-                  {Array.from({ length: 5 }, (_, i) => <span key={i} className="h-7" style={{ animationDelay: `${i * 150}ms` }} />)}
-                </div>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-[#1E1E29]">
-                <i className="block h-full rounded-full bg-lime transition-[width] duration-700" style={{ width: `${(stage + 1) * 25}%` }} />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {[0, 1, 2].map(i => (
-                  <div key={i} className="flex flex-col gap-2">
-                    <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />
-                    <div className="h-2.5 w-4/5 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
-                    <div className="h-2.5 w-1/2 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {error?.retry && !isProcessing && (
-            <div role="alert" className="card flex flex-col gap-3 border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-5 animate-fadeup">
-              <div className="flex items-start gap-3">
-                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
-                <div className="flex flex-1 flex-col gap-1">
-                  <span className="text-sm font-semibold">Generation stopped</span>
-                  <p className="text-sm leading-relaxed text-fg">{error.message}</p>
-                  {clips.length > 0 && <p className="text-xs text-muted">{clips.length} clip{clips.length === 1 ? '' : 's'} already received {clips.length === 1 ? 'is' : 'are'} kept below.</p>}
-                </div>
-                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => { if (lastRunRef.current) { setError(null); setJustFinished(false); handleClipping(null, lastRunRef.current); } }} className="btn-lime h-9 px-4 text-sm">Retry</button>
-                <button type="button" onClick={() => setError(null)} className="btn-ghost h-9 px-4 text-sm">Dismiss</button>
-              </div>
-            </div>
-          )}
-
-          {!isProcessing && clips.length === 0 && !error?.retry && (
-            <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 rounded-card border border-dashed border-line2 p-8 text-center">
-              <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Empty clip tray" className="animate-floaty">
-                <rect x="28" y="18" width="40" height="70" rx="10" fill="#1E1E29" stroke="#2A2A36" />
-                <rect x="52" y="30" width="40" height="70" rx="10" fill="#14141C" stroke="#2A2A36" />
-                <rect x="60" y="42" width="24" height="4" rx="2" fill="#2A2A36" /><rect x="60" y="52" width="18" height="4" rx="2" fill="#2A2A36" />
-                <circle cx="36" cy="92" r="14" fill="#C6FF3D" /><path d="M31 92h10M36 87v10" stroke="#0A0A0F" strokeWidth="3" strokeLinecap="round" />
-                <path d="M96 20l3 6 6 3-6 3-3 6-3-6-6-3 6-3z" fill="#7C5CFF" />
-              </svg>
-              <h3 className="font-display text-2xl font-extrabold text-white">No clips yet</h3>
-              <p className="max-w-[300px] text-sm leading-relaxed text-soft">Paste a link above and the AI will pull the best 30–60 second moments out of it.</p>
-              <button type="button" onClick={runExample} disabled={isProcessing} className="btn-ghost h-11 px-5 text-sm">▶ See an example</button>
-            </div>
-          )}
-
-          {isProcessing && clips.length === 0 && (
-            <ProgressDock label={progressLabel} step={progressStep} />
-          )}
-
-          {clips.length > 0 && (
-            <>
-              {justFinished && !isProcessing && (
-                <div className="relative flex items-center gap-4 overflow-hidden rounded-card border border-lime bg-lime-tint p-4 animate-fadeup">
-                  <div aria-hidden className="pointer-events-none absolute inset-0">
-                    {['12%', '28%', '44%', '60%', '76%', '90%'].map((l, i) => (
-                      <i key={i} className="absolute -top-2 h-3 w-2 rounded-sm animate-confetti" style={{ left: l, background: ['#C6FF3D', '#7C5CFF', '#FF4D6D', '#FFB64D'][i % 4], animationDelay: `${i * 0.25}s` }} />
-                    ))}
-                  </div>
-                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-lime shadow-glow animate-pop"><Check color="#0A0A0F" /></span>
-                  <div className="relative">
-                    <p className="font-display text-lg font-extrabold text-white">{clips.length} {clips.length === 1 ? 'clip' : 'clips'} ready</p>
-                    <p className="text-sm text-soft">Top score <span className="font-mono text-lime">{topScore}</span> — sorted best first.</p>
-                  </div>
-                </div>
-              )}
-              {lastWasExample && !isProcessing && (
-                <div id="example-next" className="flex flex-col gap-3 rounded-card border border-lime bg-surface p-4 sm:flex-row sm:items-center animate-fadeup">
-                  <div className="flex-1">
-                    <p className="font-display text-lg font-extrabold text-white">That was the example. Now do your video.</p>
-                    <p className="text-sm text-soft">Paste any YouTube, Twitch or podcast link. You get {FREE_DAILY_LIMIT} free generations a day.</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={focusInput} className="btn-lime h-11 flex-1 justify-center px-5 text-sm sm:flex-none">Paste my link</button>
-                    {!isPro && <button type="button" onClick={() => setShowPricing(true)} className="btn-ghost h-11 px-4 text-sm">See plans</button>}
-                  </div>
-                </div>
-              )}
-              {justFinished && !isProcessing && !lastWasExample && <FeedbackNudge />}
-              {notice && !isProcessing && (
-                <p role="status" className="rounded-card border border-line2 bg-surface p-3 text-sm text-soft">{notice}</p>
-              )}
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div className="flex flex-col gap-2">
-                  <span className="eyebrow" aria-live="polite">{isProcessing ? `Your clips · ${clips.length} of ${expected} ready` : 'Your clips'}</span>
-                  <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Ranked by how likely they are to blow up.</h2>
-                </div>
-                <button onClick={() => setClips([])} className="btn-ghost h-10 px-4 text-sm">Clear</button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {clips.map((c, i) => <ClipPlayer key={c.id} clip={c} index={i} compact />)}
-                {isProcessing && Array.from({ length: Math.max(0, expected - clips.length) }, (_, i) => (
-                  <div key={`pending-${i}`} aria-hidden className="flex flex-col gap-2">
-                    <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />
-                    <div className="h-2.5 w-4/5 rounded bg-shimmer [background-size:200%_100%] animate-shimmer" />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {myAssets.length > 0 && (
-            <a href="/assets" className="flex items-center justify-between rounded-input border border-line bg-surface px-4 py-3 text-sm hover:border-lime">
-              <span className="font-semibold text-white">View all {myAssets.length} assets</span>
-              <span className="text-lime">Open library →</span>
-            </a>
-          )}
-
-          {history.length > 0 && (
-            <div className="flex flex-col gap-3 pt-4">
-              <span className="text-xs font-semibold uppercase tracking-[.08em] text-muted">Recent</span>
-              <div className="flex flex-col gap-2">
-                {history.map(h => (
-                  <div key={h.id} className="flex items-center justify-between gap-3 rounded-input border border-line bg-surface px-3.5 py-2.5 text-sm">
-                    <span className="truncate text-soft">{h.url}</span>
-                    <span className="hidden shrink-0 text-xs text-muted sm:inline">{h.clips?.length || 0} clips</span>
-                    <button onClick={() => { setVideoUrl(h.url); setClips(h.clips || []); setJustFinished(false); setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }} className="shrink-0 text-xs font-semibold text-lime hover:text-lime-hover">Load</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {clipsBlock}
         </section>
 
         <SeeItWork />
@@ -1003,54 +1126,7 @@ function HomeInner() {
         </section>
       </main>
 
-      {/* UPGRADE MODAL */}
-      {showPricing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-4 backdrop-blur-sm" onClick={() => setShowPricing(false)}>
-          <div role="dialog" aria-modal="true" aria-labelledby="up-title" className="relative w-full max-w-[560px] overflow-hidden rounded-3xl border border-line2 bg-surface shadow-modal animate-fadeup" onClick={e => e.stopPropagation()}>
-            <div aria-hidden className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-spotlight blur-xl" />
-            <div className="relative flex flex-col gap-5 p-7">
-              <div className="flex items-start justify-between gap-3">
-                {!isPro && dailyCount >= FREE_DAILY_LIMIT ? (
-                  <span className="inline-flex h-8 items-center gap-2 rounded-full border border-hot bg-[#2A1414] px-2.5 text-xs font-semibold text-[#FF8FA3]">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" /><path d="M12 7v6M12 16v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-                    You've used {FREE_DAILY_LIMIT} of {FREE_DAILY_LIMIT} free clips today
-                  </span>
-                ) : <span className="eyebrow pt-2">Pro</span>}
-                <button type="button" aria-label="Close" onClick={() => setShowPricing(false)} className="btn-ghost h-9 w-9 rounded-[10px] p-0">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg>
-                </button>
-              </div>
-              <h3 id="up-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[38px]">
-                Keep the clips coming.<br /><span className="text-lime">Go Pro.</span>
-              </h3>
-              <p className="text-[15px] leading-relaxed text-soft">Pro raises the daily cap to 200, removes the watermark, and saves your history so you never lose a banger.</p>
-              <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
-                <li className="flex items-center gap-2"><Check />200 generations a day</li>
-                <li className="flex items-center gap-2"><Check />No watermark</li>
-                <li className="flex items-center gap-2"><Check />Batch up to 10 links</li>
-              </ul>
-              <div className="flex flex-col gap-2.5 sm:flex-row">
-                <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
-                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>
-              </div>
-              <div className="border-t border-line pt-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · from $9</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <button onClick={() => handleUpgrade('credits_10')} className="btn-ghost h-16 flex-col text-xs">10 credits<span className="text-[11px] text-muted">$9</span><span className="text-[10px] text-muted">base</span></button>
-                  <button onClick={() => handleUpgrade('credits_25')} className="btn-ghost h-16 flex-col text-xs">25 credits<span className="text-[11px] text-muted">$19</span><span className="text-[10px] font-bold text-lime">save 16%</span></button>
-                  <button onClick={() => handleUpgrade('credits_50')} className="btn-ghost h-16 flex-col text-xs">50 credits<span className="text-[11px] text-muted">$29</span><span className="text-[10px] font-bold text-lime">save 36%</span></button>
-                  <button onClick={() => handleUpgrade('credits_100')} className="btn-ghost h-16 flex-col text-xs">100 credits<span className="text-[11px] text-muted">$49</span><span className="text-[10px] font-bold text-lime">save 46%</span></button>
-                </div>
-                <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation after your free clips. Bigger packs cost less per clip.</p>
-              </div>
-              <div className="flex items-center justify-between text-xs text-muted">
-                <span>Secure checkout via Stripe · cancel anytime</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {modalBlock}
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14] pb-24 md:pb-0">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
           <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
@@ -1073,10 +1149,10 @@ function HomeInner() {
 }
 
 
-export default function Home() {
+export default function Home({ studio = false }) {
   return (
     <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-ink text-muted">Loading…</div>}>
-      <HomeInner />
+      <HomeInner studio={studio === true} />
     </Suspense>
   );
 }
