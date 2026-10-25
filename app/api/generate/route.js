@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { reportError } from '../../../lib/alerts';
 import { put } from '@vercel/blob';
 import { execFile } from 'child_process';
+import { ffmpegPath } from '../../../lib/ffmpegbin';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
@@ -55,7 +56,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
-import { downloadToFile, probeDuration, localTranscript, segmentToBlob } from '../../../lib/localprep';
+import { downloadToFile, probeDuration, localTranscript, segmentToBlob, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig } from '../../../lib/jobs';
@@ -447,7 +448,7 @@ async function downloadSource(url, dir) {
 }
 
 async function cutClip(src, start, length, outPath) {
-  const ffmpeg = require('ffmpeg-static');
+  const ffmpeg = ffmpegPath();
   if (!ffmpeg) return { ok: false, error: 'ffmpeg missing' };
   const attempts = [
     ['-y', '-ss', String(start), '-i', src, '-t', String(length), '-c', 'copy', '-movflags', '+faststart', outPath],
@@ -926,7 +927,9 @@ export async function POST(request) {
           }
           // YouTube via the download API: pull the file into /tmp once and do audio + per-clip
           // segments locally, so RenderIO never has to fetch the whole (possibly huge) source.
-          if (ytId && youtubeDownloader() && ctx.dir) {
+          // Without a local ffmpeg binary, skip local prep and let RenderIO's ffmpeg fetch the source.
+          if (ytId && youtubeDownloader() && ctx.dir && !localFfmpegAvailable()) console.error('[ffmpeg] local binary missing; using RenderIO for this run');
+          if (ytId && youtubeDownloader() && ctx.dir && localFfmpegAvailable()) {
             const src = await ctx.srcP;
             const file = path.join(ctx.dir, 'src.mp4');
             const t0 = Date.now();
@@ -1018,7 +1021,7 @@ export async function POST(request) {
           ctx.downloadError = dl?.error || null;
           if (ctx.source) {
             const audio = path.join(ctx.dir, 'audio.mp3');
-            const ffmpeg = require('ffmpeg-static');
+            const ffmpeg = ffmpegPath();
             if (ffmpeg) {
               try {
                 await exec(ffmpeg, ['-y', '-i', ctx.source, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', audio]);

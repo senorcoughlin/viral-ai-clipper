@@ -4,11 +4,12 @@ import GoogleAds from '../components/GoogleAds'
 import ReferralCapture from '../components/ReferralCapture'
 import { Analytics } from '@vercel/analytics/next'
 import { SpeedInsights } from '@vercel/speed-insights/next'
-import { Syne, Inter, JetBrains_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 
-const display = Syne({ subsets: ['latin'], weight: ['700', '800'], variable: '--font-display', display: 'swap' })
-const body = Inter({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-body', display: 'swap' })
-const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['600'], variable: '--font-mono', display: 'swap' })
+// Self-hosted fonts (no Google Fonts fetch at build time).
+const display = localFont({ src: './fonts/syne-latin-wght-normal.woff2', weight: '400 800', variable: '--font-display', display: 'swap' })
+const body = localFont({ src: './fonts/inter-latin-wght-normal.woff2', weight: '100 900', variable: '--font-body', display: 'swap' })
+const mono = localFont({ src: './fonts/jetbrains-mono-latin-600-normal.woff2', weight: '600', variable: '--font-mono', display: 'swap' })
 
 const SITE = 'https://viralaiclipper.com'
 const TITLE = 'Viral AI Clipper — Turn one video into up to 8 viral-ready clips'
