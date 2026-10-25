@@ -699,8 +699,13 @@ export async function POST(request) {
             try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
             await refundUsage();
             await reportError('generate:download', ctx.capacity ? 'at RenderIO capacity' : 'source download failed: ' + ctx.srcFailed, videoUrl).catch(() => {});
-            const why = 'We couldn\u2019t download that video link right now';
-            send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `${why}. Try uploading the video file instead, or try again later. This run was not counted.` });
+            const why = ytId
+              ? 'YouTube downloads are temporarily down on our side (YouTube is blocking our video downloader)'
+              : 'We couldn\u2019t download that video link right now';
+            const msg = ytId
+              ? `${why}. This isn\u2019t because you left the page. Please upload the video file instead (tap Upload), which works normally. This run was not counted.`
+              : `${why}. Try uploading the video file instead, or try again later. This run was not counted.`;
+            send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : msg });
             send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: why });
             close();
             return;
