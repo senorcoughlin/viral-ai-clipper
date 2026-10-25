@@ -569,13 +569,13 @@ function HomeInner() {
 
             {/* FORM */}
             <form ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
-              <label htmlFor="urls" className="px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or paste your own link</label>
+              <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>Or paste your own link</label>
               <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
               <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
                 <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
                   {genCount < 3 && !isProcessing && !videoUrl && (
                     <div id="url-guide" aria-hidden className="pointer-events-none absolute bottom-full right-3 z-10 mb-1.5 flex items-end gap-1.5">
-                      <span className="rounded-full bg-lime px-2.5 py-1 text-[12px] font-bold text-ink shadow-card">Paste a YouTube or video link here</span>
+                      <span className="rounded-full bg-lime px-2.5 py-1 text-[12px] font-bold text-ink shadow-card">Or paste your own link here</span>
                       <svg className="guide-bounce h-7 w-7 text-lime" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4c6 0 9 4 9 12" /><path d="M10.5 13l4.5 4.5 4.5-4.5" /></svg>
                     </div>
                   )}
