@@ -502,6 +502,17 @@ function HomeInner({ studio = false }) {
   const topScore = clips.length ? Math.max(...clips.map(c => c.viralScore || 0)) : 0;
   const price = PRICE[billing];
 
+  const downloadAll = async () => {
+    const list = clips.filter(c => c.videoUrl && (!selectedIds.length || selectedIds.includes(c.id)));
+    setDlAllBusy(true);
+    for (let i = 0; i < list.length; i++) {
+      const n = clipFileName(list[i].title, clips.indexOf(list[i]) + 1);
+      const a = document.createElement('a'); a.href = downloadHref(list[i].videoUrl, n); a.download = n;
+      document.body.appendChild(a); a.click(); a.remove();
+      await new Promise(r => setTimeout(r, 900));
+    }
+    setDlAllBusy(false);
+  };
   const formBlock = (<>
             {/* FORM */}
             <form id="clip-form" ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
@@ -804,17 +815,6 @@ function HomeInner({ studio = false }) {
       )}
 
   </>);
-  const downloadAll = async () => {
-    const list = clips.filter(c => c.videoUrl && (!selectedIds.length || selectedIds.includes(c.id)));
-    setDlAllBusy(true);
-    for (let i = 0; i < list.length; i++) {
-      const n = clipFileName(list[i].title, clips.indexOf(list[i]) + 1);
-      const a = document.createElement('a'); a.href = downloadHref(list[i].videoUrl, n); a.download = n;
-      document.body.appendChild(a); a.click(); a.remove();
-      await new Promise(r => setTimeout(r, 900));
-    }
-    setDlAllBusy(false);
-  };
   if (studio) return (
     <div className="relative min-h-screen bg-ink">
       <header className="sticky top-0 z-30 border-b border-line/60 bg-ink/90 backdrop-blur-md">
