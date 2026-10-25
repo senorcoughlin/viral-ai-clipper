@@ -688,9 +688,24 @@ export async function POST(request) {
       if (rioKey) {
         ctx.srcP = isBlobUrl(videoUrl)
           ? Promise.resolve({ url: rioUrl, direct: true })
-          : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 180000)
+          : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000)
               .then(u => ({ url: u, direct: true }))
-              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; return { url: rioUrl, direct: false }; });
+              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
+        // Fail fast: if the link can't be downloaded, every per-clip yt-dlp fallback hangs
+        // the same way, so stop now, refund the run and tell the user clearly.
+        if (!isBlobUrl(videoUrl)) {
+          await ctx.srcP;
+          if (ctx.srcFailed) {
+            try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+            await refundUsage();
+            await reportError('generate:download', ctx.capacity ? 'at RenderIO capacity' : 'source download failed: ' + ctx.srcFailed, videoUrl).catch(() => {});
+            const why = 'We couldn\u2019t download that video link right now';
+            send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `${why}. Try uploading the video file instead, or try again later. This run was not counted.` });
+            send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: why });
+            close();
+            return;
+          }
+        }
       }
       let audioP = null;
       if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
