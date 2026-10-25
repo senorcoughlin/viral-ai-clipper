@@ -12,11 +12,11 @@ import AccountBar, { syncClips } from '../components/AccountBar';
 import BoltMenu from '../components/BoltMenu';
 import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
-import { track } from '@vercel/analytics';
+import { funnel } from '../lib/funnel';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
-const ft = (e, p) => { try { track(e, p); } catch {} };
+const ft = (e, p) => funnel(e, p);
 
 const FREE_DAILY_LIMIT = 3;
 
