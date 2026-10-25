@@ -509,33 +509,33 @@ export async function POST(request) {
 
   // Twitch / Kick: resolve to media playlists and decide which window to transcribe.
   const streamInfo = parseStreamUrl(videoUrl);
-  let stream = null;
+  let media = null;
   if (streamInfo) {
-    try { stream = await resolveStream(streamInfo); } catch (e) {
+    try { media = await resolveStream(streamInfo); } catch (e) {
       if (e?.userFacing) return NextResponse.json({ success: false, message: e.message, code: e.code }, { status: 400 });
       await reportError('generate:stream', e, videoUrl);
       return NextResponse.json({ success: false, message: 'We could not read that stream right now. Try again in a minute.' }, { status: 502 });
     }
-    const dur = Math.floor(Number(stream.duration) || 0);
-    if (stream.live) {
+    const dur = Math.floor(Number(media.duration) || 0);
+    if (media.live) {
       const mins = LIVE_MINUTES.includes(Number(body.liveMinutes)) ? Number(body.liveMinutes) : 10;
       // Stay ~20s back from the live edge: the newest segment is often still being written.
       const end = Math.max(0, dur - 20);
-      stream.winLen = Math.min(mins * 60, end);
-      stream.winStart = Math.max(0, end - stream.winLen);
-      stream.liveMinutes = mins;
-      if (stream.winLen < Math.max(60, clipLength + 5)) {
+      media.winLen = Math.min(mins * 60, end);
+      media.winStart = Math.max(0, end - media.winLen);
+      media.liveMinutes = mins;
+      if (media.winLen < Math.max(60, clipLength + 5)) {
         return NextResponse.json({ success: false, message: 'This stream only just started, so there isn\'t enough footage yet. Try again in a few minutes.' }, { status: 400 });
       }
     } else {
-      stream.winStart = 0;
-      stream.winLen = dur || 0;
+      media.winStart = 0;
+      media.winLen = dur || 0;
     }
-    if (!stream.winLen) return NextResponse.json({ success: false, message: 'We could not read the length of that video. Try another link.' }, { status: 400 });
+    if (!media.winLen) return NextResponse.json({ success: false, message: 'We could not read the length of that video. Try another link.' }, { status: 400 });
   }
 
   // Capacity pre-check (before charging usage): a run needs ~1 cut per clip plus audio and face jobs.
-  const audioChunks = stream ? Math.max(1, Math.ceil(stream.winLen / STREAM_CHUNK_SEC)) : 1;
+  const audioChunks = media ? Math.max(1, Math.ceil(media.winLen / STREAM_CHUNK_SEC)) : 1;
   if (process.env.RENDERIO_API_KEY && (await renderioLeft()) < count + 2 + audioChunks) {
     return NextResponse.json({ success: false, message: CAPACITY_MESSAGE, capacity: true }, { status: 503 });
   }
@@ -551,16 +551,16 @@ export async function POST(request) {
     creditSpent = await consumeCredit(email).catch(() => false);
   }
   const tier = pro ? 'pro' : creditSpent ? 'credits' : 'free';
-  if (stream && !stream.live && !stream.mp4) {
+  if (media && !media.live && !media.mp4) {
     const max = tier === 'free' ? STREAM_MAX_SEC.free : STREAM_MAX_SEC.paid;
-    if (stream.winLen > max) {
+    if (media.winLen > max) {
       if (creditSpent) await refundCredit(email).catch(() => {});
       const paidMax = fmtDur(STREAM_MAX_SEC.paid);
       return NextResponse.json({
         success: false,
         message: tier === 'free'
-          ? `That VOD is ${fmtDur(stream.winLen)} long. Free runs handle streams up to ${fmtDur(max)}; Pro and credit runs handle up to ${paidMax}. Upgrade, or paste a Twitch clip or a shorter VOD.`
-          : `That VOD is ${fmtDur(stream.winLen)} long. The current limit is ${paidMax} per run. Paste a shorter VOD or a Twitch clip.`,
+          ? `That VOD is ${fmtDur(media.winLen)} long. Free runs handle streams up to ${fmtDur(max)}; Pro and credit runs handle up to ${paidMax}. Upgrade, or paste a Twitch clip or a shorter VOD.`
+          : `That VOD is ${fmtDur(media.winLen)} long. The current limit is ${paidMax} per run. Paste a shorter VOD or a Twitch clip.`,
         tooLong: true,
       }, { status: 400 });
     }
@@ -593,12 +593,12 @@ export async function POST(request) {
   // cut evenly spaced clips, but we say so instead of inventing viral scores.
   const unscoredClips = (n) => {
     const segs = ctx.transcript?.segments || [];
-    if (stream) {
+    if (media) {
       // Spread evenly across the stream window (absolute source time).
-      const usable = Math.max(0, stream.winLen - Number(clipLength) - 2);
-      const n2 = Math.max(1, Math.min(n, Math.floor(stream.winLen / Number(clipLength)) || 1));
+      const usable = Math.max(0, media.winLen - Number(clipLength) - 2);
+      const n2 = Math.max(1, Math.min(n, Math.floor(media.winLen / Number(clipLength)) || 1));
       return Array.from({ length: n2 }, (_, i) => {
-        const st = Math.floor(stream.winStart + (n2 === 1 ? Math.min(5, usable) : (usable * i) / (n2 - 1)));
+        const st = Math.floor(media.winStart + (n2 === 1 ? Math.min(5, usable) : (usable * i) / (n2 - 1)));
         return { title: `Clip ${i + 1}`, hook: '', hooks: [], caption: '', hashtags: '', bestTime: '', ...heuristicScore(st), scored: true, estimated: true, startSec: st };
       });
     }
@@ -637,7 +637,7 @@ export async function POST(request) {
     } else {
       score += 4; // music/action footage with no speech
     }
-    score += Math.max(0, 4 - Math.floor((start - (stream?.winStart || 0)) / 120));
+    score += Math.max(0, 4 - Math.floor((start - (media?.winStart || 0)) / 120));
     score = Math.max(35, Math.min(82, score));
     const reason = segs.length
       ? `Estimated score (AI scoring unavailable): ${wps.toFixed(1)} words/sec of speech${score >= 70 ? ' with a strong opening' : ''}.`
@@ -743,8 +743,8 @@ export async function POST(request) {
         enqueue(obj);
       };
       try {
-      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean', stream?.live ? 'live' + stream.liveMinutes : '']);
-      const hit = stream?.live ? null : await getCached(key);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
+      const hit = media?.live ? null : await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
       if (cached && cached.length) {
@@ -761,10 +761,10 @@ export async function POST(request) {
       // Tell the client right away that work has started; setup happens below.
       const startedAt = Date.now();
       ctx.startedAt = startedAt;
-      send({ type: 'start', total: count, ...(stream ? { stream: { live: !!stream.live, minutes: stream.liveMinutes || null, duration: Math.round(stream.winLen), chunks: audioChunks } } : {}) });
+      send({ type: 'start', total: count, ...(media ? { stream: { live: !!media.live, minutes: media.liveMinutes || null, duration: Math.round(media.winLen), chunks: audioChunks } } : {}) });
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
-      const cachedTr = stream?.live ? null : await getCachedTranscript(videoUrl).catch(() => null);
+      const cachedTr = media?.live ? null : await getCachedTranscript(videoUrl).catch(() => null);
       // Cold run: start the RenderIO audio -> Whisper path at the same time as the
       // YouTube caption fetch (captions are usually blocked from Vercel). If captions
       // win, the audio result is simply ignored.
@@ -772,8 +772,8 @@ export async function POST(request) {
       // as plain ffmpeg jobs on that file (fast seeks) instead of each re-downloading it.
       // Uploads are already direct files. If the download fails, fall back to per-job yt-dlp.
       const rioKey = process.env.RENDERIO_API_KEY;
-      if (rioKey && stream) {
-        ctx.srcP = Promise.resolve({ url: stream.videoUrl, direct: true });
+      if (rioKey && media) {
+        ctx.srcP = Promise.resolve({ url: media.videoUrl, direct: true });
       } else if (rioKey) {
         ctx.srcP = isBlobUrl(videoUrl)
           ? Promise.resolve({ url: rioUrl, direct: true })
@@ -797,12 +797,12 @@ export async function POST(request) {
         }
       }
       let audioP = null;
-      if (stream && !cachedTr && rioKey && process.env.GROQ_API_KEY) {
+      if (media && !cachedTr && rioKey && process.env.GROQ_API_KEY) {
         // Split the window into <=60 min chunks, transcribe them in parallel, merge in source time.
-        const n = Math.max(1, Math.ceil(stream.winLen / STREAM_CHUNK_SEC));
-        const step = stream.winLen / n;
-        ctx.chunks = Array.from({ length: n }, (_, k) => ({ start: stream.winStart + k * step, len: step }));
-        audioP = Promise.all(ctx.chunks.map(ch => streamChunkTranscript(stream.audioUrl, ch.start, ch.len, 150000)
+        const n = Math.max(1, Math.ceil(media.winLen / STREAM_CHUNK_SEC));
+        const step = media.winLen / n;
+        ctx.chunks = Array.from({ length: n }, (_, k) => ({ start: media.winStart + k * step, len: step }));
+        audioP = Promise.all(ctx.chunks.map(ch => streamChunkTranscript(media.audioUrl, ch.start, ch.len, 150000)
           .catch((e) => { console.warn('stream chunk failed', ch.start, e?.message); if (e?.capacity) ctx.capacity = true; return EMPTY_TRANSCRIPT; })))
           .then(parts => {
             ctx.chunkTranscripts = parts;
@@ -816,7 +816,7 @@ export async function POST(request) {
       // captions only give phrase timings. Prefer Whisper whenever the audio job runs.
       if (audioP) {
         send({ type: 'status', step: 'transcript', detail: 'audio' });
-        const [w, yt] = await Promise.all([audioP, ytId && !stream ? fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT]);
+        const [w, yt] = await Promise.all([audioP, ytId && !media ? fetchTranscript(videoUrl) : EMPTY_TRANSCRIPT]);
         ctx.transcript = w?.segments?.length ? w : yt;
         ctx.transcriptSource = w?.segments?.length ? 'whisper' : yt?.segments?.length ? 'youtube' : null;
       } else {
@@ -865,10 +865,10 @@ export async function POST(request) {
       if (!cachedTr && ctx.transcript?.segments?.length) setCachedTranscript(videoUrl, ctx.transcript).catch(() => {});
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
       let scored = null;
-      if (stream && ctx.transcript?.segments?.length) {
+      if (media && ctx.transcript?.segments?.length) {
         // Score each chunk on its own (keeps prompts small and parallel), then keep the best
         // non-overlapping moments across the whole stream.
-        const winEnd = stream.winStart + stream.winLen;
+        const winEnd = media.winStart + media.winLen;
         const parts = (ctx.chunkTranscripts && ctx.chunkTranscripts.length > 1) ? ctx.chunkTranscripts : [ctx.transcript];
         const scoreChunk = async (tr) => {
           if (!tr?.segments?.length) return [];
@@ -878,7 +878,7 @@ export async function POST(request) {
           return (r?.clips || []).filter(c => c.startSec >= lo - 5 && c.startSec <= hi);
         };
         const all = (await Promise.all(parts.map(scoreChunk))).flat()
-          .map(c => ({ ...c, startSec: Math.max(stream.winStart, Math.min(Number(c.startSec) || 0, winEnd - clipLength)) }))
+          .map(c => ({ ...c, startSec: Math.max(media.winStart, Math.min(Number(c.startSec) || 0, winEnd - clipLength)) }))
           .sort((a, b) => (b.score || 0) - (a.score || 0));
         const picked = [];
         for (const c of all) {
@@ -917,7 +917,7 @@ export async function POST(request) {
       const clips = results.filter(Boolean);
       ctx.runClips = clips;
       ctx.runFailed = base.length - clips.length;
-      if (clips.length && !stream?.live) await setCached(key, clips);
+      if (clips.length && !media?.live) await setCached(key, clips);
       try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
       const real = clips.length;
       if (!real) {
