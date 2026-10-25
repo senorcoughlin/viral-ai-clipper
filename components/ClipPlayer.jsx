@@ -39,7 +39,14 @@ const Icon = {
   download: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>,
 };
 
-export default function ClipPlayer({ clip, compact = false }) {
+
+const slug = (t) => String(t || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '');
+const stamp = () => { const d = new Date(), z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`; };
+export const clipFileName = (title, n) => ['viral-clip', slug(title), n, stamp()].filter(Boolean).join('-') + '.mp4';
+const downloadHref = (src, name) => /^https:\/\/(renderio\.dev\/api\/media\/|[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/)/.test(src || '')
+  ? `/api/download?${new URLSearchParams({ u: src.split('#')[0], n: name })}` : src;
+
+export default function ClipPlayer({ clip, compact = false, index }) {
   const [copied, setCopied] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -64,6 +71,11 @@ export default function ClipPlayer({ clip, compact = false }) {
 
   const videoSrc = renderedUrl || (srcIndex === 0 && clip.videoUrl ? clip.videoUrl : null) || SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
 
+  const onDownload = (e) => {
+    const name = clipFileName(clip.title || title, (index ?? 0) + 1);
+    e.currentTarget.href = downloadHref(videoSrc, name);
+    e.currentTarget.download = name;
+  };
   const copy = (text, key) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
@@ -206,7 +218,7 @@ export default function ClipPlayer({ clip, compact = false }) {
             <span style={{ color }}>{label}</span>
             <span className="flex gap-2">
               {clip.source && !clip.preview && <button type="button" onClick={() => setEditorOpen(true)} className="font-semibold text-soft hover:text-lime">Edit</button>}
-              <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
+              <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
             </span>
           </div>
           <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Post to Shorts'}</button>
@@ -277,7 +289,7 @@ export default function ClipPlayer({ clip, compact = false }) {
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
           <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost h-10 px-3 text-xs">{postBusy ? 'Uploading…' : 'Shorts'}</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
-          <a href={videoSrc} download={`${title || 'clip'}.mp4`} target="_blank" rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
+          <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}
           </a>
           <button type="button" aria-label="Copy AI prompt" title="Copy AI prompt" onClick={() => copy(aiPrompt, 'prompt')} className="btn-ghost h-10 w-10 p-0">

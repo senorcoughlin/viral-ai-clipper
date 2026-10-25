@@ -878,7 +878,7 @@ function HomeInner() {
                 <button onClick={() => setClips([])} className="btn-ghost h-10 px-4 text-sm">Clear</button>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {clips.map((c) => <ClipPlayer key={c.id} clip={c} compact />)}
+                {clips.map((c, i) => <ClipPlayer key={c.id} clip={c} index={i} compact />)}
                 {isProcessing && Array.from({ length: Math.max(0, expected - clips.length) }, (_, i) => (
                   <div key={`pending-${i}`} aria-hidden className="flex flex-col gap-2">
                     <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />
