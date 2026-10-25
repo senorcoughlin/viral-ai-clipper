@@ -578,7 +578,11 @@ export async function POST(request) {
     }
   }
   const watermark = tier === 'free' || tier === 'example'; // Pro and credit-paid runs are never watermarked.
-  const limit = await checkLimit(ip, tier);
+  // Test-only bypass (set TEST_BYPASS_SECRET on Preview only): skips daily usage counters.
+  const bypass = !!process.env.TEST_BYPASS_SECRET && process.env.VERCEL_ENV !== 'production'
+    && request.headers.get('x-test-bypass') === process.env.TEST_BYPASS_SECRET;
+  const noCache = bypass && !!body.noCache;
+  const limit = bypass ? { ok: true, refund: async () => {}, key: null } : await checkLimit(ip, tier);
   if (!limit.ok) {
     if (creditSpent) await refundCredit(email).catch(() => {});
     return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached }, { status: limit.status });
@@ -783,7 +787,7 @@ export async function POST(request) {
       }, RUN_BUDGET_MS);
       try {
       const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
-      const hit = media?.live ? null : await getCached(key);
+      const hit = media?.live || noCache ? null : await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
       if (cached && cached.length) {
@@ -803,7 +807,7 @@ export async function POST(request) {
       send({ type: 'start', total: count, ...(media ? { stream: { live: !!media.live, minutes: media.liveMinutes || null, duration: Math.round(media.winLen), chunks: audioChunks } } : {}) });
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
-      const cachedTr = media?.live ? null : await getCachedTranscript(videoUrl).catch(() => null);
+      const cachedTr = media?.live || noCache ? null : await getCachedTranscript(videoUrl).catch(() => null);
       // Cold run: start the RenderIO audio -> Whisper path at the same time as the
       // YouTube caption fetch (captions are usually blocked from Vercel). If captions
       // win, the audio result is simply ignored.
