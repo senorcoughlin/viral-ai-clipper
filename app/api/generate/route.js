@@ -772,7 +772,11 @@ export async function POST(request) {
       if (!scored && ctx.transcript?.text && Date.now() - startedAt < 170000) {
         scored = await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count); // one retry
       }
-      if (!scored?.clips?.length) reportError('generate:score', new Error(ctx.transcript?.text ? 'Gemini scoring failed twice; used heuristic scores' : 'No transcript; used heuristic scores'), videoUrl).catch(() => {});
+      // Only a real scoring failure is alert-worthy; no transcript is an expected fallback (log only).
+      if (!scored?.clips?.length) {
+        if (ctx.transcript?.text) reportError('generate:score', new Error('Gemini scoring failed twice; used heuristic scores'), videoUrl).catch(() => {});
+        else console.warn('generate: no transcript; used heuristic scores', videoUrl);
+      }
       const base = scored?.clips?.length ? scored.clips.slice(0, count).map(c => ({ ...c, scored: true })) : unscoredClips(count);
 
       send({ type: 'status', step: 'cutting', total: base.length });
