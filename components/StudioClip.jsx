@@ -135,7 +135,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   return (
     <article className="card flex min-w-0 flex-col overflow-hidden animate-fadeup" data-studio-clip>
       <div className="relative aspect-[9/16] max-h-[78vh] w-full bg-black">
-        <video src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0) setDur(d); }} />
+        <video src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0 && !dur) { setDur(d); setEd(x => x.trimmed ? x : { ...x, end: x.start + d }); } }} />
         <label className="absolute left-3 top-3 z-10 flex h-9 items-center gap-2 rounded-full border border-line2 bg-ink/85 px-3 text-xs font-semibold">
           <input type="checkbox" className="h-4 w-4 accent-lime" checked={!!selected} onChange={e => onSelect?.(e.target.checked)} /> Select
         </label>
