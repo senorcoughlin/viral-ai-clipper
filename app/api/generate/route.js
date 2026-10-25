@@ -23,6 +23,9 @@ import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../.
 // YouTube is capped tighter until long-video processing lands (one run must fit in maxDuration).
 const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
 const YT_TOO_LONG = `YouTube videos up to ${Math.round(Number(process.env.YT_MAX_MINUTES || 60))} minutes for now; upload the file for longer ones. This run was not counted.`;
+const SRC_KEY = (id) => `ysrc:${id}`;
+const LONG_SEC = 40 * 60; // use 360p for long YouTube sources (smaller, faster to pull)
+const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
 
@@ -53,7 +56,9 @@ import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
 import { downloadToFile, probeDuration, localTranscript, segmentToBlob } from '../../../lib/localprep';
-import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId } from '../../../lib/jobs';
+import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig } from '../../../lib/jobs';
+import { refundSlot } from '../../../lib/ratelimit';
+import { getVercelOidcToken } from '@vercel/functions/oidc';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
 
 // Stream sources (Twitch/Kick) are transcribed in chunks so multi-hour VODs fit the
@@ -499,8 +504,10 @@ export async function POST(request) {
   const ytId = youtubeId(videoUrl);
   // Private uploads are handed to RenderIO through a signed, expiring proxy URL.
   const rioUrl = toFetchable(videoUrl);
+  let ytSecs = 0;
   if (ytId) {
     const secs = (await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId));
+    ytSecs = secs || 0;
     if (secs === -1) {
       return NextResponse.json({ success: false, message: 'That YouTube video is live right now. Live YouTube clipping isn\'t supported yet. Paste it again once the stream ends (the replay works), or use a Twitch channel link for "clip the last X minutes".', live: true }, { status: 400 });
     }
@@ -553,17 +560,20 @@ export async function POST(request) {
 
   // Identity comes only from the signed session cookie, never from the request body.
   const ip = clientIp(request);
-  const email = paidEmail(request);
+  // Signed follow-up of an existing job (see hand-off below): same job, already charged.
+  const cont = await readContinuation(request).catch(() => null);
+  const email = cont ? (cont.email || null) : paidEmail(request);
   const ent = email ? await getEntitlement(email).catch(() => null) : null;
   const pro = !!ent?.pro;
   let creditSpent = false;
   // The homepage sample video is a free demo: it never spends a free slot or a credit.
   const isExample = ytId === EXAMPLE_YT_ID;
-  if (!pro && !isExample && ent?.credits > 0 && (await freeUsed(ip)) >= FREE_DAILY_LIMIT) {
+  if (!cont && !pro && !isExample && ent?.credits > 0 && (await freeUsed(ip)) >= FREE_DAILY_LIMIT) {
     // Free allowance is used up: spend one server-side credit up front (atomic).
     creditSpent = await consumeCredit(email).catch(() => false);
   }
-  const tier = pro ? 'pro' : creditSpent ? 'credits' : isExample ? 'example' : 'free';
+  if (cont) creditSpent = !!cont.creditSpent;
+  const tier = cont?.tier || (pro ? 'pro' : creditSpent ? 'credits' : isExample ? 'example' : 'free');
   if (media && !media.live && !media.mp4) {
     const max = tier === 'free' || tier === 'example' ? STREAM_MAX_SEC.free : STREAM_MAX_SEC.paid;
     if (media.winLen > max) {
@@ -583,7 +593,8 @@ export async function POST(request) {
   const bypass = !!process.env.TEST_BYPASS_SECRET && process.env.VERCEL_ENV !== 'production'
     && request.headers.get('x-test-bypass') === process.env.TEST_BYPASS_SECRET;
   const noCache = bypass && !!body.noCache;
-  const limit = bypass ? { ok: true, refund: async () => {}, key: null } : await checkLimit(ip, tier);
+  const limit = cont ? { ok: true, refund: () => refundSlot(cont.slotKey), key: cont.slotKey }
+    : bypass ? { ok: true, refund: async () => {}, key: null } : await checkLimit(ip, tier);
   if (!limit.ok) {
     if (creditSpent) await refundCredit(email).catch(() => {});
     return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached }, { status: limit.status });
@@ -592,8 +603,8 @@ export async function POST(request) {
   let refunded = false;
   // The run is a server-side job: it keeps going if the browser backgrounds or drops
   // the stream, and the client can resume it via GET /api/generate?job=<id>.
-  const jobId = jobsEnabled ? newJobId() : null;
-  if (jobId) await createJob(jobId, { slotKey: limit.key, creditSpent, email: creditSpent ? email : null }).catch(() => {});
+  const jobId = cont ? cont.jobId : jobsEnabled ? newJobId() : null;
+  if (jobId && !cont) await createJob(jobId, { slotKey: limit.key, creditSpent, email: creditSpent ? email : null, tier }).catch(() => {});
   const refundUsage = async () => {
     if (refunded) return;
     refunded = true;
@@ -764,6 +775,32 @@ export async function POST(request) {
       const close = () => { if (!open) return; open = false; try { controller.close(); } catch {} };
       enqueue({ type: 'job', id: jobId });
       let watchdog = null;
+      let handedOff = false;
+      // Continue this same job in a fresh invocation (fresh 300s budget). See local prep.
+      const handOff = async () => {
+        handedOff = true;
+        if (watchdog) clearTimeout(watchdog);
+        if (hb) clearInterval(hb);
+        if (writer) await writer.flush();
+        await touchJob(jobId, {});
+        try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+        const headers = { 'Content-Type': 'application/json', 'x-continue-job': jobId, 'x-continue-sig': continueSig(jobId) };
+        try { const t = await getVercelOidcToken(); if (t) headers['x-vercel-trusted-oidc-idp-token'] = t; } catch {}
+        let ok = false;
+        try {
+          const res = await fetch(`${new URL(request.url).origin}/api/generate`, { method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store' });
+          ok = res.ok;
+          console.log('handoff', { status: res.status, ms: Date.now() - t0 });
+          res.body?.cancel().catch(() => {});
+        } catch (e) { console.warn('handoff failed', e?.message); }
+        if (!ok) {
+          handedOff = false;
+          await refundUsage();
+          send({ type: 'error', message: 'This video took too long to process. Try again, or upload the file instead. This run was not counted.' });
+          send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'handoff failed' });
+        }
+        close();
+      };
       const hb = jobId ? setInterval(() => { touchJob(jobId); }, 10000) : null;
       const work = withMeter(meter, async () => {
       let finished = false;
@@ -826,10 +863,14 @@ export async function POST(request) {
       if (rioKey && media) {
         ctx.srcP = Promise.resolve({ url: media.videoUrl, direct: true });
       } else if (rioKey) {
+        // A previous invocation of this job (or a recent run) may already have the source in Blob.
+        ctx.cachedSrc = ytId && youtubeDownloader() ? await kvGetJson(SRC_KEY(ytId)) : null;
         ctx.srcP = isBlobUrl(videoUrl)
           ? Promise.resolve({ url: rioUrl, direct: true })
+          : ctx.cachedSrc?.blob
+            ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
           : (ytId && youtubeDownloader()
-              ? youtubeDownloader()(videoUrl, 150000)
+              ? youtubeDownloader()(videoUrl, 150000, { format: ytSecs > LONG_SEC ? '360' : undefined })
               : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000))
               .then(u => ({ url: u, direct: true }))
               .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
@@ -859,11 +900,32 @@ export async function POST(request) {
             const file = path.join(ctx.dir, 'src.mp4');
             const t0 = Date.now();
             try {
-              const bytes = await downloadToFile(src.url, file, 150000);
+              const left = Math.max(30000, RUN_BUDGET_MS - 40000 - (Date.now() - startedAt));
+              const res = src.blob
+                ? await downloadToFile(src.url, file, left, { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` })
+                : await downloadToFile(src.url, file, left, {}, cont ? null : `sources/${ytId}.mp4`);
+              if (res.blobUrl) kvSetJson(SRC_KEY(ytId), { blob: res.blobUrl }, 6 * 3600).catch(() => {});
               ctx.sourceSec = await probeDuration(file);
-              console.log('local source', { ms: Date.now() - t0, bytes, sec: ctx.sourceSec });
+              console.log('local source', { ms: Date.now() - t0, bytes: res.size, sec: ctx.sourceSec, fromBlob: !!src.blob });
               ctx.local = file;
-            } catch (e) { console.warn('local source download failed', e?.message); }
+              // Not enough time left in this invocation for transcription + cuts: hand the job to a
+              // fresh invocation, which picks the source up from Blob and continues the same job.
+              if (!cont && res.blobUrl && Date.now() - startedAt > HANDOFF_AFTER_MS) {
+                await handOff();
+                return;
+              }
+            } catch (e) {
+              console.warn('local source download failed', e?.message);
+              if (src.blob) kvSetJson(SRC_KEY(ytId), {}, 1).catch(() => {});
+            }
+            if (!ctx.local) {
+              try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+              await refundUsage();
+              send({ type: 'error', message: 'This video took too long to download. Try again in a minute, or upload the file instead. This run was not counted.' });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'download slow' });
+              close();
+              return;
+            }
             if (ctx.sourceSec && ctx.sourceSec > YT_MAX_SECONDS) {
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
               await refundUsage();
@@ -1045,7 +1107,7 @@ export async function POST(request) {
       }).finally(async () => {
         if (hb) clearInterval(hb);
         clearTimeout(watchdog);
-        if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
+        if (writer && !handedOff) { await writer.flush(); await touchJob(jobId, { done: true }); }
         close();
       }).finally(() => saveRun({
         at: t0, ms: Date.now() - t0, video: youtubeId(videoUrl) || String(videoUrl).slice(0, 120),
