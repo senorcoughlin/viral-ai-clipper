@@ -40,6 +40,7 @@ async function youtubeDuration(id) {
   } catch { return null; }
 }
 import { validateVideoUrl } from '../../../lib/validate';
+import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 
@@ -47,15 +48,9 @@ const exec = promisify(execFile);
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
+// Handles watch, youtu.be, shorts, embed and /live/<id> links.
 function youtubeId(url) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
-    if (u.searchParams.get('v')) return u.searchParams.get('v');
-    const m = u.pathname.match(/\/(shorts|embed)\/([^/?]+)/);
-    if (m) return m[2];
-  } catch {}
-  return null;
+  return youtubeIdOf(url);
 }
 
 // Transcript shape used everywhere below: { text, segments: [{ start, end, text }] }
@@ -63,7 +58,16 @@ function youtubeId(url) {
 // land on the spoken word instead of being spread evenly across the clip.
 const EMPTY_TRANSCRIPT = { text: '', segments: [] };
 
-async function fetchTranscript(url) {
+async function fetchTranscript(url, attempts = 2) {
+  for (let i = 0; i < attempts; i++) {
+    const tr = await fetchTranscriptOnce(url);
+    if (tr.segments.length || !youtubeId(url)) return tr;
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, 800));
+  }
+  return EMPTY_TRANSCRIPT;
+}
+
+async function fetchTranscriptOnce(url) {
   const id = youtubeId(url);
   if (!id) return EMPTY_TRANSCRIPT;
   try {
@@ -434,7 +438,11 @@ export async function POST(request) {
   const aiStyle = ['clean_viral','character_swap','anime_action','kids_3d'].includes(rawStyle) ? rawStyle : 'clean_viral';
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
-  const videoUrl = validateVideoUrl(rawUrl);
+  // One video per request. If several links arrive glued together (no separator),
+  // take only the first; the browser sends each link as its own request.
+  const parsed = parseLinks(rawUrl, 1);
+  if (parsed.found > 1) console.warn('generate: multiple links in one request; using first', { found: parsed.found });
+  const videoUrl = validateVideoUrl(parsed.links[0] || rawUrl);
   if (!videoUrl) {
     return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
   }
@@ -699,6 +707,18 @@ export async function POST(request) {
         }
       } catch {}
 
+      // Last-chance transcript before falling back to heuristic scores: retry the
+      // YouTube captions once more, then one fresh audio->Whisper pass if time allows.
+      if (!ctx.transcript?.segments?.length && ytId) {
+        const again = await fetchTranscript(videoUrl, 1);
+        if (again.segments.length) { ctx.transcript = again; ctx.transcriptSource = 'youtube'; }
+      }
+      if (!ctx.transcript?.segments?.length && ctx.srcP && process.env.GROQ_API_KEY && Date.now() - startedAt < 120000) {
+        send({ type: 'status', step: 'transcript', detail: 'audio-retry' });
+        const src = await ctx.srcP;
+        const w = await audioTranscript(src.url, 90000, src.direct).catch((e) => { console.warn('audio transcript retry failed', e?.message); return EMPTY_TRANSCRIPT; });
+        if (w?.segments?.length) { ctx.transcript = w; ctx.transcriptSource = 'whisper'; }
+      }
       if (!cachedTr && ctx.transcript?.segments?.length) setCachedTranscript(videoUrl, ctx.transcript).catch(() => {});
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
       let scored = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count) : null;

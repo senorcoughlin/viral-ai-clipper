@@ -10,6 +10,7 @@ import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
 import AccountBar, { syncClips } from '../components/AccountBar';
 import BoltMenu from '../components/BoltMenu';
+import { parseLinks } from '../lib/links';
 import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
 import { funnel } from '../lib/funnel';
@@ -217,7 +218,8 @@ function HomeInner() {
       return;
     }
 
-    const urls = runUrl.split(/[\n,]/).map(u => u.trim()).filter(Boolean).slice(0, 10);
+    // Splits links glued together with no separator, dedupes, caps at 10.
+    const urls = parseLinks(runUrl).links;
     if (!urls.length) return;
     lastRunRef.current = settings;
     ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
@@ -485,6 +487,18 @@ function HomeInner() {
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
+              {(() => {
+                const p = parseLinks(videoUrl);
+                if (p.found < 2) return null;
+                return (
+                  <p id="link-count" className="px-1 text-xs text-soft">
+                    {p.links.length} video{p.links.length === 1 ? '' : 's'} detected
+                    {p.duplicates ? ` · ${p.duplicates} duplicate${p.duplicates === 1 ? '' : 's'} removed` : ''}
+                    {p.dropped ? ` · ${p.dropped} over the 10-link limit skipped` : ''}
+                    {' '}· each is clipped separately
+                  </p>
+                );
+              })()}
               <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="self-start rounded-full border border-lime/60 px-3.5 py-1.5 text-[13px] font-semibold text-lime hover:bg-lime hover:text-ink disabled:opacity-50">
                 ▶ Try it free with an example
               </button>
