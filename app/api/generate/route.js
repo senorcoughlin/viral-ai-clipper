@@ -512,6 +512,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const reqStart = Date.now(); // the 300s function clock starts here, not when the stream opens
   const limited = await routeGuard(request, 'generate', 60, 3600);
   if (limited) return limited;
   const body = await request.json().catch(() => ({}));
@@ -807,6 +808,10 @@ export async function POST(request) {
       enqueue({ type: 'job', id: jobId });
       let watchdog = null;
       let handedOff = false;
+      // Resolved when the watchdog ends the run, so waitUntil stops waiting on stuck RenderIO
+      // calls and the invocation ends before Vercel's hard 300s kill.
+      let stopRun = () => {};
+      const stopP = new Promise(r => { stopRun = r; });
       // Continue this same job in a fresh invocation (fresh 300s budget). See local prep.
       const handOff = async () => {
         handedOff = true;
@@ -851,6 +856,7 @@ export async function POST(request) {
           send({ type: 'done', note: 'Some clips ran out of time.', total: clipsSent, real: clipsSent, preview: 0, failed: count - clipsSent });
           if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
           close();
+          stopRun();
           return;
         }
         await refundUsage().catch(() => {});
@@ -860,7 +866,8 @@ export async function POST(request) {
         send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
         if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
         close();
-      }, RUN_BUDGET_MS);
+        stopRun();
+      }, Math.max(10000, RUN_BUDGET_MS - (Date.now() - reqStart)));
       try {
       const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
       const hit = media?.live || noCache ? null : await getCached(key);
@@ -1167,7 +1174,7 @@ export async function POST(request) {
         meter,
       }));
       // Keep the function alive until the job finishes even if the client disconnects.
-      try { waitUntil(work); } catch {}
+      try { waitUntil(Promise.race([work, stopP])); } catch {}
       return undefined;
     },
     cancel() { /* client went away; the job keeps running and stays resumable */ },
