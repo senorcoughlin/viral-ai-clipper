@@ -9,6 +9,7 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+const EXAMPLE_YT_ID = 'jNQXAC9IVRw';
 import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
@@ -555,13 +556,15 @@ export async function POST(request) {
   const ent = email ? await getEntitlement(email).catch(() => null) : null;
   const pro = !!ent?.pro;
   let creditSpent = false;
-  if (!pro && ent?.credits > 0 && (await freeUsed(ip)) >= FREE_DAILY_LIMIT) {
+  // The homepage sample video is a free demo: it never spends a free slot or a credit.
+  const isExample = ytId === EXAMPLE_YT_ID;
+  if (!pro && !isExample && ent?.credits > 0 && (await freeUsed(ip)) >= FREE_DAILY_LIMIT) {
     // Free allowance is used up: spend one server-side credit up front (atomic).
     creditSpent = await consumeCredit(email).catch(() => false);
   }
-  const tier = pro ? 'pro' : creditSpent ? 'credits' : 'free';
+  const tier = pro ? 'pro' : creditSpent ? 'credits' : isExample ? 'example' : 'free';
   if (media && !media.live && !media.mp4) {
-    const max = tier === 'free' ? STREAM_MAX_SEC.free : STREAM_MAX_SEC.paid;
+    const max = tier === 'free' || tier === 'example' ? STREAM_MAX_SEC.free : STREAM_MAX_SEC.paid;
     if (media.winLen > max) {
       if (creditSpent) await refundCredit(email).catch(() => {});
       const paidMax = fmtDur(STREAM_MAX_SEC.paid);
@@ -574,7 +577,7 @@ export async function POST(request) {
       }, { status: 400 });
     }
   }
-  const watermark = tier === 'free'; // Pro and credit-paid runs are never watermarked.
+  const watermark = tier === 'free' || tier === 'example'; // Pro and credit-paid runs are never watermarked.
   const limit = await checkLimit(ip, tier);
   if (!limit.ok) {
     if (creditSpent) await refundCredit(email).catch(() => {});

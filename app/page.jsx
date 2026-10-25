@@ -204,6 +204,7 @@ function HomeInner() {
   };
 
   const lastRunRef = useRef(null);
+  const [lastWasExample, setLastWasExample] = useState(false);
   const [genCount, setGenCount] = useState(3);
   const focusedRef = useRef(false);
   useEffect(() => {
@@ -221,7 +222,6 @@ function HomeInner() {
   };
   const runExample = () => {
     if (isProcessing) return;
-    setVideoUrl(SAMPLE_URL);
     handleClipping(null, { videoUrl: SAMPLE_URL, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack, source: 'example' });
   };
   // Shared handler for generate events, whether they arrive on the live stream or
@@ -333,7 +333,9 @@ function HomeInner() {
     // Shadow state so a retry reuses exactly the same URL and settings.
     const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk } = settings;
     if (!runUrl.trim()) return;
-    if (!isPro && dailyCount >= FREE_DAILY_LIMIT && credits <= 0) {
+    const isExample = settings.source === 'example';
+    setLastWasExample(isExample);
+    if (!isExample && !isPro && dailyCount >= FREE_DAILY_LIMIT && credits <= 0) {
       setShowPricing(true);
       return;
     }
@@ -454,8 +456,8 @@ function HomeInner() {
       setClips([...all]);
       setJustFinished(true);
       ft('generate_success', { source: settings.source || 'manual', clips: all.length });
-      bumpGenCount();
-      if (!isPro) {
+      if (!isExample) bumpGenCount();
+      if (!isPro && !isExample) {
         if (!(dailyCount >= FREE_DAILY_LIMIT && credits > 0)) incrementDaily();
         refreshBilling();
       }
@@ -546,22 +548,28 @@ function HomeInner() {
       )}
       <main id="top" className="relative mx-auto max-w-6xl px-5">
         {/* HERO */}
-        <section className="grid grid-cols-1 items-center gap-12 pb-20 pt-16 md:grid-cols-[1.1fr_.9fr]">
+        <section className="grid grid-cols-1 items-center gap-12 pb-20 pt-6 sm:pt-16 md:grid-cols-[1.1fr_.9fr]">
           <div className="flex min-w-0 flex-col gap-6">
-            <div className="inline-flex h-8 items-center gap-2 self-start rounded-full border border-line2 bg-surface pl-1.5 pr-3 text-[13px] font-medium text-soft">
+            <div className="hidden h-8 items-center gap-2 self-start rounded-full border border-line2 bg-surface pl-1.5 sm:inline-flex pr-3 text-[13px] font-medium text-soft">
               <span className="inline-flex h-[22px] items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">NEW</span>
               Batch mode · paste up to 10 links at once
             </div>
-            <h1 className="font-display text-[48px] font-extrabold leading-[.98] tracking-tight text-white md:text-[72px]">
+            <h1 className="font-display text-[38px] font-extrabold leading-[1.02] tracking-tight text-white sm:text-[48px] md:text-[72px]">
               Turn one video into <span className="text-lime">up to 8 clips</span> that are built to go viral.
             </h1>
-            <p className="max-w-[520px] text-lg leading-relaxed text-soft">
+            <div className="flex flex-col gap-2">
+              <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[60px] w-full justify-center px-6 text-[18px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
+                {isProcessing && lastWasExample ? 'Making example clips…' : '▶ See it work — free, 1 tap'}
+              </button>
+              <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free clips.</p>
+            </div>
+            <p className="hidden max-w-[520px] text-lg leading-relaxed text-soft sm:block">
               Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
             </p>
 
             {/* FORM */}
             <form ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
-              <label htmlFor="urls" className="px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted">Video links</label>
+              <label htmlFor="urls" className="px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or paste your own link</label>
               <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
               <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
                 <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
@@ -619,9 +627,6 @@ function HomeInner() {
                   {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
                 </div>
               )}
-              <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="self-start rounded-full border border-lime/60 px-3.5 py-1.5 text-[13px] font-semibold text-lime hover:bg-lime hover:text-ink disabled:opacity-50">
-                ▶ Try it free with an example
-              </button>
               <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
                 {[
                   { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
@@ -825,7 +830,7 @@ function HomeInner() {
               </svg>
               <h3 className="font-display text-2xl font-extrabold text-white">No clips yet</h3>
               <p className="max-w-[300px] text-sm leading-relaxed text-soft">Paste a link above and the AI will pull the best 30–60 second moments out of it.</p>
-              <button type="button" onClick={() => { setVideoUrl('https://www.youtube.com/watch?v=jNQXAC9IVRw'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-ghost h-11 px-5 text-sm">Try a sample link</button>
+              <button type="button" onClick={runExample} disabled={isProcessing} className="btn-ghost h-11 px-5 text-sm">▶ See an example</button>
             </div>
           )}
 
@@ -849,7 +854,19 @@ function HomeInner() {
                   </div>
                 </div>
               )}
-              {justFinished && !isProcessing && <FeedbackNudge />}
+              {lastWasExample && !isProcessing && (
+                <div id="example-next" className="flex flex-col gap-3 rounded-card border border-lime bg-surface p-4 sm:flex-row sm:items-center animate-fadeup">
+                  <div className="flex-1">
+                    <p className="font-display text-lg font-extrabold text-white">That was the example. Now do your video.</p>
+                    <p className="text-sm text-soft">Paste any YouTube, Twitch or podcast link. You get {FREE_DAILY_LIMIT} free generations a day.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={focusInput} className="btn-lime h-11 flex-1 justify-center px-5 text-sm sm:flex-none">Paste my link</button>
+                    {!isPro && <button type="button" onClick={() => setShowPricing(true)} className="btn-ghost h-11 px-4 text-sm">See plans</button>}
+                  </div>
+                </div>
+              )}
+              {justFinished && !isProcessing && !lastWasExample && <FeedbackNudge />}
               {notice && !isProcessing && (
                 <p role="status" className="rounded-card border border-line2 bg-surface p-3 text-sm text-soft">{notice}</p>
               )}
