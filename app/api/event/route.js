@@ -2,7 +2,7 @@
 import { kvCommand, kvEnabled } from '../../../lib/kv';
 
 export const runtime = 'nodejs';
-const ALLOWED = new Set(['landing_view', 'url_input_focus', 'url_pasted', 'generate_click', 'generate_success', 'generate_error']);
+const ALLOWED = new Set(['landing_view', 'url_input_focus', 'url_pasted', 'generate_click', 'generate_success', 'generate_error', 'spin_view', 'spin_click', 'spin_win']);
 const BOT = /bot|crawl|spider|slurp|headless|lighthouse|preview|facebookexternalhit|curl|wget|python|node-fetch|axios/i;
 
 export async function POST(req) {

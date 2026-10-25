@@ -13,6 +13,7 @@ import BoltMenu from '../components/BoltMenu';
 import { parseLinks } from '../lib/links';
 import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
+import SpinWheel from '../components/SpinWheel';
 import { funnel } from '../lib/funnel';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
@@ -1010,6 +1011,8 @@ function HomeInner() {
           <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
+
+      <SpinWheel onWon={() => refreshBilling()} onUpgrade={() => setShowPricing(true)} />
 
       {/* Sticky mobile CTA */}
       {!isPro && (
