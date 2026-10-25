@@ -51,7 +51,7 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { youtubeDownloader } from '../../../lib/downloader';
+import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId } from '../../../lib/jobs';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
 
@@ -499,7 +499,7 @@ export async function POST(request) {
   // Private uploads are handed to RenderIO through a signed, expiring proxy URL.
   const rioUrl = toFetchable(videoUrl);
   if (ytId) {
-    const secs = await youtubeDuration(ytId);
+    const secs = (await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId));
     if (secs === -1) {
       return NextResponse.json({ success: false, message: 'That YouTube video is live right now. Live YouTube clipping isn\'t supported yet. Paste it again once the stream ends (the replay works), or use a Twitch channel link for "clip the last X minutes".', live: true }, { status: 400 });
     }
