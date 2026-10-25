@@ -4,12 +4,13 @@ import { reportError } from '../../../../lib/alerts';
 import { createMagicToken } from '../../../../lib/magic';
 import { allowAttempt, clientIp } from '../../../../lib/ratelimit';
 import { routeGuard } from '../../../../lib/ratelimit';
+import { safeNext } from '../../../../lib/nextpath';
 
 // POST { email } -> emails a one-time sign-in link (via Resend).
 export async function POST(request) {
   const limited = await routeGuard(request, 'auth_email', 30, 3600);
   if (limited) return limited;
-  const { email } = await request.json().catch(() => ({}));
+  const { email, next } = await request.json().catch(() => ({}));
   const clean = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean) || clean.length > 200) {
     return NextResponse.json({ success: false, message: 'Enter a valid email' }, { status: 400 });
@@ -21,7 +22,8 @@ export async function POST(request) {
   }
   try {
     const token = await createMagicToken(clean);
-    const link = `https://viralaiclipper.com/api/auth/verify?t=${encodeURIComponent(token)}`;
+    const n = safeNext(next);
+    const link = `https://viralaiclipper.com/api/auth/verify?t=${encodeURIComponent(token)}${n !== '/' ? `&next=${encodeURIComponent(n)}` : ''}`;
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },

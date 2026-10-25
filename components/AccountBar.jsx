@@ -42,10 +42,15 @@ export default function AccountBar({ onChange, inline = false }) {
       const qs = q.toString();
       window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
     }
-    if (!local) {
-      // Email-link sign-ins only set the httpOnly session cookie, so ask the server.
+    {
+      // The httpOnly session cookie is the source of truth: it picks up email-link
+      // sign-ins and account switches on this device, and clears stale local state.
       fetch('/api/account', { cache: 'no-store' }).then(r => r.json()).then(d => {
-        if (d?.signedIn && d.email) {
+        if (!d?.signedIn) {
+          if (local) { localStorage.removeItem('viral_account'); setSession(null); onChange?.(null); }
+          return;
+        }
+        if (d.email && (!local || local.email !== d.email)) {
           const next = { email: d.email, cookie: true };
           localStorage.setItem('viral_account', JSON.stringify(next));
           setSession(next);
@@ -69,7 +74,7 @@ export default function AccountBar({ onChange, inline = false }) {
     setError('');
     try {
       if (mode === 'email') {
-        const r = await fetch('/api/auth/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+        const r = await fetch('/api/auth/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, next: window.location.pathname }) });
         const d = await r.json().catch(() => ({}));
         setError(d.message || (d.success ? 'Check your inbox.' : 'Could not send the link'));
         return;

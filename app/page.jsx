@@ -205,6 +205,16 @@ function HomeInner({ studio = false }) {
   };
 
   const lastRunRef = useRef(null);
+  const [ytFlash, setYtFlash] = useState('');
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const y = q.get('youtube');
+    if (!y) return;
+    setYtFlash(y === 'connected' ? 'connected' : 'error');
+    q.delete('youtube');
+    const qs = q.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+  }, []);
   const [selectedIds, setSelectedIds] = useState([]);
   const [dlAllBusy, setDlAllBusy] = useState(false);
   const [lastWasExample, setLastWasExample] = useState(false);
@@ -514,6 +524,15 @@ function HomeInner({ studio = false }) {
     setDlAllBusy(false);
   };
   const formBlock = (<>
+    {ytFlash && (
+      <div id="yt-flash" role="status" className={`flex items-start gap-3 rounded-card border p-3 text-sm ${ytFlash === 'connected' ? 'border-lime bg-lime-tint text-fg' : 'border-[#FF4D6D]/60 bg-[#FF4D6D]/10 text-fg'}`}>
+        <p className="flex-1">{ytFlash === 'connected'
+          ? 'YouTube connected. The Publish button can now upload clips to your channel as private videos.'
+          : 'YouTube didn\'t connect. While Google is still reviewing this app, only Google accounts added as testers can connect. Try again with that account, or download the clip and upload it in YouTube Studio.'}</p>
+        {ytFlash !== 'connected' && <a href={`/api/youtube/start?next=${studio ? '/studio' : '/'}`} className="shrink-0 font-semibold text-lime">Try again</a>}
+        <button type="button" aria-label="Dismiss" onClick={() => setYtFlash('')} className="shrink-0 text-muted">✕</button>
+      </div>
+    )}
             {/* FORM */}
             <form id="clip-form" ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
               <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>Or paste your own link</label>
@@ -879,7 +898,7 @@ function HomeInner({ studio = false }) {
           <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
             <a href="/studio" className="font-semibold text-lime hover:text-lime-hover">Open Studio</a>
             <a href="/tutorial" className="hover:text-fg">Tutorial</a>
-            <a href="/api/youtube/start" className="hover:text-fg" title="Lets the Shorts button upload clips to your channel as private videos">Connect YouTube</a>
+            <a href="/api/youtube/start?next=/" className="hover:text-fg" title="Lets the Shorts button upload clips to your channel as private videos">Connect YouTube</a>
             <a href="#clips" className="hover:text-fg">Your clips</a>
             <a href="/connectors" className="hover:text-fg">Connectors</a>
             <a href="/tools" className="hover:text-fg">AI Tools</a>

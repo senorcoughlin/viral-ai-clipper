@@ -6,7 +6,7 @@ import ReferralCard from './ReferralCard';
 
 const LINKS = [
   ['Home', '/#top'], ['Generations remaining', '/#remaining'], ['Your clips', '/#clips'], ['Tutorial', '/tutorial'],
-  ['Connect YouTube', '/api/youtube/start'], ['Connectors', '/connectors'],
+  ['Connect YouTube', '/api/youtube/start?next=/studio'], ['Connectors', '/connectors'],
   ['AI Tools', '/tools'], ['My Assets', '/assets'], ['Channel', '/channel'], ['Monetize', '/monetize'], ['Permissions', '/permissions'], ['Clipping programs', '/programs'], ['Pricing', '/#pricing'], ['Feedback', '/feedback'], ['Guides', '/free-ai-clip-maker'],
 ];
 

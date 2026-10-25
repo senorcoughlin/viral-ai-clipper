@@ -158,7 +158,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
         </ul>
         {msg && (
           <p role="status" className={`rounded-input border p-2.5 text-xs ${msg.ok ? 'border-lime/50 text-soft' : 'border-[#FF4D6D]/60 text-fg'}`}>
-            {msg.text}{msg.url && <> <a href={msg.url} target="_blank" rel="noreferrer" className="font-semibold text-lime">Open →</a></>}{msg.connect && <> <a href="/api/youtube/start" className="font-semibold text-lime">Connect YouTube →</a></>}
+            {msg.text}{msg.url && <> <a href={msg.url} target="_blank" rel="noreferrer" className="font-semibold text-lime">Open →</a></>}{msg.connect && <> <a href="/api/youtube/start?next=/studio" className="font-semibold text-lime">Connect YouTube →</a></>}
           </p>
         )}
 

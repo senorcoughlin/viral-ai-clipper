@@ -80,7 +80,8 @@ export async function POST(request) {
       if (account.hash !== hashPassword(password, account.salt)) {
         return NextResponse.json({ success: false, message: 'Wrong password' }, { status: 401 });
       }
-      const session = crypto.randomBytes(24).toString('hex');
+      // Keep the existing token so other signed-in devices stay signed in (multi-device).
+      const session = account.session || crypto.randomBytes(24).toString('hex');
       account.session = session;
       if (linkVerified) account.verified = true;
       await writeAccount(clean, account);
@@ -90,7 +91,8 @@ export async function POST(request) {
 
     if (action === 'save' || action === 'load') {
       const account = await readAccount(clean);
-      if (!account || account.session !== token) {
+      // Either the account token or the signed session cookie for this email is accepted.
+      if (!account || (account.session !== token && cur?.email !== clean)) {
         return NextResponse.json({ success: false, message: 'Not signed in' }, { status: 401 });
       }
       if (action === 'save') {

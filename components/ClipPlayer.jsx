@@ -146,7 +146,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
           <div role="status" className={`rounded-input border px-3 py-2 text-xs leading-relaxed ${postMsg.ok ? 'border-lime text-lime' : 'border-line2 text-soft'}`}>
             {postMsg.text}{' '}
             {postMsg.url && <a href={postMsg.url} target="_blank" rel="noreferrer" className="underline">Open Studio</a>}
-            {postMsg.connect && <> {postMsg.url ? '· ' : ''}<a href="/api/youtube/start" className="underline">Connect YouTube</a></>}
+            {postMsg.connect && <> {postMsg.url ? '· ' : ''}<a href={`/api/youtube/start?next=${typeof window !== 'undefined' ? window.location.pathname : '/'}`} className="underline">Connect YouTube</a></>}
           </div>
         );
 
