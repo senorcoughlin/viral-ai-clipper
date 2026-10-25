@@ -75,6 +75,7 @@ export async function POST(request) {
       cancel_url: `${origin}/cancel`,
       metadata: { plan: planType, ...attr },
       subscription_data: { metadata: { plan: planType, ...attr } },
+      allow_promotion_codes: true,
       managed_payments: { enabled: false },
     });
 

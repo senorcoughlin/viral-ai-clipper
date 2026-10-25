@@ -63,6 +63,10 @@ const Download = () => (
 
 function HomeInner() {
   const [videoUrl, setVideoUrl] = useState('');
+  const [promoHidden, setPromoHidden] = useState(true);
+  useEffect(() => {
+    try { setPromoHidden(Date.now() > 1793595540000 || localStorage.getItem('vac_promo_launch50') === '1'); } catch { setPromoHidden(false); }
+  }, []);
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [aiStyle, setAiStyle] = useState('clean_viral');
   const [pack, setPack] = useState('');
@@ -198,7 +202,7 @@ function HomeInner() {
       return;
     }
 
-    const urls = runUrl.split(/[\n,]/).map(u => u.trim()).filter(Boolean);
+    const urls = runUrl.split(/[\n,]/).map(u => u.trim()).filter(Boolean).slice(0, 10);
     if (!urls.length) return;
     lastRunRef.current = settings;
     ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
@@ -409,6 +413,14 @@ function HomeInner() {
         </div>
       </header>
 
+      {!isPro && !promoHidden && (
+        <div className="relative mx-auto mt-3 flex max-w-6xl items-center justify-center gap-3 px-5">
+          <div className="flex items-center gap-3 rounded-full border border-lime bg-lime-tint px-4 py-1.5 text-[13px] font-semibold text-lime">
+            <span>Launch week: 50% off Pro with code <b>LAUNCH50</b>, ends Nov 1</span>
+            <button aria-label="Dismiss" onClick={() => { setPromoHidden(true); try { localStorage.setItem('vac_promo_launch50', '1'); } catch {} }} className="text-lime/70 hover:text-lime">✕</button>
+          </div>
+        </div>
+      )}
       <main id="top" className="relative mx-auto max-w-6xl px-5">
         {/* HERO */}
         <section className="grid grid-cols-1 items-center gap-12 pb-20 pt-16 md:grid-cols-[1.1fr_.9fr]">
@@ -421,7 +433,7 @@ function HomeInner() {
               Turn one video into <span className="text-lime">up to 8 clips</span> that are built to go viral.
             </h1>
             <p className="max-w-[520px] text-lg leading-relaxed text-soft">
-              Paste a YouTube, podcast or stream link. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
+              Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
             </p>
 
             {/* FORM */}
