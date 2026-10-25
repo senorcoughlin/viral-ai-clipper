@@ -44,7 +44,7 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { downloaderEnabled, downloadViaService } from '../../../lib/downloader';
+import { youtubeDownloader } from '../../../lib/downloader';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId } from '../../../lib/jobs';
 
 const exec = promisify(execFile);
@@ -689,8 +689,8 @@ export async function POST(request) {
       if (rioKey) {
         ctx.srcP = isBlobUrl(videoUrl)
           ? Promise.resolve({ url: rioUrl, direct: true })
-          : (ytId && downloaderEnabled
-              ? downloadViaService(videoUrl, 120000)
+          : (ytId && youtubeDownloader()
+              ? youtubeDownloader()(videoUrl, 120000)
               : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000))
               .then(u => ({ url: u, direct: true }))
               .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
