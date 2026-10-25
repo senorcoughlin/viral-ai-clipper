@@ -38,7 +38,14 @@ const LENGTHS = [
   { value: 60, label: '60s' },
 ];
 const CLIP_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }));
-const HOOKS = ['“Nobody tells you this about…”', '“I was wrong about…”', '“The $40k mistake”', '“Watch till the end”', '“This changed everything”', '“POV: you finally…”', '“Stop doing this”', '“3 things I wish I knew”'];
+const STREAM_STEPS = [
+  { t: 'Pick a streamer and check their rules', d: 'Choose a niche you know (gaming, IRL, podcasts). Check the streamer\u2019s clipping rules first. Many allow fan clips, and some run their own paid clipper programs.', tools: [['Twitch', 'https://www.twitch.tv'], ['Kick', 'https://kick.com'], ['Permission template', '/permissions']] },
+  { t: 'Find a paying clip campaign', d: 'Campaign platforms pay per 1,000 approved views on clips of a creator\u2019s content. Rates, platforms and rules vary by campaign, and most require you to be 18+.', tools: [['Content Rewards (Whop)', 'https://whop.com/contentrewards/'], ['Vyro', 'https://vyro.com'], ['Programs list', '/programs']] },
+  { t: 'Grab the VOD or video link', d: 'Copy the link to a finished stream (VOD) or video. Twitch, YouTube and Kick replays all have a shareable link.', tools: [['Twitch VODs', 'https://www.twitch.tv'], ['YouTube', 'https://www.youtube.com']] },
+  { t: 'Paste it into Viral AI Clipper', d: 'Paste up to 10 links at once. Pick 9:16, and we find the best moments with captions and a hook burned in.', tools: [['Paste a link \u2191', '#urls'], ['Twitch clipping guide', '/how-to-clip-twitch-streams']] },
+  { t: 'Post consistently', d: 'Post to TikTok, YouTube Shorts and Instagram Reels. Many clippers aim for 3\u20135 clips a day. Add your own edits or commentary, since platforms may limit reposted content.', tools: [['TikTok', 'https://www.tiktok.com/upload'], ['YouTube Shorts', 'https://studio.youtube.com'], ['Reels', 'https://www.instagram.com']] },
+  { t: 'Track views, submit and scale', d: 'Submit approved posts to your campaign for view payouts. As you grow, you may qualify for YouTube Partner Program Shorts revenue or TikTok Creator Rewards (1-min+ original videos). Check each program\u2019s eligibility. Go Pro for 200 clips a day.', tools: [['YouTube Partner Program', 'https://support.google.com/youtube/answer/72851'], ['TikTok Creator Rewards', 'https://www.tiktok.com/creator-academy/en/article/creator-rewards-program'], ['Go Pro', '#pricing']] },
+];
 const PRICE = { monthly: { amount: '$19.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly' } };
 
 /* ---------- small icons (inline SVG, no deps) ---------- */
@@ -186,6 +193,14 @@ function HomeInner() {
     ft('landing_view', { path: window.location.pathname, ref: document.referrer ? new URL(document.referrer).hostname : 'direct' });
   }, []);
   const bumpGenCount = () => { setGenCount(c => { const n = c + 1; try { localStorage.setItem(GUIDE_KEY, String(n)); } catch {} return n; }); };
+  const focusInput = e => {
+    e?.preventDefault?.();
+    const el = document.getElementById('urls');
+    if (!el) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+    setTimeout(() => el.focus({ preventScroll: true }), reduce ? 0 : 400);
+  };
   const runExample = () => {
     if (isProcessing) return;
     setVideoUrl(SAMPLE_URL);
@@ -586,12 +601,36 @@ function HomeInner() {
         </section>
       </main>
 
-      {/* MARQUEE */}
-      <div aria-hidden className="relative overflow-hidden border-y border-[#1E1E29] bg-[#0D0D14] py-3.5">
-        <div className="flex w-max gap-4 animate-marquee">
-          {[...HOOKS, ...HOOKS].map((h, i) => <span key={i} className="chip cursor-default hover:border-line2">{h}</span>)}
+      {/* HOW TO CLIP STREAMERS */}
+      <section id="clip-streamers" aria-labelledby="clip-streamers-title" className="border-y border-[#1E1E29] bg-[#0D0D14] py-14">
+        <div className="mx-auto flex max-w-6xl flex-col gap-8 px-5">
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-lime">Step by step</span>
+            <h2 id="clip-streamers-title" className="font-display text-3xl font-extrabold tracking-tight text-white md:text-4xl">How to clip streamers and get paid</h2>
+            <p className="max-w-2xl text-sm text-soft">A simple workflow clippers use. Earnings aren&apos;t guaranteed: payouts depend on each program&apos;s rules, approval and your views.</p>
+          </div>
+          <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {STREAM_STEPS.map((st, i) => (
+              <li key={st.t} className="card flex flex-col gap-3 p-5">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-lime font-display text-sm font-extrabold text-ink">{i + 1}</span>
+                  <h3 className="text-base font-bold text-white">{st.t}</h3>
+                </div>
+                <p className="text-sm leading-relaxed text-soft">{st.d}</p>
+                <div className="mt-auto flex flex-wrap gap-2 pt-1">
+                  {st.tools.map(([label, href]) => href.startsWith('#') || href.startsWith('/')
+                    ? <a key={label} href={href} onClick={href === '#urls' ? focusInput : undefined} className="chip text-xs hover:border-lime">{label}</a>
+                    : <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="chip text-xs hover:border-lime">{label} ↗</a>)}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="flex flex-wrap items-center gap-4">
+            <a href="#urls" onClick={focusInput} className="rounded-full bg-lime px-6 py-3 text-sm font-bold text-ink hover:bg-lime-hover">Start clipping free →</a>
+            <a href="/monetize" className="text-sm font-semibold text-lime hover:text-lime-hover">Full monetization guide</a>
+          </div>
         </div>
-      </div>
+      </section>
 
       <main className="relative mx-auto max-w-6xl px-5">
         {/* STATUS / RESULTS */}
