@@ -129,6 +129,47 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
   };
 
+  const [hookIdeas, setHookIdeas] = useState(null);
+  const transcript = () => [clip.title, clip.hook, Array.isArray(clip.words) ? clip.words.map(w => w.w).join(' ') : clip.caption].filter(Boolean).join('\n').slice(0, 3000) || 'a short stream clip';
+  const suggestHooks = async () => {
+    setBusy('hooks');
+    try {
+      const d = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'hooks', input: 'Curiosity or stakes style, under 8 words, for this clip:\n' + transcript() }) }).then(r => r.json());
+      const list = (Array.isArray(d?.result) ? d.result : []).map(h => String(h).replace(/^["'\d.\s-]+|["']$/g, '').slice(0, 60)).filter(Boolean).slice(0, 5);
+      if (!list.length) throw new Error('No hook ideas right now. Try again in a minute.');
+      setHookIdeas(list);
+    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
+  };
+  const isTwitch = /twitch\.tv|kick\.com/i.test(clip.source || '');
+  const tips = (() => {
+    const len = clipLength(ed, dur), out = [];
+    const tag = (t) => ed.hashtags.toLowerCase().includes(t);
+    out.push(ed.hook.trim() ? { k: 'hook', label: 'Hook', text: `Good — "${ed.hook}". Keep it under 8 words.`, done: true }
+      : { k: 'hook', label: 'Hook', text: `Add a curiosity hook, e.g. "${(clip.hooks && clip.hooks[0]) || 'Wait for the ending…'}".`, apply: () => ({ hook: String((clip.hooks && clip.hooks[0]) || 'Wait for the ending…').slice(0, 60) }) });
+    out.push(ed.title.trim() && ed.title.length <= 60 ? { k: 'title', label: 'Title', text: 'Under 60 characters — good for Shorts.', done: true }
+      : { k: 'title', label: 'Title', text: 'Use a short title under 60 characters.', apply: () => ({ title: (ed.title || clip.title || clip.hook || 'You won\'t believe this').slice(0, 58) }) });
+    const cta = /follow|subscribe|part 2|comment/i.test(ed.description);
+    out.push(cta ? { k: 'cta', label: 'Call to action', text: 'Description has a call to action.', done: true }
+      : { k: 'cta', label: 'Call to action', text: 'End the description with "Follow for part 2 👀".', apply: () => ({ description: `${ed.description.trim()}${ed.description.trim() ? '\n\n' : ''}Follow for part 2 👀` }) });
+    const want = ['#shorts', '#fyp', isTwitch ? '#twitch' : '#viral'].filter(t => !tag(t));
+    out.push(!want.length ? { k: 'tags', label: 'Hashtags', text: 'Core hashtags are in.', done: true }
+      : { k: 'tags', label: 'Hashtags', text: `Add ${want.join(' ')} (3–5 tags total works best).`, apply: () => ({ hashtags: `${ed.hashtags.trim()} ${want.join(' ')}`.trim() }) });
+    out.push(ed.captions && ed.size !== 's' ? { k: 'style', label: 'Caption style', text: 'Captions on and readable.', done: true }
+      : { k: 'style', label: 'Caption style', text: 'Turn captions on, size L, bottom — most viewers watch muted.', apply: () => ({ captions: true, size: 'l', position: 'bottom' }) });
+    out.push(len >= 15 && len <= 60 ? { k: 'len', label: 'Length', text: `${Math.round(len)}s fits Shorts/TikTok/Reels.`, done: true }
+      : len > 60 ? { k: 'len', label: 'Length', text: `Trim to under 60s (now ${Math.round(len)}s).`, apply: () => ({ end: ed.start + 58, trimmed: true }) }
+      : { k: 'len', label: 'Length', text: `Under 15s may get less reach (now ${Math.round(len)}s). Extend the end if the moment allows.`, apply: () => ({ end: ed.start + 15, trimmed: true }) });
+    out.push(ed.zoom || ed.bg || ed.progress ? { k: 'tf', label: 'Transformation', text: 'Edit elements added.', done: true }
+      : { k: 'tf', label: 'Transformation', text: 'Add zoom 15%, a blurred background and a progress bar so it isn\'t a plain re-upload.', apply: () => ({ zoom: 'punch', bg: (clip.format || 'shorts_9_16') === 'shorts_9_16' ? 'blur' : '', progress: true }) });
+    out.push(ed.cam ? { k: 'cam', label: 'Facecam reaction', text: 'Facecam added — strongest signal of original content.', done: true }
+      : { k: 'cam', label: 'Facecam reaction', text: 'Record a 10–30s reaction on your phone and add it with "+ Reaction facecam" for the best monetization odds.' });
+    out.push(ed.creditOn && ed.credit.trim() ? { k: 'credit', label: 'Credit', text: `Credit shows "${ed.credit}".`, done: true }
+      : { k: 'credit', label: 'Credit', text: 'Credit the creator on the video.', apply: () => ({ creditOn: true, credit: ed.credit.trim() || `Clip from ${handleOf(clip.source, credit?.author) || '@creator'}` }) });
+    out.push({ k: 'when', label: 'Platform & time', text: `Post to YouTube Shorts and TikTok first${clip.bestTime ? `, around ${clip.bestTime}` : ', Tue–Thu 6–9 pm your time'}. Then Reels.`, done: true });
+    return out;
+  })();
+  const applyTip = (t) => { if (t.apply) { set(t.apply()); setMsg({ ok: true, text: `${t.label} applied. Tap "Apply edits" to re-render the video.` }); } };
+  const applyAll = () => { const p = {}; for (const t of tips) if (!t.done && t.apply) Object.assign(p, t.apply()); set(p); setMsg({ ok: true, text: 'All suggestions applied. Tap "Apply edits" to re-render the video.' }); };
   const Toggle = ({ on, onClick, children }) => <button type="button" aria-pressed={on} onClick={onClick} className={`chip shrink-0 ${on ? 'chip-on' : ''}`}>{children}</button>;
   const field = 'w-full rounded-input border border-line2 bg-ink px-3 py-2.5 text-[15px] text-fg outline-none focus:border-lime';
 
@@ -140,6 +181,12 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
           <input type="checkbox" className="h-4 w-4 accent-lime" checked={!!selected} onChange={e => onSelect?.(e.target.checked)} /> Select
         </label>
         {score > 0 && <div className="pointer-events-none absolute right-3 top-3"><ViralScoreMeter score={score} size={56} /></div>}
+        {open === 'edit' && (
+          <div aria-hidden data-caption-preview className="pointer-events-none absolute inset-x-3 z-10 text-center font-display font-black uppercase [text-shadow:0_0_4px_#000,0_2px_6px_#000]" style={{ color: BRAND_COLORS[ed.color] || ed.color, fontSize: { s: 18, m: 23, l: 28 }[ed.size] || 23, top: ed.position === 'top' ? '16%' : ed.position === 'middle' ? '46%' : undefined, bottom: ed.position === 'bottom' ? '16%' : undefined, opacity: ed.captions ? 1 : 0.25 }}>
+            {(Array.isArray(clip.words) && clip.words.slice(0, 3).map(w => w.w).join(' ')) || 'Caption preview'}
+          </div>
+        )}
+        {open === 'edit' && ed.hook.trim() && <div aria-hidden className="pointer-events-none absolute inset-x-6 top-[6%] z-10 rounded bg-black/55 px-2 py-1 text-center text-sm font-semibold text-white">{ed.hook}</div>}
       </div>
       <div className="flex flex-col gap-3 p-3.5">
         <div className="flex items-start justify-between gap-2">
@@ -192,7 +239,10 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
               <span className="text-xs font-semibold text-muted">Captions</span>
               <div className="flex flex-wrap gap-1.5">
                 <Toggle on={ed.captions} onClick={() => set({ captions: !ed.captions })}>{ed.captions ? 'On' : 'Off'}</Toggle>
-                {Object.keys(BRAND_COLORS).map(c => <button key={c} type="button" aria-label={`Caption color ${c}`} aria-pressed={ed.color === c} onClick={() => set({ color: c })} className={`h-8 w-8 rounded-full border-2 ${ed.color === c ? 'border-lime' : 'border-line2'}`} style={{ background: BRAND_COLORS[c] }} />)}
+                {Object.keys(BRAND_COLORS).map(c => <button key={c} type="button" aria-label={`Caption color ${c}`} aria-pressed={ed.color === c} onClick={() => set({ color: c })} className={`grid h-11 w-11 shrink-0 touch-manipulation place-items-center rounded-full border-[3px] ${ed.color === c ? 'border-lime ring-2 ring-lime/40' : 'border-line2'}`} style={{ background: BRAND_COLORS[c] }}>{ed.color === c && <span className="text-sm font-black text-ink">✓</span>}</button>)}
+                <label className={`relative grid h-11 w-11 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-full border-[3px] ${/^#/.test(ed.color) ? 'border-lime' : 'border-line2'}`} style={{ background: /^#/.test(ed.color) ? ed.color : 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)' }} aria-label="Custom caption color">
+                  <input type="color" value={/^#/.test(ed.color) ? ed.color : '#ffffff'} onChange={e => set({ color: e.target.value })} onInput={e => set({ color: e.target.value })} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+                </label>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {['s', 'm', 'l'].map(z => <Toggle key={z} on={ed.size === z} onClick={() => set({ size: z })}>{z.toUpperCase()}</Toggle>)}
@@ -202,6 +252,10 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
             <label className="flex flex-col gap-1.5 text-xs font-semibold text-muted">Hook text (top of video)
               <input value={ed.hook} maxLength={60} onChange={e => set({ hook: e.target.value })} placeholder="Wait for it…" className={field} />
             </label>
+            <div className="-mt-1 flex flex-col gap-1.5">
+              <button type="button" onClick={suggestHooks} disabled={!!busy} className="self-start text-xs font-semibold text-lime">{busy === 'hooks' ? 'Thinking…' : '✨ Suggest hooks'}</button>
+              {hookIdeas && <div data-hook-ideas className="flex flex-wrap gap-1.5">{hookIdeas.map(h => <button key={h} type="button" onClick={() => set({ hook: h })} className={`chip text-left ${ed.hook === h ? 'chip-on' : ''}`}>{h}</button>)}</div>}
+            </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold text-muted">Transform</span>
               <div className="flex flex-wrap gap-1.5">
@@ -223,6 +277,19 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
                 <Toggle on={ed.creditOn} onClick={() => set({ creditOn: !ed.creditOn })}>Source credit</Toggle>
               </div>
               {ed.creditOn && <input value={ed.credit} maxLength={40} onChange={e => set({ credit: e.target.value })} placeholder="Clip from @streamer" className={field} aria-label="Credit text" />}
+            </div>
+            <div data-tips className="flex flex-col gap-2 rounded-input border border-lime/40 bg-lime-tint/30 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-lime">Monetize suggestions</span>
+                {tips.some(t => !t.done && t.apply) && <button type="button" onClick={applyAll} className="btn-lime h-9 px-3 text-xs">Apply all</button>}
+              </div>
+              {tips.map(t => (
+                <div key={t.k} className="flex items-start gap-2 text-xs">
+                  <span className={t.done ? 'text-lime' : 'text-soft'}>{t.done ? '✓' : '•'}</span>
+                  <p className="flex-1 text-soft"><b className="text-fg">{t.label}:</b> {t.text}</p>
+                  {!t.done && t.apply && <button type="button" onClick={() => applyTip(t)} className="chip shrink-0">Apply</button>}
+                </div>
+              ))}
             </div>
             <button type="button" onClick={rerender} disabled={!!busy || !clip.source} className="btn-lime h-11 w-full text-sm">{busy === 'render' ? 'Re-rendering…' : 'Apply edits (re-render)'}</button>
             <div className="flex flex-col gap-1.5 border-t border-line pt-3">
