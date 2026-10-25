@@ -801,6 +801,16 @@ export async function POST(request) {
         if (w?.segments?.length) { ctx.transcript = w; ctx.transcriptSource = 'whisper'; }
       }
       if (!cachedTr && ctx.transcript?.segments?.length) setCachedTranscript(videoUrl, ctx.transcript).catch(() => {});
+      // YouTube length cap when the upfront lookup was blocked: the transcript tells us the length.
+      const segsAll = ctx.transcript?.segments || [];
+      const lenSec = segsAll.length ? segsAll[segsAll.length - 1].end : 0;
+      if (ytId && lenSec > YT_MAX_SECONDS) {
+        await refundUsage();
+        send({ type: 'error', message: YT_TOO_LONG });
+        send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+        close();
+        return;
+      }
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
       let scored = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, count) : null;
       if (!scored && ctx.transcript?.text && Date.now() - startedAt < 170000) {
