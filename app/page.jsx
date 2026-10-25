@@ -518,7 +518,7 @@ function HomeInner({ studio = false }) {
             <form id="clip-form" ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
               <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>Or paste your own link</label>
               <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
-              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
+              <div className={studio ? 'flex flex-col gap-2.5' : 'flex flex-col gap-2.5 sm:flex-row sm:items-stretch'}>
                 <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
                   {genCount < 3 && !isProcessing && !videoUrl && (
                     <div id="url-guide" aria-hidden className="pointer-events-none absolute bottom-full right-3 z-10 mb-1.5 flex items-end gap-1.5">
@@ -574,16 +574,16 @@ function HomeInner({ studio = false }) {
                   {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
                 </div>
               )}
-              <div className="flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className={studio ? 'flex flex-col gap-2 px-0.5' : 'flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center'}>
                 {[
                   { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
                   { label: 'Pack', options: PACKS, value: pack, set: setPack },
                   { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
                   { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
                 ].map((g, gi) => (
-                  <div key={g.label} role="group" aria-label={g.label} className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0">
-                    {gi > 0 && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
-                    <span className="mr-1 w-12 shrink-0 text-xs text-muted sm:w-auto">{g.label}</span>
+                  <div key={g.label} role="group" aria-label={g.label} className={studio ? 'flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]' : 'flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0'}>
+                    {gi > 0 && !studio && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
+                    <span className={`mr-1 w-12 shrink-0 text-xs text-muted ${studio ? '' : 'sm:w-auto'}`}>{g.label}</span>
                     {g.options.map(o => (
                       <button key={o.value} type="button" aria-pressed={g.value === o.value} onClick={() => g.set(o.value)} className={`chip shrink-0 ${g.value === o.value ? 'chip-on' : ''}`}>{o.label}</button>
                     ))}
