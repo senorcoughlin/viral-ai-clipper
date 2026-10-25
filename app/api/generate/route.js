@@ -690,7 +690,7 @@ export async function POST(request) {
         ctx.srcP = isBlobUrl(videoUrl)
           ? Promise.resolve({ url: rioUrl, direct: true })
           : (ytId && youtubeDownloader()
-              ? youtubeDownloader()(videoUrl, 120000)
+              ? youtubeDownloader()(videoUrl, 150000)
               : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000))
               .then(u => ({ url: u, direct: true }))
               .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
