@@ -52,6 +52,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
+import { downloadToFile, probeDuration, localTranscript, segmentToBlob } from '../../../lib/localprep';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId } from '../../../lib/jobs';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
 
@@ -675,10 +676,17 @@ export async function POST(request) {
         // Track the speaker for vertical clips while there's time left in the 300s budget.
         let crop = null;
         // Skip face tracking when the monthly RenderIO budget is getting tight.
-        const src = ctx.srcP ? await ctx.srcP : { url: rioUrl, direct: false };
+        let src = ctx.srcP ? await ctx.srcP : { url: rioUrl, direct: false };
         // HLS stream sources: a per-clip playlist with just the needed segments.
         const hls = !!(media && !media.mp4);
-        const win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
+        let win;
+        if (ctx.local) {
+          // Small pre-trimmed segment (starts at the clip start) instead of the full source.
+          win = { url: await segmentToBlob(ctx.local, ctx.dir, start, len, `${i}`), offset: 0 };
+          src = { ...src, direct: true };
+        } else {
+          win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
+        }
         if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
         playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls });
         c._crop = crop || safeClientCrop || null;
@@ -844,6 +852,27 @@ export async function POST(request) {
             close();
             return;
           }
+          // YouTube via the download API: pull the file into /tmp once and do audio + per-clip
+          // segments locally, so RenderIO never has to fetch the whole (possibly huge) source.
+          if (ytId && youtubeDownloader() && ctx.dir) {
+            const src = await ctx.srcP;
+            const file = path.join(ctx.dir, 'src.mp4');
+            const t0 = Date.now();
+            try {
+              const bytes = await downloadToFile(src.url, file, 150000);
+              ctx.sourceSec = await probeDuration(file);
+              console.log('local source', { ms: Date.now() - t0, bytes, sec: ctx.sourceSec });
+              ctx.local = file;
+            } catch (e) { console.warn('local source download failed', e?.message); }
+            if (ctx.sourceSec && ctx.sourceSec > YT_MAX_SECONDS) {
+              try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+              await refundUsage();
+              send({ type: 'error', message: YT_TOO_LONG });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+              close();
+              return;
+            }
+          }
         }
       }
       let audioP = null;
@@ -859,6 +888,8 @@ export async function POST(request) {
             const segments = parts.flatMap(p => p.segments);
             return { text: segments.map(x => x.text).join(' '), segments };
           });
+      } else if (!cachedTr && ctx.local && process.env.GROQ_API_KEY) {
+        audioP = localTranscript(ctx.local, ctx.dir, transcribeBuffer).catch((e) => { console.warn('local transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       } else if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
         audioP = ctx.srcP.then(src => audioTranscript(src.url, 120000, src.direct)).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }
@@ -906,7 +937,7 @@ export async function POST(request) {
         const again = await fetchTranscript(videoUrl, 1);
         if (again.segments.length) { ctx.transcript = again; ctx.transcriptSource = 'youtube'; }
       }
-      if (!ctx.transcript?.segments?.length && ctx.srcP && process.env.GROQ_API_KEY && Date.now() - startedAt < 120000) {
+      if (!ctx.transcript?.segments?.length && ctx.srcP && !ctx.local && process.env.GROQ_API_KEY && Date.now() - startedAt < 120000) {
         send({ type: 'status', step: 'transcript', detail: 'audio-retry' });
         const src = await ctx.srcP;
         const w = await audioTranscript(src.url, 90000, src.direct).catch((e) => { console.warn('audio transcript retry failed', e?.message); return EMPTY_TRANSCRIPT; });
