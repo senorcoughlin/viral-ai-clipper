@@ -43,6 +43,8 @@ import { validateVideoUrl } from '../../../lib/validate';
 import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
+import { waitUntil } from '@vercel/functions';
+import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId } from '../../../lib/jobs';
 
 const exec = promisify(execFile);
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
@@ -425,6 +427,16 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+// Resume/poll a background job: returns events from index `from` onward.
+export async function GET(request) {
+  const u = new URL(request.url);
+  const id = u.searchParams.get('job');
+  const from = Math.max(0, parseInt(u.searchParams.get('from') || '0', 10) || 0);
+  if (!validJobId(id)) return NextResponse.json({ found: false }, { status: 400 });
+  const j = await readJob(id, from).catch(() => ({ found: false }));
+  return NextResponse.json(j, { headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function POST(request) {
   const limited = await routeGuard(request, 'generate', 60, 3600);
   if (limited) return limited;
@@ -483,9 +495,14 @@ export async function POST(request) {
   }
   // Give the usage slot (and credit) back when the run produces no real clips.
   let refunded = false;
+  // The run is a server-side job: it keeps going if the browser backgrounds or drops
+  // the stream, and the client can resume it via GET /api/generate?job=<id>.
+  const jobId = jobsEnabled ? newJobId() : null;
+  if (jobId) await createJob(jobId, { slotKey: limit.key, creditSpent, email: creditSpent ? email : null }).catch(() => {});
   const refundUsage = async () => {
     if (refunded) return;
     refunded = true;
+    if (jobId) await touchJob(jobId, { refunded: true });
     await limit.refund?.();
     if (creditSpent) await refundCredit(email).catch(() => {});
   };
@@ -624,9 +641,19 @@ export async function POST(request) {
     start(controller) {
       const meter = newMeter();
       const t0 = Date.now();
-      return withMeter(meter, async () => {
+      const writer = jobId ? jobWriter(jobId) : null;
+      let open = true;
+      const enqueue = (obj) => {
+        if (!open) return;
+        try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch { open = false; }
+      };
+      const close = () => { if (!open) return; open = false; try { controller.close(); } catch {} };
+      enqueue({ type: 'job', id: jobId });
+      const hb = jobId ? setInterval(() => { touchJob(jobId); }, 10000) : null;
+      const work = withMeter(meter, async () => {
       const send = (obj) => {
-        try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch {}
+        writer?.push(obj);
+        enqueue(obj);
       };
       try {
       const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean']);
@@ -641,7 +668,7 @@ export async function POST(request) {
           send({ type: 'clip', index: i, total: cached.length, clip: cached[i] });
         }
         send({ type: 'done', note: 'Served from recent cache.', total: cached.length, cached: true });
-        controller.close();
+        close();
         return;
       }
       // Tell the client right away that work has started; setup happens below.
@@ -759,7 +786,7 @@ export async function POST(request) {
         const why = ctx.downloadError || 'Video processing is unavailable right now.';
         send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `No clips could be made from that video (${String(why).slice(0, 200)}). This run was not counted.` });
         send({ type: 'done', total: 0, real: 0, preview: 0, failed: base.length, refunded: true, reason: why });
-        controller.close();
+        close();
         return;
       }
       send({
@@ -771,15 +798,19 @@ export async function POST(request) {
         failed: base.length - clips.length,
         reason: real ? null : (ctx.downloadError || 'Video processing is unavailable right now.'),
       });
-      controller.close();
+      close();
       } catch (e) {
         console.error('generate stream failed', e);
         await reportError('generate', e, videoUrl);
         await refundUsage().catch(() => {});
         send({ type: 'error', message: e?.message || 'generate failed' });
         send({ type: 'done', note: 'Stopped early.', total: 0 });
-        try { controller.close(); } catch {}
+        close();
       }
+      }).finally(async () => {
+        if (hb) clearInterval(hb);
+        if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
+        close();
       }).finally(() => saveRun({
         at: t0, ms: Date.now() - t0, video: youtubeId(videoUrl) || String(videoUrl).slice(0, 120),
         requested: count, clipLength, tier, cached: !!ctx.cachedHit,
@@ -788,7 +819,11 @@ export async function POST(request) {
         failed: ctx.runFailed || 0,
         meter,
       }));
+      // Keep the function alive until the job finishes even if the client disconnects.
+      try { waitUntil(work); } catch {}
+      return undefined;
     },
+    cancel() { /* client went away; the job keeps running and stays resumable */ },
   });
 
   return new Response(stream, {

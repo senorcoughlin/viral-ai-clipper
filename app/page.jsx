@@ -17,6 +17,7 @@ import { funnel } from '../lib/funnel';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
+const ACTIVE_JOB_KEY = 'vac_active_job';
 const ft = (e, p) => funnel(e, p);
 
 const FREE_DAILY_LIMIT = 3;
@@ -207,6 +208,109 @@ function HomeInner() {
     setVideoUrl(SAMPLE_URL);
     handleClipping(null, { videoUrl: SAMPLE_URL, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack, source: 'example' });
   };
+  // Shared handler for generate events, whether they arrive on the live stream or
+  // are replayed from the server-side job after a reconnect.
+  const STEP_MAP = { download: [0, 'Downloading video…'], transcript: [1, 'Analyzing audio…'], scoring: [2, 'Scoring moments…'], cutting: [3, 'Cutting clips…'] };
+  const makeJobHandler = (st, multiUrl) => (msg) => {
+    if (msg.type === 'start') setProgressStep(msg.cached ? 3 : 0);
+    if (msg.type === 'status' && STEP_MAP[msg.step]) {
+      setProgressStep(STEP_MAP[msg.step][0]);
+      st.setLabel(STEP_MAP[msg.step][1]);
+      setProgressLabel(STEP_MAP[msg.step][1]);
+    }
+    if (msg.type === 'error') {
+      if (msg.index === undefined) st.fatal = msg.message || 'Generation failed on the server.';
+      else st.failed += 1;
+      st.lastReason = msg.message || st.lastReason;
+    }
+    if (msg.type === 'clip' && msg.clip) {
+      if (st.all.some(c => c._jobIndex === msg.index && c._jobUrl === (multiUrl || ''))) return;
+      const clip = { ...msg.clip, _jobIndex: msg.index, _jobUrl: multiUrl || '', title: multiUrl ? `[${multiUrl.slice(0, 18)}…] ${msg.clip.title}` : msg.clip.title };
+      const at = st.all.findIndex(c => (c.viralScore || 0) < (clip.viralScore || 0));
+      st.all = at === -1 ? [...st.all, clip] : [...st.all.slice(0, at), clip, ...st.all.slice(at)];
+      setClips([...st.all]);
+      if (st.all.length === 1) setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+      setProgressStep(3);
+      const l = `${st.all.length} of ${msg.total} ready…`;
+      st.setLabel(l);
+      setProgressLabel(l);
+    }
+    if (msg.type === 'done') {
+      st.gotDone = true;
+      setProgressStep(4);
+      setProgressLabel('Clips ready');
+      if (msg.reason) st.lastReason = msg.reason;
+    }
+  };
+  // Poll the background job until it finishes. Polls right away when the tab comes back.
+  const followJob = async (id, from, onMsg) => {
+    let next = from;
+    let misses = 0;
+    while (true) {
+      let j = null;
+      try {
+        const r = await fetch(`/api/generate?job=${encodeURIComponent(id)}&from=${next}`, { cache: 'no-store' });
+        j = await r.json();
+      } catch { j = null; }
+      if (j && j.found) {
+        misses = 0;
+        for (const m of j.events || []) onMsg(m);
+        next = j.next ?? next;
+        if (j.done) return;
+        if (j.lost) throw new Error('The server lost this run. It was not counted against your limit, so just hit Retry.');
+      } else if (j && j.found === false) {
+        throw new Error('This run expired on the server. It was not counted, so just hit Retry.');
+      } else if (++misses > 60) {
+        throw new Error('Could not reach the server. Check your connection and retry.');
+      }
+      await new Promise(res => {
+        const t = setTimeout(done, document.hidden ? 5000 : 2000);
+        function done() { clearTimeout(t); document.removeEventListener('visibilitychange', onVis); res(); }
+        function onVis() { if (!document.hidden) done(); }
+        document.addEventListener('visibilitychange', onVis);
+      });
+    }
+  };
+  const saveActiveJob = (j) => { try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(j)); } catch {} };
+  const clearActiveJob = () => { try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch {} };
+  // After a reload (or the browser discarding the tab), pick the run back up.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current) return;
+    resumedRef.current = true;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || 'null'); } catch {}
+    if (!saved?.id || Date.now() - (saved.at || 0) > 60 * 60 * 1000) { clearActiveJob(); return; }
+    (async () => {
+      setIsProcessing(true);
+      setVideoUrl(saved.runUrl || saved.url || '');
+      setError(null);
+      setProgressStep(0);
+      let label = 'Resuming your run…';
+      setProgressLabel(label);
+      const st = { all: [], failed: 0, lastReason: '', fatal: '', gotDone: false, setLabel: (l) => { label = l; } };
+      try {
+        await followJob(saved.id, 0, makeJobHandler(st, saved.multi ? saved.url : null));
+        if (st.fatal && !st.all.length) throw new Error(st.fatal);
+        if (!st.all.length) throw new Error(st.lastReason ? `No clips could be made: ${st.lastReason}` : 'No clips could be made from that link. Try another video.');
+        const all = [...st.all].sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+        setClips(all);
+        setJustFinished(true);
+        if (st.failed) setNotice(`${st.failed} clip${st.failed === 1 ? '' : 's'} failed to render.`);
+        if (saved.multi) setNotice('Resumed the link that was in progress. Run the rest of the batch again if needed.');
+        setHistory(prev => prev.some(h => h.jobId === saved.id) ? prev : [{ id: Date.now(), jobId: saved.id, url: saved.url, format: saved.fmt, aiStyle: saved.style, clips: all }, ...prev].slice(0, 5));
+        if (!saved.isPro) refreshBilling();
+      } catch (e) {
+        setClips([...st.all]);
+        setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
+      } finally {
+        clearActiveJob();
+        setIsProcessing(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleClipping = async (e, override) => {
     e?.preventDefault?.();
     const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack };
@@ -234,7 +338,6 @@ function HomeInner() {
     let all = [];
     let failed = 0;
     let lastReason = '';
-    const STEP = { download: [0, 'Downloading video…'], transcript: [1, 'Analyzing audio…'], scoring: [2, 'Scoring moments…'], cutting: [3, 'Cutting clips…'] };
     try {
       for (const url of urls) {
         const started = Date.now();
@@ -269,18 +372,21 @@ function HomeInner() {
           if (err.limitReached) setShowPricing(true);
           throw new Error(err.message || `Generate failed (${res.status})`);
         }
+        const st = { all, failed, lastReason, fatal: '', gotDone: false, badLines: 0, setLabel: (l) => { label = l; } };
+        const onMsg = makeJobHandler(st, urls.length > 1 ? url : null);
+        let jobId = null;
+        let seen = 0;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
-        let gotDone = false;
-        let badLines = 0;
-        let fatal = '';
+        let dropped = false;
         while (true) {
           let chunk;
           try {
             chunk = await reader.read();
           } catch {
-            throw new Error('Connection dropped while generating. Retry to pick up where it failed.');
+            dropped = true;
+            break;
           }
           const { value, done } = chunk;
           if (done) buf += decoder.decode();
@@ -291,45 +397,27 @@ function HomeInner() {
             const line = raw.replace(/^data:\s*/, '');
             if (!line.trim()) continue;
             let msg;
-            try { msg = JSON.parse(line); } catch { badLines += 1; continue; }
-            if (msg.type === 'start') {
-              setProgressStep(msg.cached ? 3 : 0);
+            try { msg = JSON.parse(line); } catch { st.badLines += 1; continue; }
+            if (msg.type === 'job') {
+              jobId = msg.id || null;
+              if (jobId) saveActiveJob({ id: jobId, url, runUrl, multi: urls.length > 1, fmt, style, isPro, at: Date.now() });
+              continue;
             }
-            if (msg.type === 'status' && STEP[msg.step]) {
-              setProgressStep(STEP[msg.step][0]);
-              label = STEP[msg.step][1];
-              setProgressLabel(label);
-            }
-            if (msg.type === 'error') {
-              if (msg.index === undefined) fatal = msg.message || 'Generation failed on the server.';
-              else failed += 1;
-              lastReason = msg.message || lastReason;
-            }
-            if (msg.type === 'clip' && msg.clip) {
-              const clip = {
-                ...msg.clip,
-                title: urls.length > 1 ? `[${url.slice(0, 18)}…] ${msg.clip.title}` : msg.clip.title,
-              };
-              // Insert in score order so cards don't reshuffle when the run ends.
-              const at = all.findIndex(c => (c.viralScore || 0) < (clip.viralScore || 0));
-              all = at === -1 ? [...all, clip] : [...all.slice(0, at), clip, ...all.slice(at)];
-              setClips([...all]);
-              if (all.length === 1) {
-                setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
-              }
-              setProgressStep(3);
-              label = `${all.length} of ${msg.total} ready…`;
-              setProgressLabel(label);
-            }
-            if (msg.type === 'done') {
-              gotDone = true;
-              setProgressStep(4);
-              setProgressLabel('Clips ready');
-              if (msg.reason) lastReason = msg.reason;
-            }
+            seen += 1;
+            onMsg(msg);
           }
           if (done) break;
         }
+        // Phone switched apps / tab was backgrounded: the server job keeps running, so
+        // reattach and replay whatever we missed instead of failing the run.
+        if (!st.gotDone && jobId) {
+          setProgressLabel(label + ' (reconnecting…)');
+          await followJob(jobId, seen, onMsg);
+        } else if (dropped) {
+          throw new Error('Connection dropped while generating. Retry to pick up where it failed.');
+        }
+        all = st.all; failed = st.failed; lastReason = st.lastReason;
+        const { fatal, gotDone, badLines } = st;
         if (fatal) throw new Error(fatal);
         if (!gotDone) {
           throw new Error(badLines ? 'The server sent a garbled response and the stream ended early.' : 'The connection ended before generation finished.');
@@ -355,8 +443,10 @@ function HomeInner() {
         if (!(dailyCount >= FREE_DAILY_LIMIT && credits > 0)) incrementDaily();
         refreshBilling();
       }
+      clearActiveJob();
       setHistory(prev => [{ id: Date.now(), url: runUrl, format: fmt, aiStyle: style, clips: all }, ...prev].slice(0, 5));
     } catch (e) {
+      clearActiveJob();
       setClips([...all]);
       ft('generate_error', { source: settings.source || 'manual', message: String(e?.message || 'unknown').slice(0, 120) });
       setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
