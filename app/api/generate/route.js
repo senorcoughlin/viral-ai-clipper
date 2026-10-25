@@ -56,6 +56,8 @@ import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
 import { downloadToFile, probeDuration, localTranscript, segmentToBlob } from '../../../lib/localprep';
+import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
+import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig } from '../../../lib/jobs';
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
@@ -288,6 +290,34 @@ async function transcribeBuffer(buf) {
   }
 }
 
+
+// Fallback transcription with Gemini (audio in, timestamped lines out) when Groq's quota is used up.
+async function geminiTranscribe(buf, lenSec) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || !buf?.length) return EMPTY_TRANSCRIPT;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    const prompt = 'Transcribe this audio verbatim. Return ONLY JSON {"lines":[{"t":seconds_from_start,"text":"..."}]} with one entry per sentence or short phrase (max ~12 words), t = when it starts, in seconds as a number.';
+    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
+      method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inline_data: { mime_type: 'audio/mpeg', data: Buffer.from(buf).toString('base64') } }, { text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 32768, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
+      }),
+    });
+    clearTimeout(timer);
+    if (!res.ok) { console.warn('gemini transcribe failed', res.status); return EMPTY_TRANSCRIPT; }
+    const data = await res.json();
+    meterGemini('transcribe', data?.usageMetadata);
+    const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
+    const lines = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').lines || [])
+      .map(l => ({ t: Number(l.t), text: String(l.text || '').trim() })).filter(l => Number.isFinite(l.t) && l.text && l.t <= (lenSec || 1e9) + 5)
+      .sort((a, b) => a.t - b.t);
+    const segments = lines.map((l, k) => ({ start: l.t, end: lines[k + 1] ? lines[k + 1].t : Math.min(l.t + 4, lenSec || l.t + 4), text: l.text }));
+    return { text: segments.map(x => x.text).join(' '), segments };
+  } catch (e) { console.warn('gemini transcribe failed', e?.message); return EMPTY_TRANSCRIPT; }
+}
 
 const AUDIO_CAP_SEC = 90 * 60;
 const GROQ_MAX_BYTES = 25 * 1024 * 1024;
@@ -853,6 +883,7 @@ export async function POST(request) {
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
       const cachedTr = media?.live || noCache ? null : await getCachedTranscript(videoUrl).catch(() => null);
+      if (!cachedTr && ytId && !media && subtitlesEnabled) ctx.subsP = fetchYoutubeSubtitles(videoUrl, 60000);
       // Cold run: start the RenderIO audio -> Whisper path at the same time as the
       // YouTube caption fetch (captions are usually blocked from Vercel). If captions
       // win, the audio result is simply ignored.
@@ -950,8 +981,13 @@ export async function POST(request) {
             const segments = parts.flatMap(p => p.segments);
             return { text: segments.map(x => x.text).join(' '), segments };
           });
-      } else if (!cachedTr && ctx.local && process.env.GROQ_API_KEY) {
-        audioP = localTranscript(ctx.local, ctx.dir, transcribeBuffer).catch((e) => { console.warn('local transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
+      } else if (!cachedTr && ctx.local) {
+        // YouTube captions (RapidAPI) first; Groq Whisper (hourly quota) then Gemini as fallbacks.
+        audioP = (ctx.subsP || Promise.resolve(EMPTY_TRANSCRIPT)).then(sub => sub?.segments?.length
+          ? sub
+          : localTranscript(ctx.local, ctx.dir, process.env.GROQ_API_KEY ? transcribeBuffer : async () => EMPTY_TRANSCRIPT, {
+              maxSec: Number(process.env.GROQ_RUN_MAX_SEC || 2400), reserve: reserveAudioSec, release: releaseAudioSec, fallback: geminiTranscribe,
+            })).catch((e) => { console.warn('local transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       } else if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
         audioP = ctx.srcP.then(src => audioTranscript(src.url, 120000, src.direct)).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }
@@ -1018,10 +1054,20 @@ export async function POST(request) {
       }
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
       let scored = null;
-      if (media && ctx.transcript?.segments?.length) {
+      // Long non-stream transcripts (e.g. 45 min+ YouTube) are scored in 20-min windows too,
+      // so the prompt isn't truncated to the opening and clips come from across the video.
+      const segsT = ctx.transcript?.segments || [];
+      if (!media && segsT.length && segsT[segsT.length - 1].end - segsT[0].start > 25 * 60) {
+        const W = 20 * 60;
+        const groups = new Map();
+        for (const sg of segsT) { const g = Math.floor(sg.start / W); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(sg); }
+        ctx.chunkTranscripts = [...groups.values()].map(sgs => ({ text: sgs.map(x => x.text).join(' '), segments: sgs }));
+      }
+      if ((media || (ctx.chunkTranscripts && ctx.chunkTranscripts.length > 1)) && ctx.transcript?.segments?.length) {
         // Score each chunk on its own (keeps prompts small and parallel), then keep the best
         // non-overlapping moments across the whole stream.
-        const winEnd = media.winStart + media.winLen;
+        const winStartS = media ? media.winStart : 0;
+        const winEnd = media ? media.winStart + media.winLen : (ctx.sourceSec || segsT[segsT.length - 1].end);
         const parts = (ctx.chunkTranscripts && ctx.chunkTranscripts.length > 1) ? ctx.chunkTranscripts : [ctx.transcript];
         const scoreChunk = async (tr) => {
           if (!tr?.segments?.length) return [];
@@ -1031,7 +1077,7 @@ export async function POST(request) {
           return (r?.clips || []).filter(c => c.startSec >= lo - 5 && c.startSec <= hi);
         };
         const all = (await Promise.all(parts.map(scoreChunk))).flat()
-          .map(c => ({ ...c, startSec: Math.max(media.winStart, Math.min(Number(c.startSec) || 0, winEnd - clipLength)) }))
+          .map(c => ({ ...c, startSec: Math.max(winStartS, Math.min(Number(c.startSec) || 0, winEnd - clipLength)) }))
           .sort((a, b) => (b.score || 0) - (a.score || 0));
         const picked = [];
         for (const c of all) {
