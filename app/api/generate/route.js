@@ -504,6 +504,13 @@ async function mapLimit(items, limit, fn) {
 // Resume/poll a background job: returns events from index `from` onward.
 export async function GET(request) {
   const u = new URL(request.url);
+  // Preview-only diagnostic: confirms the bundled ffmpeg binary resolves and runs.
+  if (u.searchParams.get('diag') === 'ffmpeg' && process.env.VERCEL_ENV !== 'production' && process.env.TEST_BYPASS_SECRET
+    && request.headers.get('x-test-bypass') === process.env.TEST_BYPASS_SECRET) {
+    const bin = ffmpegPath();
+    const v = bin ? await exec(bin, ['-version']).then(r => r.stdout.split('\n')[0]).catch(e => 'ERR ' + e.message) : null;
+    return NextResponse.json({ bin, version: v, downloader: !!youtubeDownloader() });
+  }
   const id = u.searchParams.get('job');
   const from = Math.max(0, parseInt(u.searchParams.get('from') || '0', 10) || 0);
   if (!validJobId(id)) return NextResponse.json({ found: false }, { status: 400 });
