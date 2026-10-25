@@ -677,7 +677,7 @@ function HomeInner({ studio = false }) {
                 <path d="M96 20l3 6 6 3-6 3-3 6-3-6-6-3 6-3z" fill="#7C5CFF" />
               </svg>
               <h3 className="font-display text-2xl font-extrabold text-white">No clips yet</h3>
-              <p className="max-w-[300px] text-sm leading-relaxed text-soft">Paste a link above and the AI will pull the best 30–60 second moments out of it.</p>
+              <p className="max-w-[300px] text-sm leading-relaxed text-soft">{studio ? 'Paste a link or upload a video in the panel, tap Generate, and your clips show up here.' : 'Paste a link above and the AI will pull the best 30–60 second moments out of it.'}</p>
               <button type="button" onClick={runExample} disabled={isProcessing} className="btn-ghost h-11 px-5 text-sm">▶ See an example</button>
             </div>
           )}
@@ -725,6 +725,7 @@ function HomeInner({ studio = false }) {
                   <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Ranked by how likely they are to blow up.</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {studio && selectedIds.length > 0 && <button type="button" onClick={() => { if (window.confirm(`Upload ${selectedIds.length} selected clip${selectedIds.length === 1 ? '' : 's'} to your YouTube as private?`)) window.dispatchEvent(new CustomEvent('studio-publish', { detail: { platform: 'youtube' } })); }} className="btn-lime h-10 px-4 text-sm">🚀 Publish selected to YouTube ({selectedIds.length})</button>}
                   {studio && clips.some(c => c.videoUrl) && <button type="button" onClick={downloadAll} disabled={dlAllBusy} className="btn-lime h-10 px-4 text-sm">{dlAllBusy ? 'Downloading…' : selectedIds.length ? `Download selected (${selectedIds.length})` : `Download all (${clips.filter(c => c.videoUrl).length})`}</button>}
                   <button onClick={() => { setClips([]); setSelectedIds([]); }} className="btn-ghost h-10 px-4 text-sm">Clear</button>
                 </div>

@@ -14,14 +14,19 @@ const handleOf = (src, author) => {
 };
 
 // Monetization-readiness checks shown before publishing.
-export function monetizationChecks(clip, ed) {
-  const len = Math.max(0, (ed.end ?? 0) - (ed.start ?? 0));
+export function clipLength(ed, dur) {
+  const trimmed = Math.max(0, (ed.end ?? 0) - (ed.start ?? 0));
+  return ed.trimmed || !dur ? trimmed : dur;
+}
+
+export function monetizationChecks(clip, ed, dur) {
+  const len = clipLength(ed, dur);
   const vertical = (clip.format || 'shorts_9_16') === 'shorts_9_16';
   return [
     { k: 'vertical', ok: vertical, label: 'Vertical 9:16', tip: 'Re-generate with the 9:16 format for Shorts, TikTok and Reels.' },
     { k: 'length', ok: len >= 15 && len <= 60, label: `Length 15–60s (now ${Math.round(len)}s)`, tip: 'Trim to 15–60 seconds for Shorts/TikTok.' },
     { k: 'captions', ok: !!ed.captions && (Array.isArray(clip.words) ? clip.words.length > 0 : !!clip.subtitlesEnabled), label: 'Captions burned in', tip: 'Turn captions on and re-render.' },
-    { k: 'transform', ok: !!(ed.rendered && (ed.hook.trim() || ed.progress)), label: 'Transformation added (hook text or progress bar)', tip: 'Add hook text or a progress bar, then re-render.' },
+    { k: 'transform', ok: !!(ed.rendered && (ed.hook.trim() || ed.progress || ed.zoom || ed.bg || ed.cam)), label: 'Transformation added', tip: 'Add hook text, zoom, a background, a progress bar or a facecam, then re-render.' },
     { k: 'credit', ok: !!(ed.rendered && ed.creditOn && ed.credit.trim()), label: 'Source credit on the video', tip: 'Turn on "Clip from @streamer" and re-render.' },
     { k: 'short', ok: len <= 90, label: 'Not a long unedited reupload', tip: 'Keep clips short and edited.' },
   ];
@@ -38,17 +43,18 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   const [copied, setCopied] = useState('');
   const [ed, setEd] = useState(() => ({
     start: s0, end: e0, captions: true, color: 'white', size: 'm', position: 'bottom',
-    hook: clip.hook || '', creditOn: true, credit: '', progress: false, rendered: false,
+    hook: clip.hook || '', creditOn: true, credit: '', progress: false, rendered: false, zoom: '', bg: '', cam: '', trimmed: false,
     title: clip.title || '', description: clip.socialCaption || clip.caption || '', hashtags: clip.hashtags || '',
   }));
   const [ideas, setIdeas] = useState(null);
   const set = (p) => setEd(e => ({ ...e, ...p }));
+  const [dur, setDur] = useState(0);
   useEffect(() => { const b = loadBrand(); if (b) set({ color: b.color || 'white', size: b.size || 'm', position: b.position || 'bottom' }); }, []);
   useEffect(() => { if (!ed.credit) { const h = handleOf(clip.source, credit?.author); if (h) set({ credit: `Clip from ${h}` }); } }, [credit, clip.source]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setVideoUrl(clip.videoUrl || ''); }, [clip.videoUrl]);
 
   const score = Number(clip.viralScore || clip.score) || 0;
-  const checks = useMemo(() => monetizationChecks(clip, ed), [clip, ed]);
+  const checks = useMemo(() => monetizationChecks(clip, ed, dur), [clip, ed, dur]);
   const ready = checks.every(c => c.ok);
   const postText = [ed.description.trim(), ed.hashtags.trim(), ed.creditOn && ed.credit.trim() ? ed.credit.trim() : ''].filter(Boolean).join('\n\n');
   const fileName = () => clipFileName(ed.title || clip.title, (index ?? 0) + 1);
@@ -82,12 +88,12 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   const rerender = async () => {
     setBusy('render'); setMsg({ ok: true, text: 'Re-rendering… about a minute.' });
     try {
-      const start = Math.max(0, ed.start), end = Math.max(start + 3, ed.end);
+      const start = Math.max(0, ed.start), end = Math.max(start + 3, ed.trimmed ? ed.end : (dur ? s0 + dur : ed.end));
       const words = ed.captions && Array.isArray(clip.words) ? clip.words.map(w => ({ w: w.w, a: +(w.a + s0 - start).toFixed(2), b: +(w.b + s0 - start).toFixed(2) })).filter(w => w.a >= 0 && w.b <= end - start + 0.5) : [];
       const res = await fetch('/api/rerender', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         source: clip.source, startSec: start, endSec: end, format: clip.format, style: clip.style, crop: clip.crop,
         caption: '', words, brand: { color: ed.color, size: ed.size, position: ed.position, upper: true },
-        hook: ed.hook.trim(), credit: ed.creditOn ? ed.credit.trim() : '', progress: ed.progress,
+        hook: ed.hook.trim(), credit: ed.creditOn ? ed.credit.trim() : '', progress: ed.progress, zoom: ed.zoom, bg: ed.bg, overlayUrl: ed.cam || undefined,
       }) });
       const d = await res.json();
       if (!d.success) throw new Error(d.message || 'Re-render failed');
@@ -95,6 +101,22 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       setMsg({ ok: true, text: 'Done — the preview now shows your edits.' });
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
   };
+  const uploadCam = async (file) => {
+    if (!file) return;
+    setBusy('cam'); setMsg({ ok: true, text: 'Uploading facecam…' });
+    try {
+      const { upload } = await import('@vercel/blob/client');
+      const blob = await upload(`uploads/cam_${file.name.replace(/[^\w.-]+/g, '_')}`, file, { access: 'private', handleUploadUrl: '/api/upload' });
+      set({ cam: blob.url }); setMsg({ ok: true, text: 'Facecam ready. Tap Apply edits to add it.' });
+    } catch (e) { setMsg({ ok: false, text: e.message || 'Upload failed' }); } finally { setBusy(''); }
+  };
+  const ytRef = useRef(null);
+  ytRef.current = youtube;
+  useEffect(() => {
+    const h = (e) => { if (selected && e.detail?.platform === 'youtube') ytRef.current?.(); };
+    window.addEventListener('studio-publish', h);
+    return () => window.removeEventListener('studio-publish', h);
+  }, [selected]);
   const suggest = async () => {
     setBusy('ai');
     try {
@@ -113,7 +135,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   return (
     <article className="card flex min-w-0 flex-col overflow-hidden animate-fadeup" data-studio-clip>
       <div className="relative aspect-[9/16] max-h-[78vh] w-full bg-black">
-        <video src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" />
+        <video src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0) setDur(d); }} />
         <label className="absolute left-3 top-3 z-10 flex h-9 items-center gap-2 rounded-full border border-line2 bg-ink/85 px-3 text-xs font-semibold">
           <input type="checkbox" className="h-4 w-4 accent-lime" checked={!!selected} onChange={e => onSelect?.(e.target.checked)} /> Select
         </label>
@@ -122,7 +144,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       <div className="flex flex-col gap-3 p-3.5">
         <div className="flex items-start justify-between gap-2">
           <p className="line-clamp-2 font-display text-base font-extrabold leading-snug text-white">{ed.title || `Clip ${(index ?? 0) + 1}`}</p>
-          <span className="shrink-0 font-mono text-xs text-muted">{fmt(ed.end - ed.start)}</span>
+          <span className="shrink-0 font-mono text-xs text-muted">{fmt(clipLength(ed, dur))}</span>
         </div>
         <button type="button" onClick={() => setOpen(open === 'publish' ? '' : 'publish')} className="btn-lime h-12 w-full text-[15px] font-extrabold">🚀 Publish</button>
         <div className="grid grid-cols-3 gap-2">
@@ -159,12 +181,12 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
               {[['Start', 'start'], ['End', 'end']].map(([l, k]) => (
                 <div key={k} className="flex items-center gap-2 text-sm">
                   <span className="w-10 text-xs text-soft">{l}</span>
-                  <button type="button" onClick={() => set({ [k]: Math.max(0, ed[k] - 1) })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} earlier`}>−1s</button>
+                  <button type="button" onClick={() => set({ [k]: Math.max(0, ed[k] - 1), trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} earlier`}>−1s</button>
                   <span className="w-14 text-center font-mono text-sm">{fmt(ed[k])}</span>
-                  <button type="button" onClick={() => set({ [k]: ed[k] + 1 })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} later`}>+1s</button>
+                  <button type="button" onClick={() => set({ [k]: ed[k] + 1, trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} later`}>+1s</button>
                 </div>
               ))}
-              <span className="text-[11px] text-muted">Length {Math.round(ed.end - ed.start)}s · aim for 15–60s</span>
+              <span className="text-[11px] text-muted">Length {Math.round(clipLength(ed, dur))}s · aim for 15–60s</span>
             </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold text-muted">Captions</span>
@@ -184,6 +206,20 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
               <span className="text-xs font-semibold text-muted">Transform</span>
               <div className="flex flex-wrap gap-1.5">
                 <Toggle on={ed.progress} onClick={() => set({ progress: !ed.progress })}>Progress bar</Toggle>
+                <Toggle on={ed.zoom === 'punch'} onClick={() => set({ zoom: ed.zoom === 'punch' ? '' : 'punch' })}>Zoom 15%</Toggle>
+                <Toggle on={ed.zoom === 'tight'} onClick={() => set({ zoom: ed.zoom === 'tight' ? '' : 'tight' })}>Punch-in 30%</Toggle>
+              </div>
+              {(clip.format || 'shorts_9_16') === 'shorts_9_16' && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-muted">Background</span>
+                  <Toggle on={!ed.bg} onClick={() => set({ bg: '' })}>Fill (crop)</Toggle>
+                  <Toggle on={ed.bg === 'blur'} onClick={() => set({ bg: 'blur' })}>Blurred</Toggle>
+                  <Toggle on={ed.bg === 'black'} onClick={() => set({ bg: 'black' })}>Black</Toggle>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <label className="chip shrink-0 cursor-pointer">{busy === 'cam' ? 'Uploading…' : ed.cam ? 'Facecam ✓ (replace)' : '+ Reaction facecam'}<input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" className="hidden" disabled={!!busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; uploadCam(f); }} /></label>
+                {ed.cam && <button type="button" onClick={() => set({ cam: '' })} className="chip shrink-0">Remove facecam</button>}
                 <Toggle on={ed.creditOn} onClick={() => set({ creditOn: !ed.creditOn })}>Source credit</Toggle>
               </div>
               {ed.creditOn && <input value={ed.credit} maxLength={40} onChange={e => set({ credit: e.target.value })} placeholder="Clip from @streamer" className={field} aria-label="Credit text" />}

@@ -47,7 +47,7 @@ export async function POST(request) {
   const watermark = !(ent?.pro || ent?.credits > 0);
   try {
     const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, {
-      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000, watermark,
+      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000, watermark,
     });
     return NextResponse.json({ success: true, videoUrl: url });
   } catch (e) {
