@@ -19,6 +19,10 @@ import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../.
 
 // Longest source we accept. Long sources make RenderIO's download+cut slower and
 // risk the 300s function limit (seen in production). Override with MAX_SOURCE_MINUTES.
+// YouTube is capped tighter until long-video processing lands (one run must fit in maxDuration).
+const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
+const YT_TOO_LONG = `YouTube videos up to ${Math.round(Number(process.env.YT_MAX_MINUTES || 60))} minutes for now; upload the file for longer ones. This run was not counted.`;
+const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
 
 // Best-effort YouTube duration lookup (seconds) from the public watch page.
@@ -467,6 +471,9 @@ export async function POST(request) {
     if (secs === 0) {
       return NextResponse.json({ success: false, message: 'That YouTube video is unavailable (private, removed, or region-locked). Try another link.' }, { status: 400 });
     }
+    if (secs && secs > YT_MAX_SECONDS) {
+      return NextResponse.json({ success: false, message: YT_TOO_LONG, tooLong: true }, { status: 400 });
+    }
     if (secs && secs > MAX_SOURCE_SECONDS) {
       return NextResponse.json({ success: false, message: `That video is ${Math.round(secs / 60)} minutes long. The limit is ${Math.round(MAX_SOURCE_SECONDS / 60)} minutes — trim it or use a shorter upload.` }, { status: 400 });
     }
@@ -650,12 +657,36 @@ export async function POST(request) {
       };
       const close = () => { if (!open) return; open = false; try { controller.close(); } catch {} };
       enqueue({ type: 'job', id: jobId });
+      let watchdog = null;
       const hb = jobId ? setInterval(() => { touchJob(jobId); }, 10000) : null;
       const work = withMeter(meter, async () => {
+      let finished = false;
+      let clipsSent = 0;
       const send = (obj) => {
+        if (finished) return;
+        if (obj.type === 'done') finished = true;
+        if (obj.type === 'clip') clipsSent += 1;
         writer?.push(obj);
         enqueue(obj);
       };
+      // Watchdog: if the run would outlive the function, end it cleanly (refund + clear message)
+      // instead of being killed and showing up as a lost run.
+      watchdog = setTimeout(async () => {
+        if (finished) return;
+        if (clipsSent > 0) {
+          send({ type: 'done', note: 'Some clips ran out of time.', total: clipsSent, real: clipsSent, preview: 0, failed: count - clipsSent });
+          if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
+          close();
+          return;
+        }
+        await refundUsage().catch(() => {});
+        reportError('generate:timeout', 'run exceeded time budget', videoUrl).catch(() => {});
+        const msg = 'This video took too long to process. Try a shorter video, fewer clips, or upload the file. This run was not counted.';
+        send({ type: 'error', message: msg });
+        send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+        if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
+        close();
+      }, RUN_BUDGET_MS);
       try {
       const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean']);
       const hit = await getCached(key);
@@ -836,6 +867,7 @@ export async function POST(request) {
       }
       }).finally(async () => {
         if (hb) clearInterval(hb);
+        clearTimeout(watchdog);
         if (writer) { await writer.flush(); await touchJob(jobId, { done: true }); }
         close();
       }).finally(() => saveRun({
