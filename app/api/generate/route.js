@@ -196,7 +196,7 @@ const SAMPLE_VIDEOS = [
 function cleanReasons(r) {
   if (!r || typeof r !== 'object') return null;
   const out = {};
-  for (const k of ['hook', 'pacing', 'emotion']) if (r[k]) out[k] = String(r[k]).replace(/\s+/g, ' ').trim().slice(0, 90);
+  for (const k of ['hook', 'pacing', 'clarity', 'emotion']) if (r[k]) out[k] = String(r[k]).replace(/\s+/g, ' ').trim().slice(0, 90);
   return Object.keys(out).length ? out : null;
 }
 
@@ -214,7 +214,7 @@ How to choose:
 - Score 1-99 for how likely this clip is to stop the scroll and get shared. Be honest: most moments are 60-80. Reserve 90+ for exceptional ones.
 ${timed ? `- startSec MUST be a second where a sentence begins, taken from the [mm:ss] markers (convert to seconds). Do not invent times outside the transcript range.` : ''}
 Return ONLY valid JSON with ${count} clip${count === 1 ? '' : 's'}, ranked best first:
-{"clips":[{"title":"short punchy title","hook":"on-screen hook, under 8 words","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":72,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"one sentence on why this moment works","reasons":{"hook":"under 10 words on the opening","pacing":"under 10 words on pacing","emotion":"under 10 words on the emotion or CTA payoff"}}]}
+{"clips":[{"title":"short punchy title","hook":"on-screen hook, under 8 words","hooks":["hook a","hook b","hook c"],"caption":"post caption with a CTA","hashtags":"#tag1 #tag2 #tag3","bestTime":"Tue 7pm","score":72,"startSec":<number>,"endSec":<startSec + ${length}>,"reason":"one sentence on why this moment works","reasons":{"hook":"under 10 words on the opening","pacing":"under 10 words on pacing","clarity":"under 10 words on whether it makes sense without context","emotion":"under 10 words on the emotion or CTA payoff"}}]}
 Clips must not overlap. startSec/endSec are seconds from the start of the video.
 Video: ${videoUrl}
 Format: ${format}

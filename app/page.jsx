@@ -747,7 +747,8 @@ function HomeInner({ studio = false }) {
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="flex flex-col gap-2">
                   <span className="eyebrow" aria-live="polite">{isProcessing ? `Your clips · ${clips.length} of ${expected} ready` : 'Your clips'}</span>
-                  <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Ranked by how likely they are to blow up.</h2>
+                  <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Ranked by AI viral score.</h2>
+                  <p className="max-w-[560px] text-sm text-soft">The score is an AI estimate of how well a moment fits short-form, based on its hook, pacing and clarity. It is not a guarantee of views. Tap a clip to see the reasons.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {studio && selectedIds.length > 0 && <button type="button" onClick={() => { if (window.confirm(`Upload ${selectedIds.length} selected clip${selectedIds.length === 1 ? '' : 's'} to your YouTube as private?`)) window.dispatchEvent(new CustomEvent('studio-publish', { detail: { platform: 'youtube' } })); }} className="btn-lime h-10 px-4 text-sm">🚀 Publish selected to YouTube ({selectedIds.length})</button>}

@@ -156,8 +156,6 @@ export default function ClipPlayer({ clip, compact = false, index }) {
   const color = unscored ? '#8A8A99' : tier.color;
   const label = unscored ? 'Not scored' : tier.label;
   const hookText = (socialCaption || '').replace(/#\S+/g, '').replace(/[^\w\s'!?.,-]/g, '').trim();
-  const hookPct = Math.min(100, score + 2);
-  const pacePct = Math.max(60, score - 5);
 
   return (
     <article className={`group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup ${compact ? 'max-w-[180px]' : ''}`}>
@@ -251,7 +249,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
             {clip.reason && <p className="text-xs leading-relaxed text-muted">Why this score: {clip.reason}</p>}
             {clip.reasons && (
               <ul className="flex flex-col gap-1 text-xs leading-snug text-soft">
-                {[['hook', 'Hook'], ['pacing', 'Pacing'], ['emotion', 'Emotion/CTA']].filter(([k]) => clip.reasons[k]).map(([k, l]) => (
+                {[['hook', 'Hook'], ['pacing', 'Pacing'], ['clarity', 'Clarity'], ['emotion', 'Emotion/CTA']].filter(([k]) => clip.reasons[k]).map(([k, l]) => (
                   <li key={k} className="min-w-0 break-words"><span className="font-semibold text-lime">{l}:</span> {clip.reasons[k]}</li>
                 ))}
               </ul>
@@ -280,8 +278,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
         )}
 
         {postStatus}
-        <Bar label="Hook" pct={hookPct} color={color} />
-        <Bar label="Pacing" pct={pacePct} color={color} />
+        {!unscored && <p className="text-[11px] text-muted">Viral score {score}/100 · AI estimate (hook, pacing, clarity), not a guarantee</p>}
 
         <p className="text-[11px] leading-snug text-muted">Shorts uploads directly to your connected channel. TikTok, Reels and X open the app with your caption copied, so download the clip first.</p>
         <div className="flex flex-wrap gap-2 pt-1">
