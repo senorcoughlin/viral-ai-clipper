@@ -158,7 +158,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
   const hookText = (socialCaption || '').replace(/#\S+/g, '').replace(/[^\w\s'!?.,-]/g, '').trim();
 
   return (
-    <article className={`group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup ${compact ? 'max-w-[180px]' : ''}`}>
+    <article className={`group card flex flex-col overflow-hidden transition hover:-translate-y-1 hover:border-lime animate-fadeup ${compact ? 'mx-auto w-full max-w-sm min-[480px]:mx-0 min-[480px]:max-w-[180px]' : ''}`}>
       {/* Preview / Player */}
       <div className={`relative ${compact ? 'aspect-[9/14]' : (ASPECT[clip.format] || ASPECT.shorts_9_16)} border-b border-line bg-black`}>
         <video
