@@ -752,8 +752,9 @@ export async function POST(request) {
           src = { ...src, direct: true };
           // YouTube captions only carry phrase (or approximate) timings. Re-time this clip's
           // words with Whisper on the clip's own exact-start audio so captions land on the word.
-          if (timedWords.length && ctx.transcript?.src !== 'whisper' && process.env.GROQ_API_KEY && len <= 180
+          if (timedWords.length && ctx.transcript?.src !== 'whisper' && process.env.GROQ_API_KEY && len <= 900 && (ctx.retimeSec || 0) + len <= Number(process.env.RETIME_RUN_MAX_SEC || 1800)
             && Date.now() - (ctx.startedAt || Date.now()) < 200000 && await reserveAudioSec(len).catch(() => false)) {
+            ctx.retimeSec = (ctx.retimeSec || 0) + len;
             try {
               const tr = await transcribeBuffer(await clipAudio(ctx.local, ctx.dir, start, len, `${i}`));
               const ww = (tr.segments || []).filter(w => w.start < len).map(w => ({ w: w.text, a: Math.max(0, w.start), b: Math.min(len, Math.max(w.end, w.start + 0.05)) }));
