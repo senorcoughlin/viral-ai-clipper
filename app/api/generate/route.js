@@ -27,6 +27,17 @@ const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
 const YT_TOO_LONG = `YouTube videos up to ${Math.round(Number(process.env.YT_MAX_MINUTES || 60))} minutes for now; upload the file for longer ones. This run was not counted.`;
 const SRC_KEY = (id) => `ysrc:${id}`;
 const LONG_SEC = 40 * 60; // use 360p for long YouTube sources (smaller, faster to pull)
+// Source resolution for YouTube downloads. A 9:16 crop of a 16:9 frame only keeps ~56% of the
+// width, so a 480p source was being upscaled ~2.7x into the 720x1280 clip (soft, blocky).
+// Pull 1080p when the file comfortably fits the function's /tmp and time budget, else 720p.
+function ytSourceFormat(secs) {
+  if (process.env.YT_DOWNLOAD_FORMAT) return process.env.YT_DOWNLOAD_FORMAT;
+  if (!(secs > 0)) return '720';
+  if (secs <= Number(process.env.YT_1080_MAX_SEC || 12 * 60)) return '1080';
+  if (secs <= 30 * 60) return '720';
+  if (secs <= LONG_SEC) return '480';
+  return '360';
+}
 const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
@@ -57,7 +68,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
-import { downloadToFile, probeDuration, localTranscript, segmentToBlob, localFfmpegAvailable } from '../../../lib/localprep';
+import { downloadToFile, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig } from '../../../lib/jobs';
@@ -286,7 +297,7 @@ async function transcribeBuffer(buf) {
     const segments = words.length
       ? words.map(w => ({ start: Number(w.start) || 0, end: Number(w.end) || (Number(w.start) || 0) + 0.3, text: String(w.word || '').trim() })).filter(w => w.text)
       : (Array.isArray(data.segments) ? data.segments.map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() })).filter(s => s.text) : []);
-    return { text: data.text || segments.map(s => s.text).join(' '), segments };
+    return { text: data.text || segments.map(s => s.text).join(' '), segments, src: words.length ? 'whisper' : 'whisper-seg' };
   } catch {
     return EMPTY_TRANSCRIPT;
   }
@@ -414,12 +425,12 @@ async function getCachedTranscript(url) {
   const v = await kvGetJson(trKey(url));
   if (!v?.s?.length) return null;
   const segments = v.s.map(([start, end, text]) => ({ start, end, text }));
-  return { text: segments.map(x => x.text).join(' '), segments };
+  return { text: segments.map(x => x.text).join(' '), segments, src: v.src || null };
 }
 async function setCachedTranscript(url, tr) {
   if (!kvEnabled || !tr?.segments?.length) return;
   const s = tr.segments.map(x => [Math.round(x.start * 100) / 100, Math.round(x.end * 100) / 100, x.text]);
-  await kvSetJson(trKey(url), { s }, 7 * 24 * 3600);
+  await kvSetJson(trKey(url), { s, src: tr.src || null }, 7 * 24 * 3600);
 }
 
 async function downloadSource(url, dir) {
@@ -724,7 +735,7 @@ export async function POST(request) {
     if (rio) {
       try {
         const label = autoSubtitles !== false && c.scored !== false ? (c.hook || c.title || '') : '';
-        const timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
+        let timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
         // Track the speaker for vertical clips while there's time left in the 300s budget.
         let crop = null;
         // Skip face tracking when the monthly RenderIO budget is getting tight.
@@ -734,8 +745,22 @@ export async function POST(request) {
         let win;
         if (ctx.local) {
           // Small pre-trimmed segment (starts at the clip start) instead of the full source.
-          win = { url: await segmentToBlob(ctx.local, ctx.dir, start, len, `${i}`), offset: 0 };
+          // Lossless stream-copy segment; `offset` is where the clip really starts inside it
+          // (the cut snaps back to a keyframe), so RenderIO seeks there frame-accurately.
+          const seg = await segmentToBlob(ctx.local, ctx.dir, start, len, `${i}`);
+          win = { url: seg.url, offset: seg.offset };
           src = { ...src, direct: true };
+          // YouTube captions only carry phrase (or approximate) timings. Re-time this clip's
+          // words with Whisper on the clip's own exact-start audio so captions land on the word.
+          if (timedWords.length && ctx.transcript?.src !== 'whisper' && process.env.GROQ_API_KEY && len <= 180
+            && Date.now() - (ctx.startedAt || Date.now()) < 200000 && await reserveAudioSec(len).catch(() => false)) {
+            try {
+              const tr = await transcribeBuffer(await clipAudio(ctx.local, ctx.dir, start, len, `${i}`));
+              const ww = (tr.segments || []).filter(w => w.start < len).map(w => ({ w: w.text, a: Math.max(0, w.start), b: Math.min(len, Math.max(w.end, w.start + 0.05)) }));
+              if (ww.length >= Math.max(3, timedWords.length * 0.5)) { timedWords = ww; c._retimed = true; }
+              else await releaseAudioSec(len).catch(() => {});
+            } catch (e) { console.warn('clip retime failed', e?.message); await releaseAudioSec(len).catch(() => {}); }
+          }
         } else {
           win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
         }
@@ -798,7 +823,7 @@ export async function POST(request) {
       startSec: start,
       endSec: start + len,
       // Kept so the caption editor can re-render this clip with the same timing/crop.
-      words: (c._words || []).slice(0, 200).map(w => ({ w: w.w, a: Math.round(w.a * 100) / 100, b: Math.round(w.b * 100) / 100 })),
+      words: (c._words || []).slice(0, 1500).map(w => ({ w: w.w, a: Math.round(w.a * 100) / 100, b: Math.round(w.b * 100) / 100 })),
       crop: c._crop || null,
       preview: !real,
     };
@@ -879,7 +904,7 @@ export async function POST(request) {
         stopRun();
       }, Math.max(10000, RUN_BUDGET_MS - (Date.now() - reqStart)));
       try {
-      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v2', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v3', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
       const hit = media?.live || noCache ? null : await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
@@ -919,7 +944,7 @@ export async function POST(request) {
           : ctx.cachedSrc?.blob
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
           : (ytId && youtubeDownloader()
-              ? youtubeDownloader()(videoUrl, 150000, { format: ytSecs > LONG_SEC ? '360' : undefined })
+              ? youtubeDownloader()(videoUrl, 150000, { format: ytSourceFormat(ytSecs) })
               : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000)
                   // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
                   .catch((e) => { if (e?.capacity) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: videoUrl } }, 'out_video', rioKey, 120000); }))

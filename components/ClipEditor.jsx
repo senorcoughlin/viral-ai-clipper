@@ -10,16 +10,40 @@ export function loadBrand() {
   try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; }
 }
 
-// Re-time edited words: same word count keeps the original timings; otherwise the
-// new words are spread evenly over the original spoken span.
-function retime(original, text) {
-  const next = text.split(/\s+/).filter(Boolean).slice(0, 300);
+// Re-time edited words. Unchanged words keep their spoken timings (word-level diff), and
+// replaced/inserted words share the time span of the words they replace, so fixing one word
+// no longer smears every caption evenly across the clip.
+export function retime(original, text) {
+  const next = text.split(/\s+/).filter(Boolean).slice(0, 1500);
   if (!original.length) return [];
   if (next.length === original.length) return original.map((o, i) => ({ ...o, w: next[i] }));
-  const a0 = original[0].a;
-  const b1 = original[original.length - 1].b;
-  const step = Math.max(0.12, (b1 - a0) / Math.max(1, next.length));
-  return next.map((w, i) => ({ w, a: +(a0 + i * step).toFixed(2), b: +(a0 + (i + 1) * step).toFixed(2) }));
+  const key = (w) => String(w).toLowerCase().replace(/[^a-z0-9']/g, '');
+  const n = original.length, m = next.length;
+  // LCS table (bounded sizes: <=1500 words each, typical clips are ~100).
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    L[i][j] = key(original[i].w) && key(original[i].w) === key(next[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = [];
+  let i = 0, j = 0;
+  const fill = (oi0, oi1, nj0, nj1) => {
+    const cnt = nj1 - nj0;
+    if (cnt <= 0) return;
+    const a0 = oi1 > oi0 ? original[oi0].a : (oi0 > 0 ? original[oi0 - 1].b : original[0].a);
+    const b1 = oi1 > oi0 ? original[oi1 - 1].b : (oi0 < n ? original[oi0].a : original[n - 1].b);
+    const span = Math.max(0.12 * cnt, b1 - a0);
+    for (let k = 0; k < cnt; k++) out.push({ w: next[nj0 + k], a: +(a0 + k * span / cnt).toFixed(2), b: +(a0 + (k + 1) * span / cnt).toFixed(2) });
+  };
+  let oi0 = 0, nj0 = 0;
+  while (i < n && j < m) {
+    if (key(original[i].w) && key(original[i].w) === key(next[j])) {
+      fill(oi0, i, nj0, j);
+      out.push({ ...original[i], w: next[j] });
+      i++; j++; oi0 = i; nj0 = j;
+    } else if (L[i + 1][j] >= L[i][j + 1]) i++;
+    else j++;
+  }
+  fill(oi0, n, nj0, m);
+  return out;
 }
 
 export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onTransform, onRendered, onClose }) {

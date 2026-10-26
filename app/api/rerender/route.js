@@ -27,7 +27,7 @@ export async function POST(request) {
   if (!(await allowAttempt(`rerender:${clientIp(request)}`, 30, 24 * 3600))) {
     return NextResponse.json({ success: false, message: 'Re-render limit reached for today.' }, { status: 429 });
   }
-  const words = (Array.isArray(body.words) ? body.words : []).slice(0, 300)
+  const words = (Array.isArray(body.words) ? body.words : []).slice(0, 1500)
     .map(x => ({ w: String(x?.w || '').slice(0, 40), a: Number(x?.a), b: Number(x?.b) }))
     .filter(x => x.w.trim() && Number.isFinite(x.a) && Number.isFinite(x.b) && x.a >= 0 && x.b >= x.a && x.a <= len);
   const vertical = (body.format || 'shorts_9_16') === 'shorts_9_16';
