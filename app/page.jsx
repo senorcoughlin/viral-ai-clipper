@@ -586,6 +586,14 @@ function HomeInner({ studio = false }) {
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
+              {!studio && (
+                <div className="-mt-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p id="trust-line" className="px-1 text-[13px] text-soft">{FREE_DAILY_LIMIT} free a day · No signup needed · No card</p>
+                  <button id="try-example" type="button" onClick={() => { ft('sample_click'); runExample(); }} disabled={isProcessing} className="btn-ghost h-11 justify-center px-4 text-[14px] font-bold disabled:opacity-60" title="Clips a 19-second sample. Doesn't use your free generations.">
+                    {isProcessing && lastWasExample ? 'Making sample clip…' : '▶ Try a sample video'}
+                  </button>
+                </div>
+              )}
               {(() => {
                 const p = parseLinks(videoUrl);
                 if (p.found < 2) return null;
@@ -964,13 +972,6 @@ function HomeInner({ studio = false }) {
             </p>
 
             {formBlock}
-            <p id="trust-line" className="-mt-1 px-1 text-[13px] text-soft">{FREE_DAILY_LIMIT} free generations a day · No signup needed · No card</p>
-            <div className="flex flex-col gap-1.5">
-              <button id="try-example" type="button" onClick={() => { ft('sample_click'); runExample(); }} disabled={isProcessing} className="btn-ghost h-12 w-full justify-center px-5 text-[15px] font-bold sm:w-auto sm:self-start disabled:opacity-60">
-                {isProcessing && lastWasExample ? 'Making sample clip…' : '▶ Try a sample video'}
-              </button>
-              <p className="px-1 text-[12px] text-muted">Clips a 19-second sample. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
-            </div>
             <div className="flex flex-wrap gap-5 text-[13px] text-muted">
               <span className="flex items-center gap-1.5"><Check />No watermark on Pro</span>
               <span className="flex items-center gap-1.5"><Check />Captions burned in</span>
