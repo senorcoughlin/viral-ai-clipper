@@ -17,6 +17,8 @@ async function serve(request, head) {
   }
   if (!out.has('accept-ranges')) out.set('accept-ranges', 'bytes');
   out.set('cache-control', 'private, no-store');
+  const dl = (p.get('dl') || '').replace(/[^\w.-]+/g, '-').slice(0, 100);
+  if (dl) out.set('content-disposition', `attachment; filename="${dl.endsWith('.mp4') ? dl : dl + '.mp4'}"`);
   return new Response(head ? null : r.body, { status: r.status, headers: out });
 }
 export const GET = (req) => serve(req, false);

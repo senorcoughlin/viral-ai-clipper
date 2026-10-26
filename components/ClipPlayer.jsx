@@ -44,7 +44,8 @@ const Icon = {
 const slug = (t) => String(t || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '');
 const stamp = () => { const d = new Date(), z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`; };
 export const clipFileName = (title, n) => ['viral-clip', slug(title), n, stamp()].filter(Boolean).join('-') + '.mp4';
-export const downloadHref = (src, name) => /^https:\/\/(renderio\.dev\/api\/media\/|[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/)/.test(src || '')
+export const downloadHref = (src, name) => /^https:\/\/viralaiclipper\.com\/api\/media\?/.test(src || '') || /^\/api\/media\?/.test(src || '')
+  ? `${src.split('#')[0]}&dl=${encodeURIComponent(name)}` : /^https:\/\/(renderio\.dev\/api\/media\/|[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/)/.test(src || '')
   ? `/api/download?${new URLSearchParams({ u: src.split('#')[0], n: name })}` : src;
 
 export default function ClipPlayer({ clip, compact = false, index }) {
@@ -222,6 +223,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
               <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
             </span>
           </div>
+          {(renderedUrl || clip.editedAt) && <a data-testid="card-final-download" href={videoSrc} download onClick={onDownload} rel="noreferrer" className="btn-lime mt-1 grid h-11 w-full place-items-center text-sm font-bold">Download final render</a>}
           <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Upload to YouTube Shorts'}</button>
           <p className="text-[10px] leading-snug text-muted">Opens app, caption copied — attach the downloaded clip:</p>
           <div className="grid grid-cols-3 gap-1">
@@ -294,6 +296,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
           <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}
           </a>
+          {(renderedUrl || clip.editedAt) && <a data-testid="card-final-download" href={videoSrc} download onClick={onDownload} rel="noreferrer" className="btn-lime grid h-10 place-items-center px-4 text-sm font-bold">Download final render</a>}
           <button type="button" aria-label="Copy AI prompt" title="Copy AI prompt" onClick={() => copy(aiPrompt, 'prompt')} className="btn-ghost h-10 w-10 p-0">
             {copied === 'prompt' ? Icon.check : Icon.copy}
           </button>
