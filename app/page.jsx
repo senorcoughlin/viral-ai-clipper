@@ -327,7 +327,7 @@ function HomeInner({ studio = false }) {
         const all = [...st.all].sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
         setClips(all);
         setJustFinished(true);
-      try { window.dispatchEvent(new Event('vac:clip-done')); } catch {}
+        try { window.dispatchEvent(new Event('vac:clip-done')); } catch {}
         if (st.failed) setNotice(`${st.failed} clip${st.failed === 1 ? '' : 's'} failed to render.`);
         if (saved.multi) setNotice('Resumed the link that was in progress. Run the rest of the batch again if needed.');
         setHistory(prev => prev.some(h => h.jobId === saved.id) ? prev : [{ id: Date.now(), jobId: saved.id, url: saved.url, format: saved.fmt, aiStyle: saved.style, clips: all }, ...prev].slice(0, 5));
@@ -471,6 +471,7 @@ function HomeInner({ studio = false }) {
       all.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
       setClips([...all]);
       setJustFinished(true);
+      try { window.dispatchEvent(new Event('vac:clip-done')); } catch {}
       ft('generate_success', { source: settings.source || 'manual', clips: all.length });
       if (!isExample) bumpGenCount();
       if (!isPro && !isExample) {
