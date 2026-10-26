@@ -212,7 +212,9 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
         {open === 'publish' && (
           <div className="flex flex-col gap-2 rounded-input border border-line2 p-3" data-publish>
             {!ready && <p className="text-xs text-[#FFB64D]">Not every monetization check is green yet. You can still publish, but YouTube and TikTok may limit reach or monetization on reused clips.</p>}
+            <p className="text-[11px] text-muted">Direct upload — needs your YouTube channel connected:</p>
             <button type="button" onClick={youtube} disabled={!!busy} className="btn-lime h-11 w-full text-sm">{busy === 'yt' ? 'Uploading…' : 'YouTube Shorts (uploads as private)'}</button>
+            <p className="mt-1 text-[11px] text-muted">Opens the app with your caption copied — attach the clip (it downloads first):</p>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => forApp('https://www.tiktok.com/upload', 'tt')} className="btn-ghost h-11 text-sm">TikTok</button>
               <button type="button" onClick={() => forApp('https://www.instagram.com/', 'ig')} className="btn-ghost h-11 text-sm">Instagram Reels</button>

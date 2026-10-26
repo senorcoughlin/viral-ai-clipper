@@ -221,7 +221,8 @@ export default function ClipPlayer({ clip, compact = false, index }) {
               <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" className="font-semibold text-lime hover:underline">Download</a>
             </span>
           </div>
-          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Post to Shorts'}</button>
+          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Upload to YouTube Shorts'}</button>
+          <p className="text-[10px] leading-snug text-muted">Opens app, caption copied — attach the downloaded clip:</p>
           <div className="grid grid-cols-3 gap-1">
             <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">TikTok</button>
             <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">Reels</button>
@@ -281,13 +282,14 @@ export default function ClipPlayer({ clip, compact = false, index }) {
         <Bar label="Hook" pct={hookPct} color={color} />
         <Bar label="Pacing" pct={pacePct} color={color} />
 
+        <p className="text-[11px] leading-snug text-muted">Shorts uploads directly to your connected channel. TikTok, Reels and X open the app with your caption copied, so download the clip first.</p>
         <div className="flex flex-wrap gap-2 pt-1">
           <button type="button" onClick={() => copy(withCredit(socialCaption, credit, creditOn), 'cap')} className="btn-lime h-10 flex-1 text-sm">
             {copied === 'cap' ? 'Copied!' : 'Copy caption'}
           </button>
           <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-10 px-3 text-xs">TikTok</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
-          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost h-10 px-3 text-xs">{postBusy ? 'Uploading…' : 'Shorts'}</button>
+          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost h-10 px-3 text-xs">{postBusy ? 'Uploading…' : 'Upload to Shorts'}</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
           <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}
