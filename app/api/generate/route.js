@@ -25,7 +25,7 @@ import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../.
 // YouTube is capped tighter until long-video processing lands (one run must fit in maxDuration).
 const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
 const YT_TOO_LONG = `YouTube videos up to ${Math.round(Number(process.env.YT_MAX_MINUTES || 60))} minutes for now; upload the file for longer ones. This run was not counted.`;
-const SRC_KEY = (id) => `ysrc:${id}`;
+const SRC_KEY = (id) => `ysrc2:${id}`; // v2: higher-res sources (old keys point at 480p files)
 const LONG_SEC = 40 * 60; // use 360p for long YouTube sources (smaller, faster to pull)
 // Source resolution for YouTube downloads. A 9:16 crop of a 16:9 frame only keeps ~56% of the
 // width, so a 480p source was being upscaled ~2.7x into the 720x1280 clip (soft, blocky).
