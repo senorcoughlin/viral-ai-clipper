@@ -43,20 +43,18 @@ export default function SpinWheel({ onWon, onUpgrade }) {
 
   const load = () => fetch('/api/spin', { cache: 'no-store' }).then(r => r.json()).then(d => { setSt(d); if (d.email) setEmail(e => e || d.email); return d; }).catch(() => null);
 
+  // No automatic popup on load: opens on gift tap, or once after the first finished clip.
+  useEffect(() => { load(); }, []);
   useEffect(() => {
-    load().then(d => {
-      if (!d) return;
-      // Auto-prompt at most once per ET day, only on a return visit, and only if a spin is plausible.
+    const onDone = () => {
       try {
-        const today = nyDate();
-        const seen = localStorage.getItem('vac_seen_day');
-        if (!seen) { localStorage.setItem('vac_seen_day', today); return; }
-        if (localStorage.getItem(PROMPT_KEY) === today) return;
-        if (d.verified && !d.available) return;
-        localStorage.setItem(PROMPT_KEY, today);
-        setTimeout(() => setOpen(true), 4000);
-      } catch {}
-    });
+        if (localStorage.getItem('vac_spin_after_first')) return;
+        localStorage.setItem('vac_spin_after_first', '1');
+      } catch { return; }
+      setTimeout(() => setOpen(true), 2500);
+    };
+    window.addEventListener('vac:clip-done', onDone);
+    return () => window.removeEventListener('vac:clip-done', onDone);
   }, []);
   useEffect(() => { if (open && !viewed.current) { viewed.current = true; funnel('spin_view', { available: !!st?.available }); } if (!open) viewed.current = false; }, [open]);
   useEffect(() => {
