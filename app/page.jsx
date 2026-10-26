@@ -755,10 +755,10 @@ function HomeInner({ studio = false }) {
                   <button onClick={() => { setClips([]); setSelectedIds([]); }} className="btn-ghost h-10 px-4 text-sm">Clear</button>
                 </div>
               </div>
-              <div className={studio ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}>
+              <div className={studio ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3' : 'mx-auto grid w-full max-w-[420px] grid-cols-1 gap-5 sm:max-w-none sm:grid-cols-2 lg:grid-cols-3'}>
                 {clips.map((c, i) => studio
                   ? <StudioClip key={c.id} clip={c} index={i} selected={selectedIds.includes(c.id)} onSelect={on => setSelectedIds(ids => on ? [...ids, c.id] : ids.filter(x => x !== c.id))} />
-                  : <ClipPlayer key={c.id} clip={c} index={i} compact />)}
+                  : <ClipPlayer key={c.id} clip={c} index={i} />)}
                 {isProcessing && Array.from({ length: Math.max(0, expected - clips.length) }, (_, i) => (
                   <div key={`pending-${i}`} aria-hidden className="flex flex-col gap-2">
                     <div className="aspect-[9/12] rounded-xl bg-shimmer [background-size:200%_100%] animate-shimmer" style={{ animationDelay: `${i * 200}ms` }} />

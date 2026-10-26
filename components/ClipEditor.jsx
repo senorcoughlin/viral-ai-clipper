@@ -112,7 +112,7 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
           <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-fg">✕</button>
         </div>
         <label className="flex flex-col gap-1.5 text-xs text-muted">
-          {words.length ? 'Caption words (keep the same number of words to keep exact timing)' : 'Caption text'}
+          {words.length ? 'Caption words — add, remove or fix words freely; timing re-spreads across the clip automatically' : 'Caption text'}
           <textarea value={text} onChange={e => setText(e.target.value)} rows={5} className="rounded-input border border-line2 bg-ink px-3 py-2 text-sm text-fg outline-none focus:border-lime" />
         </label>
         <div className="flex flex-col gap-2">
