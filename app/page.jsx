@@ -48,7 +48,7 @@ const STREAM_STEPS = [
   { t: 'Grab the VOD or video link', d: 'Copy the link to a finished stream (VOD) or video. Twitch, YouTube and Kick replays all have a shareable link.', tools: [['Twitch VODs', 'https://www.twitch.tv'], ['YouTube', 'https://www.youtube.com']] },
   { t: 'Paste it into Viral AI Clipper', d: 'Paste up to 10 links at once. Pick 9:16, and we find the best moments with captions and a hook burned in.', tools: [['Paste a link \u2191', '#urls'], ['Twitch clipping guide', '/how-to-clip-twitch-streams']] },
   { t: 'Post consistently', d: 'Post to TikTok, YouTube Shorts and Instagram Reels. Many clippers aim for 3\u20135 clips a day. Add your own edits or commentary, since platforms may limit reposted content.', tools: [['TikTok', 'https://www.tiktok.com/upload'], ['YouTube Shorts', 'https://studio.youtube.com'], ['Reels', 'https://www.instagram.com']] },
-  { t: 'Track views, submit and scale', d: 'Submit approved posts to your campaign for view payouts. As you grow, you may qualify for YouTube Partner Program Shorts revenue or TikTok Creator Rewards (1-min+ original videos). Check each program\u2019s eligibility. Go Pro for 200 clips a day.', tools: [['YouTube Partner Program', 'https://support.google.com/youtube/answer/72851'], ['TikTok Creator Rewards', 'https://www.tiktok.com/creator-academy/en/article/creator-rewards-program'], ['Go Pro', '#pricing']] },
+  { t: 'Track views, submit and scale', d: 'Submit approved posts to your campaign for view payouts. As you grow, you may qualify for YouTube Partner Program Shorts revenue or TikTok Creator Rewards (1-min+ original videos). Check each program\u2019s eligibility. Go Pro for 200 generations a day.', tools: [['YouTube Partner Program', 'https://support.google.com/youtube/answer/72851'], ['TikTok Creator Rewards', 'https://www.tiktok.com/creator-academy/en/article/creator-rewards-program'], ['Go Pro', '#pricing']] },
 ];
 const LIVE_MINUTES = [5, 10, 15];
 // twitch.tv/<channel> (not a VOD or clip link): eligible for "clip the last X minutes".
@@ -796,7 +796,7 @@ function HomeInner({ studio = false }) {
                 {!isPro && dailyCount >= FREE_DAILY_LIMIT ? (
                   <span className="inline-flex h-8 items-center gap-2 rounded-full border border-hot bg-[#2A1414] px-2.5 text-xs font-semibold text-[#FF8FA3]">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" /><path d="M12 7v6M12 16v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-                    You've used {FREE_DAILY_LIMIT} of {FREE_DAILY_LIMIT} free clips today
+                    You've used {FREE_DAILY_LIMIT} of {FREE_DAILY_LIMIT} free generations today
                   </span>
                 ) : <span className="eyebrow pt-2">Pro</span>}
                 <button type="button" aria-label="Close" onClick={() => setShowPricing(false)} className="btn-ghost h-9 w-9 rounded-[10px] p-0">
@@ -806,7 +806,7 @@ function HomeInner({ studio = false }) {
               <h3 id="up-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[38px]">
                 Keep the clips coming.<br /><span className="text-lime">Go Pro.</span>
               </h3>
-              <p className="text-[15px] leading-relaxed text-soft">Pro raises the daily cap to 200, removes the watermark, and saves your history so you never lose a banger.</p>
+              <p className="text-[15px] leading-relaxed text-soft">Pro gives you 200 generations a day, removes the watermark, and saves your history so you never lose a banger.</p>
               <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
                 <li className="flex items-center gap-2"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2"><Check />No watermark</li>
@@ -824,7 +824,7 @@ function HomeInner({ studio = false }) {
                   <button onClick={() => handleUpgrade('credits_50')} className="btn-ghost h-16 flex-col text-xs">50 credits<span className="text-[11px] text-muted">$29</span><span className="text-[10px] font-bold text-lime">save 36%</span></button>
                   <button onClick={() => handleUpgrade('credits_100')} className="btn-ghost h-16 flex-col text-xs">100 credits<span className="text-[11px] text-muted">$49</span><span className="text-[10px] font-bold text-lime">save 46%</span></button>
                 </div>
-                <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation after your free clips. Bigger packs cost less per clip.</p>
+                <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation (1 link, up to 8 clips), used after your free ones. Bigger packs cost less per generation.</p>
               </div>
               <div className="flex items-center justify-between text-xs text-muted">
                 <span>Secure checkout via Stripe · cancel anytime</span>
@@ -944,7 +944,7 @@ function HomeInner({ studio = false }) {
               <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[60px] w-full justify-center px-6 text-[18px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
                 {isProcessing && lastWasExample ? 'Making example clips…' : '▶ See it work — free, 1 tap'}
               </button>
-              <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free clips. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
+              <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
             </div>
             <p className="hidden max-w-[520px] text-lg leading-relaxed text-soft sm:block">
               Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
@@ -1085,8 +1085,8 @@ function HomeInner({ studio = false }) {
             <ul className="grid gap-2 text-sm text-soft md:grid-cols-2">
               <li>• Start with 1 clip and 15 seconds if you want the fastest result.</li>
               <li>• Longer videos give the AI more moments to choose from.</li>
-              <li>• You get {FREE_DAILY_LIMIT} free clips a day. Credits never expire.</li>
-              <li>• Pro removes the daily cap and the watermark.</li>
+              <li>• You get {FREE_DAILY_LIMIT} free generations a day. 1 generation = 1 link, up to 8 clips. Credits never expire.</li>
+              <li>• Pro gives 200 generations a day and removes the watermark.</li>
               <li>• Your clips also show up on the Assets page.</li>
               <li>• The publish buttons open the app with your caption already copied.</li>
             </ul>
@@ -1097,7 +1097,8 @@ function HomeInner({ studio = false }) {
         <section id="pricing" className="flex flex-col items-center gap-9 pb-28">
           <div className="flex max-w-[640px] flex-col items-center gap-3 text-center">
             <span className="eyebrow">Pricing</span>
-            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} clips a day free. 200 a day on Pro. No per-minute credits.</h2>
+            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} free generations a day. 200 a day on Pro. No per-minute charges.</h2>
+            <p className="text-sm text-soft">1 generation = 1 video link, making up to 8 clips. A batch of 3 links uses 3 generations. Failed runs are not counted.</p>
             <div className="mt-2 inline-flex rounded-full border border-line2 bg-surface p-1">
               <button type="button" onClick={() => setBilling('monthly')} className={`chip h-[34px] border-0 ${billing === 'monthly' ? 'chip-on' : ''}`}>Monthly</button>
               <button type="button" onClick={() => setBilling('yearly')} className={`chip h-[34px] border-0 ${billing === 'yearly' ? 'chip-on' : ''}`}>

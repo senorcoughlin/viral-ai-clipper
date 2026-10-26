@@ -37,10 +37,10 @@ export default function Tutorial() {
         <ul className="grid gap-2 text-sm text-soft">
           <li>• Start with 1 clip and 15 seconds if you want the fastest result.</li>
           <li>• Longer videos give the AI more moments to choose from.</li>
-          <li>• You get a few free clips a day. Credits never expire.</li>
-          <li>• Pro removes the daily cap and the watermark.</li>
+          <li>• You get 3 free generations a day. 1 generation = 1 video link, up to 8 clips. A batch of 3 links uses 3. Failed runs are not counted.</li>
+          <li>• Credits: 1 credit = 1 extra generation, and they never expire. Pro gives 200 generations a day with no watermark.</li>
           <li>• Your clips also show up on the Assets page.</li>
-          <li>• The publish buttons open the app with your caption already copied.</li>
+          <li>• Publishing: YouTube Shorts uploads directly once you connect your channel. TikTok, Reels and X open the app with your caption copied, so you attach the downloaded clip there.</li>
         </ul>
       </div>
       <Link href="/" className="btn-lime h-12 no-underline">Start clipping</Link>

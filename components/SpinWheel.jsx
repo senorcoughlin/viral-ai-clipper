@@ -132,7 +132,7 @@ export default function SpinWheel({ onWon, onUpgrade }) {
             {result ? (
               <div className="animate-fadeup">
                 <p className="font-display text-2xl font-extrabold text-lime">+{result.prize} bonus clips!</p>
-                <p className="mb-3 text-xs text-soft">Added to your credits. They're used after your 3 free clips each day.</p>
+                <p className="mb-3 text-xs text-soft">Added to your credits. They're used after your 3 free generations each day.</p>
               </div>
             ) : st && st.verified && !st.available ? (
               <p className="mb-3 text-sm text-soft">{st.todayPrize ? <>You won <b className="text-lime">+{st.todayPrize}</b> today. </> : null}Come back tomorrow!</p>
@@ -151,7 +151,7 @@ export default function SpinWheel({ onWon, onUpgrade }) {
             {(result || (st?.verified && !st.available)) && (
               <>
                 <p className="mb-3 text-xs text-muted">Next spin in <b className="text-white">{left}</b></p>
-                {!st?.pro && <button type="button" onClick={() => { setOpen(false); onUpgrade?.(); }} className="btn-ghost mb-2 h-10 w-full text-sm">Go Pro for 200 clips/day · 50% off with LAUNCH50</button>}
+                {!st?.pro && <button type="button" onClick={() => { setOpen(false); onUpgrade?.(); }} className="btn-ghost mb-2 h-10 w-full text-sm">Go Pro for 200 generations/day · 50% off with LAUNCH50</button>}
                 {st?.pro && <p className="mb-2 text-xs text-soft">You're Pro, so bonus clips are banked as credits for later.</p>}
               </>
             )}
