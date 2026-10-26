@@ -779,7 +779,7 @@ export async function POST(request) {
       score: c.scored === false ? 0 : (c.score || 70),
       viralScore: c.scored === false ? 0 : (c.score || 70),
       scored: c.scored !== false,
-      duration: `${len}s`,
+      duration: `${ctx.sourceSec && ctx.sourceSec < len ? Math.max(1, Math.floor(ctx.sourceSec)) : len}s`,
       format: clipFormat,
       style: pack || aiStyle,
       caption: autoSubtitles ? (c.caption || '') : '',

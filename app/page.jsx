@@ -118,6 +118,7 @@ function HomeInner({ studio = false }) {
   const [expected, setExpected] = useState(0);
   const [billingEmail, setBillingEmail] = useState('');
   const [uploading, setUploading] = useState(0);
+  const [srcSecs, setSrcSecs] = useState({ url: "", secs: 0 }); // length of an uploaded file, for the short-source warning
 
   // Upload straight from the browser to Vercel Blob, then use the blob URL as the source.
   const handleUploadFile = async (file) => {
@@ -140,6 +141,7 @@ function HomeInner({ studio = false }) {
         onUploadProgress: (p) => setUploading(Math.max(1, Math.round(p.percentage))),
       });
       setVideoUrl(blob.url);
+      setSrcSecs({ url: blob.url, secs: secs > 0 ? secs : 0 });
     } catch (e) {
       setError({ message: e?.message || 'Upload failed. Try again.' });
     } finally {
@@ -610,6 +612,9 @@ function HomeInner({ studio = false }) {
                   </div>
                 ))}
               </div>
+              {srcSecs.secs > 0 && srcSecs.url === videoUrl.trim() && srcSecs.secs < clipLength + 1 && (
+                <p role="note" className="rounded-input border border-[#FFB64D]/50 px-3 py-2 text-xs text-[#FFB64D]">Your video is only {Math.round(srcSecs.secs)}s long, so clips will be about {Math.max(1, Math.floor(srcSecs.secs))}s, not {clipLength}s, and you&apos;ll get 1 clip.</p>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
                 <div className="flex gap-4">
                   <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} /> Captions</label>
@@ -940,7 +945,7 @@ function HomeInner({ studio = false }) {
               <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[52px] w-full justify-center px-6 text-[17px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
                 {isProcessing && lastWasExample ? 'Making example clips…' : '▶ See it work — free, 1 tap'}
               </button>
-              <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
+              <p className="px-1 text-[13px] text-muted">Watch the AI clip a short 19-second sample, so you get one ~18s clip. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
             </div>
             <p className="hidden max-w-[520px] text-base leading-relaxed text-soft sm:block">
               Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.

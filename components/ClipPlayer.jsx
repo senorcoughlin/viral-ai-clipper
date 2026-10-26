@@ -173,6 +173,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
           preload="metadata"
           muted
           onLoadedData={capturePoster}
+          onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0) setTimestamp(t => (t === (clip.timestamp || clip.duration || '0:00') ? `${Math.round(d)}s` : t)); }}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
