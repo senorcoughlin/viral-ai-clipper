@@ -1,4 +1,4 @@
-export const maxDuration = 120;
+export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { renderioCut, sanitizeBrand } from '../../../lib/render';
@@ -21,7 +21,7 @@ export async function POST(request) {
   if (!rio) return NextResponse.json({ success: false, message: 'Rendering is not configured' }, { status: 500 });
   const source = validateVideoUrl(body.source);
   const start = Math.max(0, Number(body.startSec) || 0);
-  const len = Math.min(90, Math.max(3, (Number(body.endSec) || start + 30) - start));
+  const len = Math.min(900, Math.max(3, (Number(body.endSec) || start + 30) - start));
   if (!source) return NextResponse.json({ success: false, message: 'Missing source video' }, { status: 400 });
   if (!(await allowAttempt(`rerender:${clientIp(request)}`, 30, 24 * 3600))) {
     return NextResponse.json({ success: false, message: 'Re-render limit reached for today.' }, { status: 429 });
@@ -46,7 +46,7 @@ export async function POST(request) {
   const ent = email ? await getEntitlement(email).catch(() => null) : null;
   const watermark = !(ent?.pro || ent?.credits > 0);
   try {
-    const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, {
+    const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
       wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand: sanitizeBrand(body.brand), hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000, watermark,
     });
     return NextResponse.json({ success: true, videoUrl: url });

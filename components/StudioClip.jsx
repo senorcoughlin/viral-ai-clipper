@@ -23,8 +23,10 @@ export function monetizationChecks(clip, ed, dur) {
   const len = clipLength(ed, dur);
   const vertical = (clip.format || 'shorts_9_16') === 'shorts_9_16';
   return [
-    { k: 'vertical', ok: vertical, label: 'Vertical 9:16', tip: 'Re-generate with the 9:16 format for Shorts, TikTok and Reels.' },
-    { k: 'length', ok: len >= 15 && len <= 60, label: `Length 15–60s (now ${Math.round(len)}s)`, tip: 'Trim to 15–60 seconds for Shorts/TikTok.' },
+    len > 180
+      ? { k: 'vertical', ok: true, label: 'Long-form: post as a regular YouTube video (16:9 works best)', tip: '' }
+      : { k: 'vertical', ok: vertical, label: 'Vertical 9:16', tip: 'Re-generate with the 9:16 format for Shorts, TikTok and Reels.' },
+    { k: 'length', ok: len >= 15, label: len > 180 ? `Long-form ${Math.round(len / 60)} min · regular YouTube upload (Shorts max is 3 min)` : `Length 15s–3m (now ${Math.round(len)}s) · Shorts-ready`, tip: 'Extend to at least 15 seconds.' },
     { k: 'captions', ok: !!ed.captions && (Array.isArray(clip.words) ? clip.words.length > 0 : !!clip.subtitlesEnabled), label: 'Captions burned in', tip: 'Turn captions on and re-render.' },
     { k: 'transform', ok: !!(ed.rendered && (ed.hook.trim() || ed.progress || ed.zoom || ed.bg || ed.cam)), label: 'Transformation added', tip: 'Add hook text, zoom, a background, a progress bar or a facecam, then re-render.' },
     { k: 'credit', ok: !!(ed.rendered && ed.creditOn && ed.credit.trim()), label: 'Source credit on the video', tip: 'Turn on "Clip from @streamer" and re-render.' },
@@ -156,8 +158,9 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       : { k: 'tags', label: 'Hashtags', text: `Add ${want.join(' ')} (3–5 tags total works best).`, apply: () => ({ hashtags: `${ed.hashtags.trim()} ${want.join(' ')}`.trim() }) });
     out.push(ed.captions && ed.size !== 's' ? { k: 'style', label: 'Caption style', text: 'Captions on and readable.', done: true }
       : { k: 'style', label: 'Caption style', text: 'Turn captions on, size L, bottom — most viewers watch muted.', apply: () => ({ captions: true, size: 'l', position: 'bottom' }) });
-    out.push(len >= 15 && len <= 60 ? { k: 'len', label: 'Length', text: `${Math.round(len)}s fits Shorts/TikTok/Reels.`, done: true }
-      : len > 60 ? { k: 'len', label: 'Length', text: `Trim to under 60s (now ${Math.round(len)}s).`, apply: () => ({ end: ed.start + 58, trimmed: true }) }
+    out.push(len >= 15 && len <= 60 ? { k: 'len', label: 'Length', text: `${Math.round(len)}s fits Shorts, TikTok and Reels.`, done: true }
+      : len > 60 && len <= 180 ? { k: 'len', label: 'Length', text: `${Math.round(len)}s works as a YouTube Short (up to 3 min) and on TikTok. Reels does best under 90s.`, done: true }
+      : len > 180 ? { k: 'len', label: 'Length', text: `${Math.round(len / 60)} min is long-form: post it as a regular YouTube video (not a Short). Want a Short too? Trim to under 3 min.`, done: true }
       : { k: 'len', label: 'Length', text: `Under 15s may get less reach (now ${Math.round(len)}s). Extend the end if the moment allows.`, apply: () => ({ end: ed.start + 15, trimmed: true }) });
     out.push(ed.zoom || ed.bg || ed.progress ? { k: 'tf', label: 'Transformation', text: 'Edit elements added.', done: true }
       : { k: 'tf', label: 'Transformation', text: 'Add zoom 15%, a blurred background and a progress bar so it isn\'t a plain re-upload.', apply: () => ({ zoom: 'punch', bg: (clip.format || 'shorts_9_16') === 'shorts_9_16' ? 'blur' : '', progress: true }) });
@@ -235,7 +238,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
                   <button type="button" onClick={() => set({ [k]: ed[k] + 1, trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} later`}>+1s</button>
                 </div>
               ))}
-              <span className="text-[11px] text-muted">Length {Math.round(clipLength(ed, dur))}s · aim for 15–60s</span>
+              <span className="text-[11px] text-muted">Length {Math.round(clipLength(ed, dur))}s · Shorts up to 3 min, longer = regular YouTube video</span>
             </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold text-muted">Captions</span>

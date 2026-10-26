@@ -39,7 +39,11 @@ const LENGTHS = [
   { value: 15, label: '15s' },
   { value: 30, label: '30s' },
   { value: 45, label: '45s' },
-  { value: 60, label: '60s' },
+  { value: 60, label: '1m' },
+  { value: 180, label: '3m' },
+  { value: 300, label: '5m' },
+  { value: 600, label: '10m' },
+  { value: 900, label: '15m' },
 ];
 const CLIP_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }));
 const STREAM_STEPS = [

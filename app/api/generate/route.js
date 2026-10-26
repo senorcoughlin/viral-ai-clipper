@@ -528,7 +528,7 @@ export async function POST(request) {
   // The browser may suggest a crop filter; only accept the exact shape cropFromFace() builds.
   const brand = sanitizeBrand(body.brand);
   const safeClientCrop = typeof faceCrop === 'string' && /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)\*[01]\.\d{3}$/.test(faceCrop) ? faceCrop : null;
-  const clipLength = Math.min(90, Math.max(5, Math.round(Number(body.clipLength)) || 30));
+  const clipLength = Math.min(900, Math.max(5, Math.round(Number(body.clipLength)) || 30));
   const aiStyle = ['clean_viral','character_swap','anime_action','kids_3d'].includes(rawStyle) ? rawStyle : 'clean_viral';
   const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
@@ -737,8 +737,9 @@ export async function POST(request) {
         } else {
           win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
         }
-        if (vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
-        playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls });
+        const long = len > 90;
+        if (!long && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
+        playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls, long, ...(long ? { timeoutMs: Math.max(60000, 262000 - (Date.now() - (ctx.startedAt || Date.now()))) } : {}) });
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
