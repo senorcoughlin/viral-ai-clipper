@@ -23,7 +23,7 @@ function retime(original, text) {
 }
 
 export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onTransform, onRendered, onClose }) {
-  const [hook, setHook] = useState(transform.hook || '');
+  const [hook, setHook] = useState(transform.hook || clip.hook || '');
   const [overlayUrl, setOverlayUrl] = useState('');
   const [script, setScript] = useState('');
   const [commentary, setCommentary] = useState(!!transform.commentary);
@@ -80,22 +80,33 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
   const saveBrand = async () => {
     localStorage.setItem('viral_brand', JSON.stringify(brand));
     const r = await fetch('/api/brand', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brand }) }).catch(() => null);
-    setMsg(r?.ok ? 'Brand kit saved to your account.' : 'Brand kit saved on this device.');
+    setMsgKind('ok'); setMsg(r?.ok ? 'Brand kit saved to your account.' : 'Brand kit saved on this device.');
   };
 
+  const [elapsed, setElapsed] = useState(0);
+  const [msgKind, setMsgKind] = useState('info');
+  useEffect(() => {
+    if (busy !== 'render') return;
+    const t0 = Date.now(); setElapsed(0);
+    const t = setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
   const rerender = async () => {
-    setBusy('render'); setMsg('Re-rendering… this takes about a minute.');
+    if (!clip.source) { setMsgKind('error'); setMsg('This clip has no source video saved, so it can\'t be re-rendered. Generate it again from the original link.'); return; }
+    setBusy('render'); setMsgKind('info'); setMsg('Rendering your edits… usually 30–90 seconds. Keep this screen open.');
     try {
       const res = await fetch('/api/rerender', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: clip.source, startSec: clip.startSec, endSec: clip.endSec, format: clip.format, style: clip.style, crop: clip.crop, caption: words.length ? '' : text, words: retime(words, text), brand, hook: hook.trim(), overlayUrl: overlayUrl.trim() || undefined }),
       });
-      const d = await res.json();
-      if (!d.success) throw new Error(d.message || 'Re-render failed');
-      onRendered?.(d.videoUrl);
+      const d = await res.json().catch(() => ({ success: false, message: `Server error (${res.status}). Try again.` }));
+      if (!d.success || !d.videoUrl) throw new Error(d.message || `Re-render failed (${res.status}). Try again.`);
+      const newWords = retime(words, text);
+      const saved = await onRendered?.(d.videoUrl, { videoUrl: d.videoUrl, words: newWords.length ? newWords : clip.words, caption: words.length ? clip.caption : text, hook: hook.trim(), brand, editedAt: Date.now() });
       setT({ hook: hook.trim(), overlay: !!overlayUrl.trim() || transform.overlay });
-      setMsg('Done — the clip now uses your edited captions.');
-    } catch (e) { setMsg(e.message); } finally { setBusy(''); }
+      setMsgKind('ok');
+      setMsg(saved === false ? 'Done. The clip now uses your edits (couldn\'t save them to your library, so download it now).' : 'Done. Your edited clip is saved. Tap Close to see it, or Download from the card.');
+    } catch (e) { setMsgKind('error'); setMsg(e?.message === 'Failed to fetch' ? 'Lost connection while rendering. Check your signal and try again.' : (e.message || 'Re-render failed. Try again.')); } finally { setBusy(''); }
   };
 
   const schedule = async (checked = false) => {
@@ -209,10 +220,10 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
               {script && <p className="text-sm text-muted">Record this in your own voice (or rewrite it) and add it as a voiceover in your editor before posting.</p>}
               <label className="flex min-h-[44px] items-center gap-3 text-[15px] text-fg"><input type="checkbox" className="h-5 w-5" checked={commentary} onChange={e => { setCommentary(e.target.checked); setT({ commentary: e.target.checked }); }} /> I added my own commentary to this clip</label>
             </section>
-            {msg && <p role="status" className="text-[15px] text-soft">{msg}</p>}
             {warn && <PreUploadWarning risks={warn} onCancel={() => setWarn(null)} onProceed={() => schedule(true)} />}
           </div>
         </div>
+        {(msg || busy === 'render') && <p role={msgKind === 'error' ? 'alert' : 'status'} data-testid="editor-status" className={`border-t border-line2 px-4 py-2 text-[15px] ${msgKind === 'error' ? 'bg-red-500/10 text-red-300' : msgKind === 'ok' ? 'text-lime' : 'text-soft'}`}>{msg}{busy === 'render' ? ` (${elapsed}s)` : ''}</p>}
         <div className="sticky bottom-0 z-10 flex flex-wrap gap-2 border-t border-line2 bg-[#0b0b0b] px-4 py-3" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
           <button type="button" disabled={!!busy} onClick={rerender} className="btn-lime h-12 flex-1 whitespace-nowrap text-base">{busy === 'render' ? 'Rendering…' : 'Save & render'}</button>
           {clip.bestTime && <button type="button" disabled={!!busy} onClick={() => schedule()} className="btn-ghost h-12 flex-1 text-base">{busy === 'schedule' ? 'Scheduling…' : `Post at ${clip.bestTime}`}</button>}

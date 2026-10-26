@@ -1,6 +1,7 @@
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
+import { head, put } from '@vercel/blob';
 import { renderioCut, sanitizeBrand } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
@@ -46,14 +47,32 @@ export async function POST(request) {
   const ent = email ? await getEntitlement(email).catch(() => null) : null;
   const watermark = !(ent?.pro || ent?.credits > 0);
   const brand = sanitizeBrand(body.brand);
+  // Library clips keep pointing at their source. Fail clearly if it's gone.
+  if (isBlobUrl(source)) {
+    const ok = await head(source).then(() => true).catch(() => false);
+    if (!ok) return NextResponse.json({ success: false, code: 'source_gone', message: 'The original video for this clip is no longer stored, so it can\'t be re-rendered. Upload or paste the video again to make a new clip.' }, { status: 410 });
+  }
   try {
     const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
       wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000, watermark,
     });
-    return NextResponse.json({ success: true, videoUrl: url });
+    // RenderIO output links are temporary: keep a permanent copy for the library and Download.
+    let videoUrl = url;
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      try {
+        const r = await fetch(url);
+        if (r.ok) videoUrl = (await put(`clips/edit_${Date.now()}.mp4`, Buffer.from(await r.arrayBuffer()), { access: 'public', contentType: 'video/mp4', addRandomSuffix: true })).url;
+      } catch (e) { console.warn('rerender blob copy failed', e?.message); }
+    }
+    return NextResponse.json({ success: true, videoUrl });
   } catch (e) {
     console.warn('rerender failed', e?.message);
     if (e?.capacity) return NextResponse.json({ success: false, message: e.message }, { status: 503 });
-    return NextResponse.json({ success: false, message: 'Re-render failed. Try again.' }, { status: 502 });
+    const m = String(e?.message || '');
+    if (/404|403|410|not found|unable to (open|download)|no such file|HTTP error|Unsupported URL|Video unavailable|Private video/i.test(m)) {
+      return NextResponse.json({ success: false, code: 'source_gone', message: 'The original video couldn\'t be downloaded (it may have been removed or made private). Paste or upload it again to make a new clip.' }, { status: 410 });
+    }
+    if (/timeout/i.test(m)) return NextResponse.json({ success: false, code: 'timeout', message: 'Rendering took too long. Try a shorter clip or try again in a minute.' }, { status: 504 });
+    return NextResponse.json({ success: false, code: 'render_failed', message: `Re-render failed (${m.slice(0, 80) || 'unknown error'}). Try again.` }, { status: 502 });
   }
 }

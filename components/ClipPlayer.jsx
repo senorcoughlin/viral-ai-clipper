@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ViralScoreMeter, { scoreTier } from './ViralScoreMeter';
 import ClipEditor from './ClipEditor';
+import { persistClipEdit } from './clipStore';
 import { useCredit, withCredit, autoCreditOn, setAutoCredit, creditLine, reuseRisks, PreUploadWarning } from './PostCheck';
 
 const FORMAT_LABEL = { shorts_9_16: '9:16', landscape_16_9: '16:9', square_1_1: '1:1' };
@@ -72,7 +73,8 @@ export default function ClipPlayer({ clip, compact = false, index }) {
   const videoSrc = renderedUrl || (srcIndex === 0 && clip.videoUrl ? clip.videoUrl : null) || SAMPLE_VIDEOS[srcIndex % SAMPLE_VIDEOS.length];
 
   const onDownload = (e) => {
-    const name = clipFileName(clip.title || title, (index ?? 0) + 1);
+    const base = clipFileName(clip.title || title, (index ?? 0) + 1);
+    const name = (renderedUrl || clip.editedAt) ? base.replace(/\.mp4$/i, '') + `-edited-${new Date(clip.editedAt || Date.now()).toISOString().slice(0, 19).replace(/[-:T]/g, '')}.mp4` : base;
     e.currentTarget.href = downloadHref(videoSrc, name);
     e.currentTarget.download = name;
   };
@@ -315,7 +317,7 @@ export default function ClipPlayer({ clip, compact = false, index }) {
         </label>
       )}
       {pendingPost && <PreUploadWarning risks={pendingPost.risks} onCancel={() => setPendingPost(null)} onProceed={() => postClip(pendingPost.platform, true)} />}
-      {editorOpen && <ClipEditor clip={clip} videoUrl={videoSrc} credit={creditOn ? credit : null} transform={transform} onTransform={setTransform} onRendered={(u) => { setRenderedUrl(u); setSrcIndex(0); videoRef.current?.load?.(); }} onClose={() => setEditorOpen(false)} />}
+      {editorOpen && <ClipEditor clip={clip} videoUrl={videoSrc} credit={creditOn ? credit : null} transform={transform} onTransform={setTransform} onRendered={async (u, patch) => { setRenderedUrl(u); setSrcIndex(0); setTimeout(() => videoRef.current?.load?.(), 0); return persistClipEdit(clip, patch || { videoUrl: u }); }} onClose={() => setEditorOpen(false)} />}
     </article>
   );
 }
