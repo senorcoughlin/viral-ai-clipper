@@ -9,6 +9,8 @@ import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 import { routeGuard } from '../../../lib/ratelimit';
 import { paidEmail } from '../../../lib/session';
 import { getEntitlement } from '../../../lib/billing';
+import { kvGetJson } from '../../../lib/kv';
+import { youtubeIdOf } from '../../../lib/links';
 
 const SAFE_CROP = /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)(\/5|\*[01]\.\d{3})$/;
 
@@ -52,9 +54,21 @@ export async function POST(request) {
     const ok = await head(source).then(() => true).catch(() => false);
     if (!ok) return NextResponse.json({ success: false, code: 'source_gone', message: 'The original video for this clip is no longer stored, so it can\'t be re-rendered. Upload or paste the video again to make a new clip.' }, { status: 410 });
   }
+  // YouTube clips: re-render from the copy of the source the generate run already stored in
+  // Blob (a direct file, fast frame-accurate seek, same resolution as the original clip)
+  // instead of making RenderIO re-download from YouTube, which often stalls past the limit.
+  let renderSrc = source;
+  let stored = false;
+  const yid = !isBlobUrl(source) ? youtubeIdOf(source) : null;
+  if (yid) {
+    for (const k of [`ysrc2:${yid}`, `ysrc:${yid}`]) {
+      const c = await kvGetJson(k).catch(() => null);
+      if (c?.blob && await head(c.blob).then(() => true).catch(() => false)) { renderSrc = c.blob; stored = true; break; }
+    }
+  }
   try {
-    const url = await renderioCut(toFetchable(source), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
-      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: isBlobUrl(source) && !overlayUrl, timeoutMs: 105000, watermark,
+    const url = await renderioCut(toFetchable(renderSrc), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
+      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark,
     });
     // RenderIO output links are temporary: keep a permanent copy for the library and Download.
     let videoUrl = url;

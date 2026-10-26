@@ -983,7 +983,7 @@ export async function POST(request) {
               const res = src.blob
                 ? await downloadToFile(src.url, file, left, { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` })
                 : await downloadToFile(src.url, file, left, {}, cont ? null : `sources/${ytId}.mp4`);
-              if (res.blobUrl) kvSetJson(SRC_KEY(ytId), { blob: res.blobUrl }, 6 * 3600).catch(() => {});
+              if (res.blobUrl) kvSetJson(SRC_KEY(ytId), { blob: res.blobUrl }, 30 * 24 * 3600).catch(() => {});
               ctx.sourceSec = await probeDuration(file);
               console.log('local source', { ms: Date.now() - t0, bytes: res.size, sec: ctx.sourceSec, fromBlob: !!src.blob });
               ctx.local = file;
