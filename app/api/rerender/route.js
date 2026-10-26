@@ -61,7 +61,7 @@ export async function POST(request) {
     if (process.env.BLOB_READ_WRITE_TOKEN) {
       try {
         const r = await fetch(url);
-        if (r.ok) videoUrl = (await put(`clips/edit_${Date.now()}.mp4`, Buffer.from(await r.arrayBuffer()), { access: 'public', contentType: 'video/mp4', addRandomSuffix: true })).url;
+        if (r.ok) videoUrl = toFetchable((await put(`clips/edit_${Date.now()}.mp4`, Buffer.from(await r.arrayBuffer()), { access: 'private', contentType: 'video/mp4', addRandomSuffix: true })).url, 365 * 24 * 3600);
       } catch (e) { console.warn('rerender blob copy failed', e?.message); }
     }
     return NextResponse.json({ success: true, videoUrl });
