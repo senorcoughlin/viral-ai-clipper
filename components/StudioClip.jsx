@@ -50,6 +50,17 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   }));
   const [ideas, setIdeas] = useState(null);
   const set = (p) => setEd(e => ({ ...e, ...p }));
+  const rootRef = useRef(null);
+  const report = (x) => { try { window.dispatchEvent(new CustomEvent('vac:clip-state', { detail: { id: clip.id, ...x } })); } catch {} };
+  // Monetization panel hooks: apply a suggested fix, or open this clip's editor/publish panel.
+  useEffect(() => {
+    const onApply = (e) => { if (e.detail?.id === clip.id && e.detail.patch) set(e.detail.patch); };
+    const onOpen = (e) => { if (e.detail?.id !== clip.id) return; setOpen(e.detail.panel || 'edit'); if (e.detail.panel !== 'publish') report({ reviewed: true }); setTimeout(() => rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
+    window.addEventListener('vac:clip-apply', onApply); window.addEventListener('vac:clip-open', onOpen);
+    return () => { window.removeEventListener('vac:clip-apply', onApply); window.removeEventListener('vac:clip-open', onOpen); };
+  }, [clip.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(() => report({ hashtags: ed.hashtags, description: ed.description, credit: ed.creditOn ? ed.credit : '' }), 600); return () => clearTimeout(t); }, [ed.hashtags, ed.description, ed.credit, ed.creditOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open === 'edit') report({ reviewed: true }); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [dur, setDur] = useState(0);
   useEffect(() => { const b = loadBrand(); if (b) set({ color: b.color || 'white', size: b.size || 'm', position: b.position || 'bottom' }); }, []);
   useEffect(() => { if (!ed.credit) { const h = handleOf(clip.source, credit?.author); if (h) set({ credit: `Clip from ${h}` }); } }, [credit, clip.source]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,12 +88,12 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       else { download(); setMsg({ ok: true, text: 'Saved the video. Caption copied — paste it in the app.' }); }
     } catch (e) { if (e?.name !== 'AbortError') setMsg({ ok: false, text: 'Sharing failed. Use Download instead.' }); } finally { setBusy(''); }
   };
-  const forApp = (url, key) => { download(); copy(postText, key); setMsg({ ok: true, text: 'Video downloading, caption copied. Upload it in the app.' }); window.open(url, '_blank'); };
+  const forApp = (url, key) => { report({ published: key === 'tt' ? 'tiktok (opened app)' : 'instagram (opened app)' }); download(); copy(postText, key); setMsg({ ok: true, text: 'Video downloading, caption copied. Upload it in the app.' }); window.open(url, '_blank'); };
   const youtube = async () => {
     setBusy('yt'); setMsg(null); copy(postText, 'yt');
     try {
       const d = (await (await fetch('/api/post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'youtube', caption: postText, videoUrl, title: (ed.title || clip.title || '').slice(0, 100) }) })).json())?.data || {};
-      if (d.mode === 'youtube-uploaded' || d.mode === 'youtube-scheduled') setMsg({ ok: true, text: 'Uploaded to your YouTube as private. Review and publish it in YouTube Studio.', url: d.url });
+      if (d.mode === 'youtube-uploaded' || d.mode === 'youtube-scheduled') report({ published: 'youtube', postUrl: d.url || '' }), setMsg({ ok: true, text: 'Uploaded to your YouTube as private. Review and publish it in YouTube Studio.', url: d.url });
       else if (d.why === 'not_connected' || d.why === 'not_authorized') setMsg({ ok: false, text: 'Connect your YouTube channel first (Google may show an "unverified app" screen while our review is pending — tap Advanced → continue). Caption copied.', connect: true });
       else setMsg({ ok: false, text: 'Auto-upload failed. Caption copied — upload it in YouTube Studio.', url: d.url || 'https://studio.youtube.com/' });
     } catch { setMsg({ ok: false, text: 'Could not reach the uploader. Caption copied.', url: 'https://studio.youtube.com/' }); } finally { setBusy(''); }
@@ -177,7 +188,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   const field = 'w-full rounded-input border border-line2 bg-ink px-3 py-2.5 text-[15px] text-fg outline-none focus:border-lime';
 
   return (
-    <article className="card flex min-w-0 flex-col overflow-hidden animate-fadeup" data-studio-clip>
+    <article ref={rootRef} className="card flex min-w-0 flex-col overflow-hidden animate-fadeup" data-studio-clip data-clip-id={clip.id}>
       <div className="relative aspect-[9/16] max-h-[78vh] w-full bg-black">
         <video src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0 && !dur) { setDur(d); setEd(x => x.trimmed ? x : { ...x, end: x.start + d }); } }} />
         <label className="absolute left-3 top-3 z-10 flex h-9 items-center gap-2 rounded-full border border-line2 bg-ink/85 px-3 text-xs font-semibold">

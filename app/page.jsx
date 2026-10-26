@@ -14,6 +14,7 @@ import { parseLinks } from '../lib/links';
 import { trackConversion, PLAN_VALUES } from '../lib/conversions';
 import EasterEgg from '../components/EasterEgg';
 import SpinWheel from '../components/SpinWheel';
+import MonetizePanel from '../components/MonetizePanel';
 import StudioClip from '../components/StudioClip';
 import { funnel } from '../lib/funnel';
 
@@ -881,6 +882,7 @@ function HomeInner({ studio = false }) {
           {formBlock}
         </aside>
         <section id="clips" className="flex min-w-0 flex-col gap-6">
+          <MonetizePanel clips={clips} onRestoreClips={(cs) => { if (!isProcessing) setClips(cs); }} />
           {clipsBlock}
         </section>
       </main>
