@@ -1209,7 +1209,7 @@ function ProgressDock({ label, step }) {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-[11px] text-muted">Keep browsing this page. Opening another page will stop the clipping.</p>
+      <p className="mt-3 text-[11px] text-muted">You can switch apps or leave — clipping keeps running on our server for up to an hour. Come back to this page and your clips appear. Batches: keep the page open so the next link can start.</p>
     </div>
   );
 }
