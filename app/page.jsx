@@ -240,6 +240,13 @@ function HomeInner({ studio = false }) {
     el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
     setTimeout(() => el.focus({ preventScroll: true }), reduce ? 0 : 400);
   };
+  const [canPaste, setCanPaste] = useState(false);
+  useEffect(() => { try { setCanPaste(!!(navigator.clipboard && navigator.clipboard.readText) && window.matchMedia('(pointer: coarse)').matches); } catch {} }, []);
+  const pasteClip = async () => {
+    ft('paste_click');
+    try { const t = (await navigator.clipboard.readText() || '').trim(); if (t) { setVideoUrl(t); return; } } catch {}
+    document.getElementById('urls')?.focus();
+  };
   const runExample = () => {
     if (isProcessing) return;
     handleClipping(null, { videoUrl: SAMPLE_URL, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack, source: 'example' });
@@ -544,11 +551,11 @@ function HomeInner({ studio = false }) {
     )}
             {/* FORM */}
             <form id="clip-form" ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
-              <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>Or paste your own link</label>
+              <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${studio && genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>{studio ? 'Or paste your own link' : 'Paste your video link'}</label>
               <span id="urls-hint" className="sr-only">Paste one public video link per line, up to 10 for batch mode.</span>
               <div className={studio ? 'flex flex-col gap-2.5' : 'flex flex-col gap-2.5 sm:flex-row sm:items-stretch'}>
                 <div className="relative flex flex-1 items-start gap-2.5 rounded-input border border-line2 bg-ink px-3.5 py-3 focus-within:border-lime">
-                  {genCount < 3 && !isProcessing && !videoUrl && (
+                  {studio && genCount < 3 && !isProcessing && !videoUrl && (
                     <div id="url-guide" aria-hidden className="pointer-events-none absolute bottom-full right-3 z-10 mb-1.5 flex items-end gap-1.5">
                       <span className="rounded-full bg-lime px-2.5 py-1 text-[12px] font-bold text-ink shadow-card">Or paste your own link here</span>
                       <svg className="guide-bounce h-7 w-7 text-lime" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4c6 0 9 4 9 12" /><path d="M10.5 13l4.5 4.5 4.5-4.5" /></svg>
@@ -567,6 +574,9 @@ function HomeInner({ studio = false }) {
                     aria-describedby="urls-hint"
                     className="min-w-0 flex-1 resize-none bg-transparent text-[15px] text-fg outline-none placeholder:text-muted"
                   />
+                  {canPaste && !videoUrl && (
+                    <button type="button" id="paste-btn" onClick={pasteClip} className="shrink-0 self-center rounded-full border border-lime px-2.5 py-1 text-xs font-semibold text-lime">Paste</button>
+                  )}
                   <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title="Upload an MP4 (up to 500 MB, 2 hours)">
                     {uploading ? `Uploading ${uploading}%` : 'Upload MP4'}
                     <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
@@ -946,20 +956,21 @@ function HomeInner({ studio = false }) {
               <span className="inline-flex h-[22px] items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">NEW</span>
               Batch mode · paste up to 10 links at once
             </div>
-            <h1 className="font-display text-[28px] font-extrabold leading-[1.05] tracking-tight text-white sm:text-[40px] md:text-[52px]">
-              Turn one video into <span className="text-lime">up to 8 clips</span> that are built to go viral.
+            <h1 className="font-display text-[26px] font-extrabold leading-[1.08] tracking-tight text-white sm:text-[40px] md:text-[52px]">
+              Paste a video link. Get <span className="text-lime">up to 8 viral clips</span>.
             </h1>
-            <div className="flex flex-col gap-2">
-              <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[52px] w-full justify-center px-6 text-[17px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
-                {isProcessing && lastWasExample ? 'Making example clips…' : '▶ See it work — free, 1 tap'}
-              </button>
-              <p className="px-1 text-[13px] text-muted">Watch the AI clip a short 19-second sample, so you get one ~18s clip. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
-            </div>
             <p className="hidden max-w-[520px] text-base leading-relaxed text-soft sm:block">
-              Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
+              YouTube, podcast or stream links, or up to 10 at once. The AI finds the hooks, burns in captions and scores every clip for TikTok, Reels and Shorts.
             </p>
 
             {formBlock}
+            <p id="trust-line" className="-mt-1 px-1 text-[13px] text-soft">{FREE_DAILY_LIMIT} free generations a day · No signup needed · No card</p>
+            <div className="flex flex-col gap-1.5">
+              <button id="try-example" type="button" onClick={() => { ft('sample_click'); runExample(); }} disabled={isProcessing} className="btn-ghost h-12 w-full justify-center px-5 text-[15px] font-bold sm:w-auto sm:self-start disabled:opacity-60">
+                {isProcessing && lastWasExample ? 'Making sample clip…' : '▶ Try a sample video'}
+              </button>
+              <p className="px-1 text-[12px] text-muted">Clips a 19-second sample. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
+            </div>
             <div className="flex flex-wrap gap-5 text-[13px] text-muted">
               <span className="flex items-center gap-1.5"><Check />No watermark on Pro</span>
               <span className="flex items-center gap-1.5"><Check />Captions burned in</span>
