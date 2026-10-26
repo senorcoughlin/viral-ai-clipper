@@ -56,7 +56,7 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { youtubeDownloader, youtubeInfoDuration } from '../../../lib/downloader';
+import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown } from '../../../lib/downloader';
 import { downloadToFile, probeDuration, localTranscript, segmentToBlob, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
@@ -510,7 +510,7 @@ export async function GET(request) {
     && request.headers.get('x-test-bypass') === process.env.TEST_BYPASS_SECRET) {
     const bin = ffmpegPath();
     const v = bin ? await exec(bin, ['-version']).then(r => r.stdout.split('\n')[0]).catch(e => 'ERR ' + e.message) : null;
-    return NextResponse.json({ bin, version: v, downloader: !!youtubeDownloader() });
+    return NextResponse.json({ bin, version: v, downloader: !!youtubeDownloader(), via: youtubeDownloader()?.name || null, rapid: rapidEnabled, api: downloadApiEnabled, rapidDown: rapidEnabled ? await rapidDown() : null });
   }
   const id = u.searchParams.get('job');
   const from = Math.max(0, parseInt(u.searchParams.get('from') || '0', 10) || 0);
