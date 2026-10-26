@@ -69,7 +69,7 @@ export default function AssetsPage() {
             <a href="/" className="btn-lime h-10 px-5 text-sm">Generate clips</a>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 min-[600px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {assets.map((c, i) => (
               <ClipPlayer key={`asset-${c.id || i}-${c.createdAt || i}`} clip={c} index={i} compact />
             ))}

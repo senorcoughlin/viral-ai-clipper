@@ -48,15 +48,32 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
       setOverlayUrl(blob.url); setMsg('Facecam ready. Re-render to add it.');
     } catch (e) { setMsg(e.message || 'Upload failed'); } finally { setBusy(''); }
   };
+  const uploadLogo = async (file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setMsg('Logo must be under 5 MB.'); return; }
+    setBusy('logo'); setMsg('Uploading your logo…');
+    try {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      const { upload } = await import('@vercel/blob/client');
+      const ext = (file.name.match(/\.(png|jpe?g|webp)$/i) || ['.png'])[0].toLowerCase();
+      const blob = await upload(`logos/logo${ext}`, file, { access: 'private', handleUploadUrl: '/api/upload' });
+      setLogoPreview(dataUrl);
+      try { localStorage.setItem('viral_logo_preview', dataUrl.length < 1500000 ? dataUrl : ''); } catch {}
+      setBrand(b => ({ ...b, logoUrl: blob.url, customLogo: true, logo: { ...(b.logo || {}), on: true } }));
+      setMsg('Logo ready. Save as brand kit to reuse it.');
+    } catch (e) { setMsg(e.message || 'Logo upload failed'); } finally { setBusy(''); }
+  };
   const words = Array.isArray(clip.words) ? clip.words : [];
   const [text, setText] = useState(words.map(w => w.w).join(' '));
-  const [brand, setBrand] = useState({ color: 'white', size: 'm', position: 'bottom', upper: true });
+  const [brand, setBrand] = useState({ color: 'white', size: 'm', position: 'bottom', upper: true, logo: { on: false, pos: 'tl', size: 'm', opacity: 90 }, wm: { on: true, pos: 'br', size: 's', opacity: 60 } });
+  const [logoPreview, setLogoPreview] = useState('');
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
     const local = loadBrand();
     if (local) setBrand(b => ({ ...b, ...local }));
+    try { const lp = localStorage.getItem('viral_logo_preview'); if (lp) setLogoPreview(lp); } catch {}
     fetch('/api/brand').then(r => r.json()).then(d => { if (d?.brand && Object.keys(d.brand).length) setBrand(b => ({ ...b, ...d.brand })); }).catch(() => {});
   }, []);
 
@@ -120,8 +137,8 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
   const previewText = (text.split(/\s+/).filter(Boolean).slice(0, 6).join(' ') || 'Your caption here');
 
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-labelledby="clip-editor-title" data-testid="clip-editor" className="fixed inset-0 z-[100] flex items-stretch justify-center bg-black/80 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0b0b0b] sm:card sm:h-auto sm:max-h-[90vh] sm:max-w-lg sm:rounded-2xl sm:border sm:border-line2" onClick={e => e.stopPropagation()}>
+    <div role="dialog" aria-modal="true" aria-labelledby="clip-editor-title" data-testid="clip-editor" className="fixed inset-0 z-[100] flex items-stretch justify-center bg-black/80 md:items-center md:p-4" onClick={onClose}>
+      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0b0b0b] md:card md:h-auto md:max-h-[90vh] md:max-w-lg md:rounded-2xl md:border md:border-line2" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-line2 bg-[#0b0b0b] px-4 py-3">
           <h3 id="clip-editor-title" className="font-display text-xl font-extrabold text-white">Edit clip</h3>
           <button type="button" onClick={onClose} aria-label="Close editor" className="grid h-11 w-11 place-items-center rounded-full border border-line2 text-lg text-fg">✕</button>
@@ -131,12 +148,21 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
             <div className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl bg-black" aria-label="Live preview">
               {videoUrl && <video src={videoUrl} muted playsInline loop autoPlay className="h-full w-full object-cover" />}
               {hook && <div className="absolute inset-x-2 top-2 rounded bg-black/70 px-2 py-1 text-center text-sm font-bold text-white">{hook}</div>}
+              {(() => {
+                const cls = p => `absolute ${p[0] === 't' ? 'top-2' : 'bottom-4'} ${p[1] === 'l' ? 'left-2' : 'right-2'}`;
+                const lg = brand.logo?.on ? brand.logo : null; const wm = brand.wm?.on ? brand.wm : null;
+                const lh = lg ? { s: 9, m: 13, l: 18 }[lg.size] : 0;
+                return <>
+                  {lg && <img data-testid="preview-logo" alt="Logo" src={brand.customLogo && logoPreview ? logoPreview : '/brand/logo.png'} className={cls(lg.pos)} style={{ height: lh, opacity: lg.opacity / 100 }} />}
+                  {wm && <span data-testid="preview-wm" className={cls(wm.pos)} style={{ fontSize: { s: 7, m: 9, l: 12 }[wm.size], opacity: wm.opacity / 100, color: '#fff', textShadow: '0 1px 2px #000', marginTop: lg && lg.pos === wm.pos && wm.pos[0] === 't' ? lh + 3 : 0, marginBottom: lg && lg.pos === wm.pos && wm.pos[0] === 'b' ? lh + 3 : 0 }}>viralaiclipper.com</span>}
+                </>;
+              })()}
               <div className={`absolute inset-x-2 ${previewPos} text-center font-extrabold leading-tight`} style={{ color: BRAND_COLORS[brand.color] || '#fff', fontSize: previewSize, textShadow: '0 2px 4px #000, 0 0 2px #000', textTransform: brand.upper ? 'uppercase' : 'none' }}>{previewText}</div>
             </div>
             <label className="flex flex-col gap-2">
               <Heading>Captions</Heading>
               <span className="text-sm text-muted">{words.length ? 'Add, remove or fix words freely. Timing re-spreads across the clip automatically.' : 'Caption text'}</span>
-              <textarea value={text} onChange={e => setText(e.target.value)} rows={5} className={field} />
+              <textarea value={text} onChange={e => setText(e.target.value)} rows={5} className={`${field} min-h-[120px]`} />
             </label>
             <section className="flex flex-col gap-3">
               <Heading>Caption color</Heading>
@@ -147,6 +173,30 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
               <div className="flex flex-wrap gap-2">{['top', 'middle', 'bottom'].map(k => <Chip key={k} on={brand.position === k} onClick={() => setBrand({ ...brand, position: k })}>{k}</Chip>)}
                 <Chip on={brand.upper} onClick={() => setBrand({ ...brand, upper: !brand.upper })}>All caps</Chip></div>
               <button type="button" onClick={saveBrand} className="btn-ghost min-h-[44px] self-start px-4 text-[15px]">Save as my brand kit</button>
+            </section>
+            <section className="flex flex-col gap-3" aria-label="Branding">
+              <Heading>Branding</Heading>
+              {[['logo', 'Viral AI Clipper logo'], ['wm', 'viralaiclipper.com watermark']].map(([k, label]) => {
+                const m = brand[k] || {}; const set = patch => setBrand(b => ({ ...b, [k]: { ...(b[k] || {}), ...patch } }));
+                return (
+                  <div key={k} className="flex flex-col gap-2 rounded-xl border border-line2 p-3">
+                    <label className="flex min-h-[44px] items-center justify-between gap-3 text-[15px] font-semibold text-fg">
+                      {k === 'logo' && brand.customLogo ? 'My logo' : label}
+                      <input type="checkbox" role="switch" aria-label={label} className="h-6 w-6 accent-[#C6FF3D]" checked={!!m.on} onChange={e => set({ on: e.target.checked })} />
+                    </label>
+                    {m.on && <>
+                      <div className="flex flex-wrap gap-2">{[['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']].map(([p, l]) => <Chip key={p} on={m.pos === p} onClick={() => set({ pos: p })}>{l}</Chip>)}</div>
+                      <div className="flex flex-wrap gap-2">{['s', 'm', 'l'].map(z => <Chip key={z} on={m.size === z} onClick={() => set({ size: z })}>{{ s: 'S', m: 'M', l: 'L' }[z]}</Chip>)}</div>
+                      <label className="flex items-center gap-3 text-[15px]">Opacity <input type="range" min={40} max={100} step={5} value={m.opacity || 85} onChange={e => set({ opacity: Number(e.target.value) })} className="h-8 flex-1 accent-[#C6FF3D]" /><span className="w-12 text-right text-fg">{m.opacity || 85}%</span></label>
+                    </>}
+                    {k === 'logo' && <div className="flex flex-wrap gap-2">
+                      <label className="btn-ghost min-h-[44px] cursor-pointer px-4 text-[15px] leading-[44px]">{busy === 'logo' ? 'Uploading…' : 'Use my own logo'}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => uploadLogo(e.target.files?.[0])} /></label>
+                      {brand.customLogo && <button type="button" onClick={() => setBrand(b => ({ ...b, customLogo: false }))} className="btn-ghost min-h-[44px] px-4 text-[15px]">Use Viral AI Clipper logo</button>}
+                    </div>}
+                  </div>
+                );
+              })}
+              <button type="button" onClick={saveBrand} className="btn-ghost min-h-[44px] self-start px-4 text-[15px]">Save branding to my brand kit</button>
             </section>
             <section className="flex flex-col gap-3">
               <Heading>Make it your own</Heading>

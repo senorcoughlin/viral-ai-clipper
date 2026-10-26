@@ -19,6 +19,9 @@ export async function POST(request) {
       request,
       onBeforeGenerateToken: async (pathname) => {
         if (!(await allowAttempt(`upload:${ip}`, 10, 24 * 3600))) throw new Error('Upload limit reached for today');
+        if (/^logos\/[\w.-]+\.(png|jpe?g|webp)$/i.test(pathname)) {
+          return { allowedContentTypes: ['image/png', 'image/jpeg', 'image/webp'], maximumSizeInBytes: 5 * 1024 * 1024, addRandomSuffix: true };
+        }
         if (!/\.(mp4|mov|m4v|webm)$/i.test(pathname)) throw new Error('Upload an MP4, MOV or WebM video');
         return {
           allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm'],
