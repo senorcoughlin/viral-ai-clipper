@@ -918,7 +918,9 @@ export async function POST(request) {
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
           : (ytId && youtubeDownloader()
               ? youtubeDownloader()(videoUrl, 150000, { format: ytSecs > LONG_SEC ? '360' : undefined })
-              : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000))
+              : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000)
+                  // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
+                  .catch((e) => { if (e?.capacity) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: videoUrl } }, 'out_video', rioKey, 120000); }))
               .then(u => ({ url: u, direct: true }))
               .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
         // Fail fast: if the link can't be downloaded, every per-clip yt-dlp fallback hangs
