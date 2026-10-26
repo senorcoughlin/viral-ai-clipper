@@ -896,17 +896,12 @@ function HomeInner({ studio = false }) {
             <BoltMenu icon={<Bolt size={20} />} onAccountChange={() => refreshBilling()} />
             <a href="#top" className="font-display text-lg font-extrabold tracking-tight text-fg no-underline">Viral AI Clipper</a>
           </div>
-          <nav className="hidden gap-7 text-sm font-medium text-soft md:flex">
-            <a href="/studio" className="font-semibold text-lime hover:text-lime-hover">Open Studio</a>
-            <a href="/tutorial" className="hover:text-fg">Tutorial</a>
-            <a href="/api/youtube/start?next=/" className="hover:text-fg" title="Lets the Shorts button upload clips to your channel as private videos">Connect YouTube</a>
-            <a href="#clips" className="hover:text-fg">Your clips</a>
-            <a href="/connectors" className="hover:text-fg">Connectors</a>
-            <a href="/tools" className="hover:text-fg">AI Tools</a>
-            <a href="/assets" className="hover:text-fg">My Assets</a>
-            <a href="/channel" className="hover:text-fg">Channel</a>
-            <AccountBar onChange={() => refreshBilling()} />
+          <nav className="hidden items-center gap-6 text-sm font-medium text-soft md:flex">
+            <a href="/studio" className="font-semibold text-lime hover:text-lime-hover">Studio</a>
+            <a href="/tutorial" className="hover:text-fg">How It Works</a>
+            <a href="/monetize" className="hover:text-fg">Earn With Clips</a>
             <a href="#pricing" className="hover:text-fg">Pricing</a>
+            <AccountBar onChange={() => refreshBilling()} />
           </nav>
           <div className="flex items-center gap-2.5">
             {!isPro && <span className="hidden text-xs text-muted sm:inline">{freeLeft}/{FREE_DAILY_LIMIT} free{credits > 0 ? ` · ${credits} credits` : ''}</span>}
@@ -932,22 +927,22 @@ function HomeInner({ studio = false }) {
       )}
       <main id="top" className="relative mx-auto max-w-6xl px-5">
         {/* HERO */}
-        <section className="grid grid-cols-1 items-center gap-12 pb-20 pt-6 sm:pt-16 md:grid-cols-[1.1fr_.9fr]">
-          <div className="flex min-w-0 flex-col gap-6">
+        <section className="grid grid-cols-1 items-center gap-8 pb-20 pt-4 sm:pt-8 md:grid-cols-[1.1fr_.9fr]">
+          <div className="flex min-w-0 flex-col gap-4">
             <div className="hidden h-8 items-center gap-2 self-start rounded-full border border-line2 bg-surface pl-1.5 sm:inline-flex pr-3 text-[13px] font-medium text-soft">
               <span className="inline-flex h-[22px] items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">NEW</span>
               Batch mode · paste up to 10 links at once
             </div>
-            <h1 className="font-display text-[38px] font-extrabold leading-[1.02] tracking-tight text-white sm:text-[48px] md:text-[72px]">
+            <h1 className="font-display text-[28px] font-extrabold leading-[1.05] tracking-tight text-white sm:text-[40px] md:text-[52px]">
               Turn one video into <span className="text-lime">up to 8 clips</span> that are built to go viral.
             </h1>
             <div className="flex flex-col gap-2">
-              <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[60px] w-full justify-center px-6 text-[18px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
+              <button id="try-example" type="button" onClick={runExample} disabled={isProcessing} className="btn-lime h-[52px] w-full justify-center px-6 text-[17px] font-extrabold shadow-glow sm:w-auto sm:self-start disabled:opacity-60">
                 {isProcessing && lastWasExample ? 'Making example clips…' : '▶ See it work — free, 1 tap'}
               </button>
               <p className="px-1 text-[13px] text-muted">Watch the AI clip a real video. Doesn't use your free generations. <a href="/studio" className="font-semibold text-lime">Open the full Studio →</a></p>
             </div>
-            <p className="hidden max-w-[520px] text-lg leading-relaxed text-soft sm:block">
+            <p className="hidden max-w-[520px] text-base leading-relaxed text-soft sm:block">
               Paste a YouTube, podcast or stream link, or up to 10 videos at once. The AI finds the hooks, cuts the dead air, burns in captions and scores every clip for TikTok, Reels and Shorts.
             </p>
 
@@ -1152,7 +1147,7 @@ function HomeInner({ studio = false }) {
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14] pb-24 md:pb-0">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
           <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
-          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
+          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="/connectors" className="hover:text-fg">Connections</a><a href="/tools" className="hover:text-fg">AI Tools</a><a href="/assets" className="hover:text-fg">My Assets</a><a href="/channel" className="hover:text-fg">Channel</a><a href="/api/youtube/start?next=/" className="hover:text-fg">Connect YouTube</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
 
