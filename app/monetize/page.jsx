@@ -91,6 +91,7 @@ export default function MonetizePage() {
   return (
     <main className="min-h-screen bg-ink text-fg">
       <SimpleHeader />
+      <p className="mx-auto max-w-3xl px-5 pt-4 text-sm text-soft">New to this? See the full path from <a href="/tutorial#earn" className="font-semibold text-lime">choosing a campaign to getting paid →</a></p>
       <Suspense fallback={null}><Guide /></Suspense>
     </main>
   );

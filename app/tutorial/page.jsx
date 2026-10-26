@@ -5,11 +5,20 @@ export const metadata = {
   description: 'How to turn a YouTube video into clips in four steps.',
 };
 
+const JOURNEY = [
+  { t: 'Choose a campaign', d: 'Pick a creator or paid clipping program to clip for.', href: '/programs', cta: 'Browse programs' },
+  { t: 'Check its rules', d: 'Confirm clipping is allowed, the platforms, and any credit or split rules.', href: '/permissions', cta: 'Permission template' },
+  { t: 'Create a clip', d: 'Paste the video link in the Studio and generate.', href: '/studio', cta: 'Open Studio' },
+  { t: 'Review captions', d: 'Fix any words (timing adjusts automatically), add a hook and your own commentary.', href: '/studio', cta: 'Edit in Studio' },
+  { t: 'Publish', d: 'Direct upload to YouTube Shorts, or open TikTok / Reels with your caption copied.', href: '/connectors', cta: 'Publishing options' },
+  { t: 'Track and submit results', d: 'Log views and submit approved posts to the campaign for payout.', href: '/monetize', cta: 'Monetization checklist' },
+];
+
 const STEPS = [
   { n: '01', title: 'Paste a YouTube link', desc: 'Copy any public YouTube URL and paste it in the box on the home page. It works with long videos, Shorts, and interviews.' },
   { n: '02', title: 'Pick length and how many clips', desc: 'Choose 15, 30, or 60 seconds. Then pick 1 clip if you want it fast, or up to 8 if you want more options.' },
   { n: '03', title: 'Hit Clip and wait for the first one', desc: 'The AI finds the best moments, cuts them, and burns a caption. The first clip appears as soon as it is ready. You do not have to wait for all of them.' },
-  { n: '04', title: 'Download and post', desc: 'Play the clip, hit Download, then use TikTok, Reels, Shorts, or X. The caption is copied for you. Create a free account so your clips stay saved.' },
+  { n: '04', title: 'Download and post', desc: 'Upload to YouTube Shorts directly once your channel is connected (it lands as private so you can review). For TikTok, Reels or X, download the clip and the button opens the app with your caption copied. Create a free account so your clips stay saved.' },
 ];
 
 export default function Tutorial() {
@@ -32,6 +41,23 @@ export default function Tutorial() {
           </article>
         ))}
       </div>
+      <section className="card flex flex-col gap-4 p-6" id="earn">
+        <div className="flex flex-col gap-1">
+          <span className="eyebrow">Earn with clips</span>
+          <h2 className="font-display text-2xl font-extrabold text-white">The full path, start to payout</h2>
+        </div>
+        <ol className="grid gap-3">
+          {JOURNEY.map((j, i) => (
+            <li key={j.t} className="flex flex-col gap-2 rounded-input border border-line2 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-lime text-xs font-bold text-lime">{i + 1}</span>
+                <div><p className="font-semibold text-white">{j.t}</p><p className="text-sm text-soft">{j.d}</p></div>
+              </div>
+              <Link href={j.href} className="btn-ghost h-9 shrink-0 self-start px-3 text-xs no-underline sm:self-center">{j.cta}</Link>
+            </li>
+          ))}
+        </ol>
+      </section>
       <div className="card flex flex-col gap-3 p-6">
         <h2 className="font-display text-lg font-extrabold text-white">Beginner tips</h2>
         <ul className="grid gap-2 text-sm text-soft">
