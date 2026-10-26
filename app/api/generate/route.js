@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 const EXAMPLE_YT_ID = 'jNQXAC9IVRw';
+import { flagOn } from '../../../lib/siteconfig';
 import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
@@ -522,6 +523,7 @@ export async function POST(request) {
   const reqStart = Date.now(); // the 300s function clock starts here, not when the stream opens
   const limited = await routeGuard(request, 'generate', 60, 3600);
   if (limited) return limited;
+  if (await flagOn('pause_generation')) return Response.json({ error: 'Clip generation is paused for a few minutes for maintenance. Please try again soon.' }, { status: 503 });
   const body = await request.json().catch(() => ({}));
   const { videoUrl: rawUrl, clipFormat = 'shorts_9_16', aiStyle: rawStyle, autoSubtitles, aiHook, clipCount = 1, faceCrop } = body;
   const pack = ['bold', 'podcast', 'gameplay'].includes(body.pack) ? body.pack : null;

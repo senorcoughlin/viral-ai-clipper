@@ -39,6 +39,8 @@ export default function SpinWheel({ onWon, onUpgrade }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const viewed = useRef(false);
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => { fetch('/api/site').then(r => r.json()).then(d => setHidden(!!d?.flags?.hide_spin)).catch(() => {}); }, []);
   const left = useCountdown(st && !st.available && st.verified ? st.nextAt : result ? result.nextAt : null);
 
   const load = () => fetch('/api/spin', { cache: 'no-store' }).then(r => r.json()).then(d => { setSt(d); if (d.email) setEmail(e => e || d.email); return d; }).catch(() => null);
@@ -98,6 +100,7 @@ export default function SpinWheel({ onWon, onUpgrade }) {
   const available = !st || !st.verified || st.available;
   const wheelBg = `conic-gradient(${SEGS.map((_, i) => `${COLORS[i]} ${i * SLICE}deg ${(i + 1) * SLICE}deg`).join(',')})`;
 
+  if (hidden) return null;
   return (
     <>
       <button type="button" aria-label="Daily free spin" onClick={() => setOpen(true)}

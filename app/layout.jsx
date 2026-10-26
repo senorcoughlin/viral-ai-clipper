@@ -1,4 +1,5 @@
 import './globals.css'
+import SiteBanner from '../components/SiteBanner'
 import PwaInstall from '../components/PwaInstall'
 import GoogleAds from '../components/GoogleAds'
 import ReferralCapture from '../components/ReferralCapture'
@@ -38,7 +39,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body>{children}<PwaInstall /><GoogleAds /><ReferralCapture /><Analytics /><SpeedInsights /></body>
+      <body><SiteBanner />{children}<PwaInstall /><GoogleAds /><ReferralCapture /><Analytics /><SpeedInsights /></body>
     </html>
   )
 }

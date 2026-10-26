@@ -1,3 +1,4 @@
+import { flagOn } from '../../../../lib/siteconfig';
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { reportError } from '../../../../lib/alerts';
@@ -10,6 +11,7 @@ import { safeNext } from '../../../../lib/nextpath';
 export async function POST(request) {
   const limited = await routeGuard(request, 'auth_email', 30, 3600);
   if (limited) return limited;
+  if (await flagOn('pause_signin')) return Response.json({ error: 'Sign-in is paused for a few minutes. Please try again soon.' }, { status: 503 });
   const { email, next } = await request.json().catch(() => ({}));
   const clean = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean) || clean.length > 200) {
