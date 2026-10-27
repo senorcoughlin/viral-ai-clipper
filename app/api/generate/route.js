@@ -67,7 +67,7 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown } from '../../../lib/downloader';
+import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi } from '../../../lib/downloader';
 import { downloadToFile, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
@@ -946,9 +946,22 @@ export async function POST(request) {
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
           : (ytId && youtubeDownloader()
               ? youtubeDownloader()(videoUrl, 150000, { format: ytSourceFormat(ytSecs) })
-              : renderioRun({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 120000)
-                  // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
-                  .catch((e) => { if (e?.capacity) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: videoUrl } }, 'out_video', rioKey, 120000); }))
+              : (async () => {
+                  // Facebook: resolve share links to the canonical reel/video URL, try the hosted
+                  // download API first (RenderIO's yt-dlp is often blocked by Facebook), then RenderIO.
+                  let dl = videoUrl;
+                  if (isFacebookUrl(videoUrl)) {
+                    dl = await resolveFacebookUrl(videoUrl);
+                    if (dl !== videoUrl) console.log('facebook link resolved', { from: videoUrl, to: dl });
+                    if (downloadApiEnabled) {
+                      try { const u = await downloadFacebookViaApi(dl, 90000); console.log('facebook source via download api'); return u; }
+                      catch (e) { console.warn('facebook download api failed; trying RenderIO', e?.message); }
+                    }
+                  }
+                  return renderioRun({ input_urls: { in_video: dl }, format_selector: '720p' }, 'out_video', rioKey, 120000)
+                    // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
+                    .catch((e) => { if (e?.capacity) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: dl } }, 'out_video', rioKey, 120000); });
+                })())
               .then(u => ({ url: u, direct: true }))
               .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
         // Fail fast: if the link can't be downloaded, every per-clip yt-dlp fallback hangs
@@ -961,7 +974,9 @@ export async function POST(request) {
             await reportError('generate:download', ctx.capacity ? 'at RenderIO capacity' : 'source download failed: ' + ctx.srcFailed, videoUrl).catch(() => {});
             const why = ytId
               ? 'YouTube downloads are temporarily down on our side (YouTube is blocking our video downloader)'
-              : 'We couldn\u2019t download that video link right now';
+              : isFacebookUrl(videoUrl)
+                ? 'We couldn\u2019t download that Facebook video (it may be private, friends-only, or blocked by Facebook)'
+                : 'We couldn\u2019t download that video link right now';
             const msg = ytId
               ? `${why}. This isn\u2019t because you left the page. Please upload the video file instead (tap Upload), which works normally. This run was not counted.`
               : `${why}. Try uploading the video file instead, or try again later. This run was not counted.`;
