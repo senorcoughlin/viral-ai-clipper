@@ -39,6 +39,7 @@ function ytSourceFormat(secs) {
   return '360';
 }
 const YT_MAX_SOURCE_BYTES = Number(process.env.YT_MAX_SOURCE_MB || 250) * 1e6; // larger YouTube pulls step down a tier
+const YT_MAX_FILE_BYTES = Number(process.env.YT_MAX_FILE_MB || 420) * 1e6; // /tmp is 512 MB; leave room for audio + cuts
 const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
@@ -1014,9 +1015,21 @@ export async function POST(request) {
             const t0 = Date.now();
             try {
               const left = Math.max(30000, RUN_BUDGET_MS - 40000 - (Date.now() - startedAt));
-              const res = src.blob
-                ? await downloadToFile(src.url, file, left, { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` })
-                : await downloadToFile(src.url, file, left, {}, cont ? null : `sources/${ytId}.mp4`);
+              let res;
+              if (src.blob) res = await downloadToFile(src.url, file, left, { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` });
+              else {
+                try { res = await downloadToFile(src.url, file, left, {}, cont ? null : `sources/${ytId}.mp4`, YT_MAX_FILE_BYTES); }
+                catch (e) {
+                  if (!e?.tooBig || process.env.YT_DOWNLOAD_FORMAT) throw e;
+                  // Bigger than /tmp allows (usually a long video whose duration YouTube hid): pull the 360p tier instead.
+                  await fs.rm(file, { force: true }).catch(() => {});
+                  console.warn('yt source too big; retrying at 360p', e.message);
+                  const left2 = RUN_BUDGET_MS - 40000 - (Date.now() - startedAt);
+                  if (left2 < 60000) throw e;
+                  const u360 = await youtubeDownloader()(videoUrl, Math.min(90000, left2 - 30000), { format: '360' });
+                  res = await downloadToFile(u360, file, RUN_BUDGET_MS - 40000 - (Date.now() - startedAt), {}, cont ? null : `sources/${ytId}.mp4`, YT_MAX_FILE_BYTES);
+                }
+              }
               if (res.blobUrl) kvSetJson(SRC_KEY(ytId), { blob: res.blobUrl }, 30 * 24 * 3600).catch(() => {});
               ctx.sourceSec = await probeDuration(file);
               console.log('local source', { ms: Date.now() - t0, bytes: res.size, sec: ctx.sourceSec, fromBlob: !!src.blob });
