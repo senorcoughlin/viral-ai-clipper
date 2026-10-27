@@ -728,7 +728,8 @@ export async function POST(request) {
 
   async function runOne(c, i) {
     const start = Number(c.startSec || 0);
-    const len = Number(clipLength);
+    let len = Number(clipLength);
+    if (whole && ctx.sourceSec > 0) len = Math.min(len, Math.max(1, Math.ceil(ctx.sourceSec)));
     let playUrl = SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length];
     let real = false;
 
@@ -770,7 +771,7 @@ export async function POST(request) {
           // Length still unknown (e.g. a resolved Facebook/direct URL): probe it now; otherwise stay capped at 90s.
           const sec = await probeRemoteDuration(src.url, null, null, 10000).catch(() => 0);
           if (sec > WHOLE_MAX_SEC + 0.5) { const e = new Error(WHOLE_TOO_LONG(sec)); throw e; }
-          if (sec > 0) { ctx.sourceSec = sec; }
+          if (sec > 0) { ctx.sourceSec = sec; len = Math.min(len, Math.max(1, Math.ceil(sec))); }
         }
         const long = len > 90;
         if (!long && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
