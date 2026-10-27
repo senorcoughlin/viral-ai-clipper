@@ -70,7 +70,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize } from '../../../lib/downloader';
-import { downloadToFile, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
+import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig } from '../../../lib/jobs';
@@ -955,6 +955,18 @@ export async function POST(request) {
                   // check the size and re-request a smaller tier so the pull fits the function budget.
                   const size = await remoteSize(u);
                   console.log('yt source size', { fmt, ytSecs, mb: Math.round(size / 1e6) });
+                  // Duration unknown: read it from the file header and pick the right tier now,
+                  // rather than pulling hundreds of MB of 720p for a 45-minute video.
+                  if (!ytSecs && ctx.dir && localFfmpegAvailable() && !process.env.YT_DOWNLOAD_FORMAT) {
+                    const secs = await probeRemoteDuration(u, path.join(ctx.dir, 'head.mp4'));
+                    const want = secs ? ytSourceFormat(secs) : fmt;
+                    console.log('yt duration from header', { secs, want });
+                    if (secs) ytSecs = secs;
+                    if (want !== fmt) {
+                      try { return await youtubeDownloader()(videoUrl, 120000, { format: want }); }
+                      catch (e) { console.warn('re-request at', want, 'failed; using', fmt, e?.message); }
+                    }
+                  }
                   const tiers = ['1080', '720', '480', '360'];
                   let i = tiers.indexOf(fmt);
                   if (size > YT_MAX_SOURCE_BYTES && i >= 0 && i < tiers.length - 1 && !process.env.YT_DOWNLOAD_FORMAT) {
@@ -973,7 +985,7 @@ export async function POST(request) {
                   if (isFacebookUrl(videoUrl)) {
                     dl = await resolveFacebookUrl(videoUrl);
                     if (dl !== videoUrl) console.log('facebook link resolved', { from: videoUrl, to: dl });
-                    if (downloadApiEnabled) {
+                    if (downloadApiEnabled || rapidEnabled) {
                       try { const u = await downloadFacebookViaApi(dl, 90000); console.log('facebook source via download api'); return u; }
                       catch (e) { console.warn('facebook download api failed; trying RenderIO', e?.message); }
                     }
