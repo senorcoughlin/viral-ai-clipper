@@ -38,6 +38,7 @@ function ytSourceFormat(secs) {
   if (secs <= LONG_SEC) return '480';
   return '360';
 }
+const YT_MAX_SOURCE_BYTES = Number(process.env.YT_MAX_SOURCE_MB || 250) * 1e6; // larger YouTube pulls step down a tier
 const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
@@ -67,7 +68,7 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi } from '../../../lib/downloader';
+import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize } from '../../../lib/downloader';
 import { downloadToFile, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
@@ -560,6 +561,7 @@ export async function POST(request) {
   if (ytId) {
     const secs = (await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId));
     ytSecs = secs || 0;
+    console.log('yt duration', { ytId, secs });
     if (secs === -1) {
       return NextResponse.json({ success: false, message: 'That YouTube video is live right now. Live YouTube clipping isn\'t supported yet. Paste it again once the stream ends (the replay works), or use a Twitch channel link for "clip the last X minutes".', live: true }, { status: 400 });
     }
@@ -945,7 +947,24 @@ export async function POST(request) {
           : ctx.cachedSrc?.blob
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
           : (ytId && youtubeDownloader()
-              ? youtubeDownloader()(videoUrl, 150000, { format: ytSourceFormat(ytSecs) })
+              ? (async () => {
+                  const fmt = ytSourceFormat(ytSecs);
+                  const u = await youtubeDownloader()(videoUrl, 150000, { format: fmt });
+                  // Duration unknown (YouTube often hides it from our servers) or a heavy file:
+                  // check the size and re-request a smaller tier so the pull fits the function budget.
+                  const size = await remoteSize(u);
+                  console.log('yt source size', { fmt, ytSecs, mb: Math.round(size / 1e6) });
+                  const tiers = ['1080', '720', '480', '360'];
+                  let i = tiers.indexOf(fmt);
+                  if (size > YT_MAX_SOURCE_BYTES && i >= 0 && i < tiers.length - 1 && !process.env.YT_DOWNLOAD_FORMAT) {
+                    // Pick the tier whose estimated size fits (each step roughly halves the bytes).
+                    let est = size; while (est > YT_MAX_SOURCE_BYTES && i < tiers.length - 1) { est /= 2; i++; }
+                    console.log('yt source too large; re-requesting', tiers[i]);
+                    try { return await youtubeDownloader()(videoUrl, Math.max(60000, RUN_BUDGET_MS - 60000 - (Date.now() - startedAt)), { format: tiers[i] }); }
+                    catch (e) { console.warn('smaller tier failed; using original', e?.message); }
+                  }
+                  return u;
+                })()
               : (async () => {
                   // Facebook: resolve share links to the canonical reel/video URL, try the hosted
                   // download API first (RenderIO's yt-dlp is often blocked by Facebook), then RenderIO.
