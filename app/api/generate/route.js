@@ -959,9 +959,10 @@ export async function POST(request) {
                   // rather than pulling hundreds of MB of 720p for a 45-minute video.
                   if (!ytSecs && ctx.dir && localFfmpegAvailable() && !process.env.YT_DOWNLOAD_FORMAT) {
                     const secs = await probeRemoteDuration(u, path.join(ctx.dir, 'head.mp4'));
-                    const want = secs ? ytSourceFormat(secs) : fmt;
+                    // Still unknown (or a bogus tiny value with no size to check): assume long and use the light tier.
+                    const want = secs >= 30 ? ytSourceFormat(secs) : (size ? fmt : '360');
                     console.log('yt duration from header', { secs, want });
-                    if (secs) ytSecs = secs;
+                    if (secs >= 30) ytSecs = secs;
                     if (want !== fmt) {
                       try { return await youtubeDownloader()(videoUrl, 120000, { format: want }); }
                       catch (e) { console.warn('re-request at', want, 'failed; using', fmt, e?.message); }
