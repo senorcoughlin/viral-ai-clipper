@@ -914,7 +914,7 @@ export async function POST(request) {
         stopRun();
       }, Math.max(10000, RUN_BUDGET_MS - (Date.now() - reqStart)));
       try {
-      const key = cacheKey(videoUrl, [clipFormat, aiStyle, whole ? 'whole' : Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v3', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, whole ? 'whole2' : Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v3', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
       const hit = media?.live || noCache ? null : await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
