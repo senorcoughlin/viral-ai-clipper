@@ -15,6 +15,8 @@ const nextConfig = {
     outputFileTracingIncludes: {
       '/api/generate': ['./node_modules/ffmpeg-static/ffmpeg'],
       '/api/generate/route': ['./node_modules/ffmpeg-static/ffmpeg'],
+      '/api/duration': ['./node_modules/ffmpeg-static/ffmpeg'],
+      '/api/duration/route': ['./node_modules/ffmpeg-static/ffmpeg'],
     },
   },
   async redirects() {

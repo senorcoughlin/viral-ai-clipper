@@ -7,6 +7,7 @@ import { validateVideoUrl } from '../../../lib/validate';
 import { youtubeInfoDuration } from '../../../lib/downloader';
 import { probeRemoteDuration, localFfmpegAvailable } from '../../../lib/localprep';
 import { toFetchable } from '../../../lib/media';
+import { youtubeDuration } from '../../../lib/ytduration';
 import { youtubeIdOf } from '../../../lib/links';
 import { parseStreamUrl } from '../../../lib/stream';
 
@@ -22,7 +23,11 @@ export async function GET(request) {
   if (!url) return NextResponse.json({ secs: 0 }, { headers: h });
   let secs = 0;
   try {
-    if (youtubeIdOf(url)) secs = Number(await youtubeInfoDuration(url, 7000)) || 0;
+    const id = youtubeIdOf(url);
+    if (id) {
+      const page = await youtubeDuration(id);
+      secs = page > 0 ? page : (Number(await youtubeInfoDuration(url, 7000)) || 0);
+    }
     else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(toFetchable(url), null, null, 10000);
   } catch {}
   return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0 }, { headers: h });
