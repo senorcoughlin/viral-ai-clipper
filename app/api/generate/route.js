@@ -42,6 +42,8 @@ const YT_MAX_SOURCE_BYTES = Number(process.env.YT_MAX_SOURCE_MB || 250) * 1e6; /
 const YT_MAX_FILE_BYTES = Number(process.env.YT_MAX_FILE_MB || 420) * 1e6; // /tmp is 512 MB; leave room for audio + cuts
 const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
+const WHOLE_MAX_SEC = 90;
+const WHOLE_TOO_LONG = (s) => `"Use whole video" works for videos up to 90 seconds, and this one is ${s >= 120 ? Math.round(s / 60) + ' minutes' : Math.round(s) + ' seconds'} long. Turn it off to get AI-picked clips instead. This run was not counted.`;
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
 
 // Best-effort YouTube duration lookup (seconds) from the public watch page.
@@ -543,9 +545,12 @@ export async function POST(request) {
   // The browser may suggest a crop filter; only accept the exact shape cropFromFace() builds.
   const brand = sanitizeBrand(body.brand);
   const safeClientCrop = typeof faceCrop === 'string' && /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)\*[01]\.\d{3}$/.test(faceCrop) ? faceCrop : null;
-  const clipLength = Math.min(900, Math.max(5, Math.round(Number(body.clipLength)) || 30));
+  let clipLength = Math.min(900, Math.max(5, Math.round(Number(body.clipLength)) || 30));
+  // "Use whole video": the entire source (90s or less) becomes one clip. Counts as one clip.
+  const whole = body.wholeVideo === true;
+  if (whole) clipLength = WHOLE_MAX_SEC;
   const aiStyle = ['clean_viral','character_swap','anime_action','kids_3d'].includes(rawStyle) ? rawStyle : 'clean_viral';
-  const count = Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
+  const count = whole ? 1 : Math.min(8, Math.max(1, Math.round(Number(clipCount)) || 1));
   if (!rawUrl) return NextResponse.json({ success: false, message: 'Missing videoUrl' }, { status: 400 });
   // One video per request. If several links arrive glued together (no separator),
   // take only the first; the browser sends each link as its own request.
@@ -605,6 +610,18 @@ export async function POST(request) {
       media.winLen = dur || 0;
     }
     if (!media.winLen) return NextResponse.json({ success: false, message: 'We could not read the length of that video. Try another link.' }, { status: 400 });
+  }
+
+  // Whole-video mode: confirm the length before charging. Unknown length is capped at 90s.
+  let wholeSec = 0;
+  if (whole) {
+    if (media) wholeSec = media.live ? 0 : media.winLen;
+    else if (ytId) wholeSec = ytSecs > 0 ? ytSecs : 0;
+    else if (localFfmpegAvailable()) wholeSec = await probeRemoteDuration(rioUrl, null, null, 12000).catch(() => 0);
+    if (media?.live) return NextResponse.json({ success: false, message: '"Use whole video" needs a finished video, not a live stream. Turn it off to clip the last few minutes.' }, { status: 400 });
+    if (wholeSec > WHOLE_MAX_SEC + 0.5) return NextResponse.json({ success: false, message: WHOLE_TOO_LONG(wholeSec), tooLong: true, whole: true }, { status: 400 });
+    if (wholeSec > 0) clipLength = Math.max(1, Math.ceil(wholeSec));
+    console.log('whole video', { wholeSec, clipLength });
   }
 
   // Capacity pre-check (before charging usage): a run needs ~1 cut per clip plus audio and face jobs.
@@ -768,6 +785,12 @@ export async function POST(request) {
         } else {
           win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
         }
+        if (whole && !wholeSec && !ctx.sourceSec && src.url && !hls && localFfmpegAvailable()) {
+          // Length still unknown (e.g. a resolved Facebook/direct URL): probe it now; otherwise stay capped at 90s.
+          const sec = await probeRemoteDuration(src.url, null, null, 10000).catch(() => 0);
+          if (sec > WHOLE_MAX_SEC + 0.5) { const e = new Error(WHOLE_TOO_LONG(sec)); throw e; }
+          if (sec > 0) { ctx.sourceSec = sec; }
+        }
         const long = len > 90;
         if (!long && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
         playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls, long, ...(long ? { timeoutMs: Math.max(60000, 262000 - (Date.now() - (ctx.startedAt || Date.now()))) } : {}) });
@@ -829,6 +852,7 @@ export async function POST(request) {
       // Kept so the caption editor can re-render this clip with the same timing/crop.
       words: (c._words || []).slice(0, 1500).map(w => ({ w: w.w, a: Math.round(w.a * 100) / 100, b: Math.round(w.b * 100) / 100 })),
       crop: c._crop || null,
+      whole: whole || undefined,
       preview: !real,
     };
   }
@@ -908,7 +932,7 @@ export async function POST(request) {
         stopRun();
       }, Math.max(10000, RUN_BUDGET_MS - (Date.now() - reqStart)));
       try {
-      const key = cacheKey(videoUrl, [clipFormat, aiStyle, Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v3', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
+      const key = cacheKey(videoUrl, [clipFormat, aiStyle, whole ? 'whole' : Number(clipLength), autoSubtitles !== false, !!aiHook, brand, pack, 'v3', watermark ? 'wm' : 'clean', media?.live ? 'live' + media.liveMinutes : '']);
       const hit = media?.live || noCache ? null : await getCached(key);
       const realHit = Array.isArray(hit) ? hit.filter(c => c && !c.preview) : [];
       const cached = realHit.length >= count ? realHit.slice(0, count) : null;
@@ -1065,6 +1089,15 @@ export async function POST(request) {
               close();
               return;
             }
+            if (whole && ctx.sourceSec > WHOLE_MAX_SEC + 0.5) {
+              try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+              await refundUsage();
+              send({ type: 'error', message: WHOLE_TOO_LONG(ctx.sourceSec) });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+              close();
+              return;
+            }
+            if (whole && ctx.sourceSec > 0) clipLength = Math.max(1, Math.ceil(ctx.sourceSec));
             if (ctx.sourceSec && ctx.sourceSec > YT_MAX_SECONDS) {
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
               await refundUsage();
@@ -1162,6 +1195,12 @@ export async function POST(request) {
       }
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
       let scored = null;
+      if (whole) {
+        // No highlight picking: one clip from 0s for the whole length. One Gemini call only for title/caption.
+        const r = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, 1).catch(() => null) : null;
+        const g = r?.clips?.[0] || {};
+        scored = { clips: [{ ...g, title: g.title || 'Full video', startSec: 0, whole: true, ...(g.score ? {} : heuristicScore(0)) }] };
+      }
       // Long non-stream transcripts (e.g. 45 min+ YouTube) are scored in 20-min windows too,
       // so the prompt isn't truncated to the opening and clips come from across the video.
       const segsT = ctx.transcript?.segments || [];
@@ -1171,7 +1210,9 @@ export async function POST(request) {
         for (const sg of segsT) { const g = Math.floor(sg.start / W); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(sg); }
         ctx.chunkTranscripts = [...groups.values()].map(sgs => ({ text: sgs.map(x => x.text).join(' '), segments: sgs }));
       }
-      if ((media || (ctx.chunkTranscripts && ctx.chunkTranscripts.length > 1)) && ctx.transcript?.segments?.length) {
+      if (whole) {
+        // scored above
+      } else if ((media || (ctx.chunkTranscripts && ctx.chunkTranscripts.length > 1)) && ctx.transcript?.segments?.length) {
         // Score each chunk on its own (keeps prompts small and parallel), then keep the best
         // non-overlapping moments across the whole stream.
         const winStartS = media ? media.winStart : 0;

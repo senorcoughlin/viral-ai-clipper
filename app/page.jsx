@@ -124,6 +124,25 @@ function HomeInner({ studio = false }) {
   const [billingEmail, setBillingEmail] = useState('');
   const [uploading, setUploading] = useState(0);
   const [srcSecs, setSrcSecs] = useState({ url: "", secs: 0 }); // length of an uploaded file, for the short-source warning
+  const [wholeVideo, setWholeVideo] = useState(false); // "Use whole video (≤90s)": the entire source becomes one clip
+  const [linkSecs, setLinkSecs] = useState({ url: '', secs: 0, checking: false }); // detected length of a pasted link
+  // Detect the pasted link's length (debounced) so we can offer "Use whole video" for 90s-or-less sources.
+  useEffect(() => {
+    const u = videoUrl.trim();
+    if (!u || /\s/.test(u) || !/^https?:\/\//i.test(u)) { setLinkSecs({ url: '', secs: 0, checking: false }); return; }
+    if (srcSecs.url === u) { setLinkSecs({ url: u, secs: srcSecs.secs, checking: false }); return; }
+    let live = true;
+    setLinkSecs({ url: u, secs: 0, checking: true });
+    const t = setTimeout(async () => {
+      let secs = 0;
+      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) secs = Number((await r.json()).secs) || 0; } catch {}
+      if (live) setLinkSecs({ url: u, secs, checking: false });
+    }, 600);
+    return () => { live = false; clearTimeout(t); };
+  }, [videoUrl, srcSecs]);
+  const curSecs = linkSecs.url && linkSecs.url === videoUrl.trim() ? linkSecs.secs : 0;
+  const wholeTooLong = curSecs > 90.5;
+  const wholeOn = wholeVideo && !wholeTooLong;
 
   // Upload straight from the browser to Vercel Blob, then use the blob URL as the source.
   const handleUploadFile = async (file) => {
@@ -357,7 +376,7 @@ function HomeInner({ studio = false }) {
 
   const handleClipping = async (e, override) => {
     e?.preventDefault?.();
-    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength, clipCount, pack, liveMinutes };
+    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength: wholeOn ? 90 : clipLength, clipCount: wholeOn ? 1 : clipCount, pack, liveMinutes, wholeVideo: wholeOn };
     // Shadow state so a retry reuses exactly the same URL and settings.
     const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk } = settings;
     if (!runUrl.trim()) return;
@@ -369,7 +388,7 @@ function HomeInner({ studio = false }) {
     }
 
     // Splits links glued together with no separator, dedupes, caps at 10.
-    const urls = parseLinks(runUrl).links;
+    const urls = parseLinks(runUrl, settings.wholeVideo ? 1 : undefined).links;
     if (!urls.length) return;
     lastRunRef.current = settings;
     ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
@@ -406,7 +425,7 @@ function HomeInner({ studio = false }) {
           res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk || '', liveMinutes: settings.liveMinutes || 10, faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
+          body: JSON.stringify({ videoUrl: url, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk || '', liveMinutes: settings.liveMinutes || 10, wholeVideo: !!settings.wholeVideo, faceCrop, brand: (() => { try { return JSON.parse(localStorage.getItem('viral_brand') || 'null'); } catch { return null; } })() }),
           });
         } catch {
           throw new Error('Could not reach the server. Check your connection and retry.');
@@ -624,8 +643,10 @@ function HomeInner({ studio = false }) {
                 {[
                   { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
                   { label: 'Pack', options: PACKS, value: pack, set: setPack },
+                  ...(wholeOn ? [] : [
                   { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
                   { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
+                  ]),
                 ].map((g, gi) => (
                   <div key={g.label} role="group" aria-label={g.label} className={studio ? 'flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]' : 'flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0'}>
                     {gi > 0 && !studio && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
@@ -636,7 +657,19 @@ function HomeInner({ studio = false }) {
                   </div>
                 ))}
               </div>
-              {srcSecs.secs > 0 && srcSecs.url === videoUrl.trim() && srcSecs.secs < clipLength + 1 && (
+              <div role="group" aria-label="Whole video" className="flex flex-col gap-1.5 px-0.5">
+                <div className="flex items-center gap-2">
+                  <button type="button" data-testid="whole-toggle" aria-pressed={wholeOn} disabled={wholeTooLong} onClick={() => setWholeVideo(v => !v)} className={`chip shrink-0 ${wholeOn ? 'chip-on' : ''} ${wholeTooLong ? 'cursor-not-allowed opacity-50' : ''}`}>{wholeOn ? '✓ ' : ''}Use whole video (≤90s)</button>
+                  {linkSecs.checking && linkSecs.url === videoUrl.trim() && <span className="text-xs text-muted">Checking length…</span>}
+                  {!linkSecs.checking && curSecs > 0 && <span className="text-xs text-muted">Video is {Math.round(curSecs)}s</span>}
+                </div>
+                {wholeTooLong && <p role="note" className="text-xs text-muted">This video is over 90 seconds, so the whole-video option is off. Trim it to 90s or less, or let the AI pick clips.</p>}
+                {wholeOn && <p role="note" className="text-xs text-soft">The whole video becomes 1 clip{curSecs > 0 ? ` (${Math.round(curSecs)}s)` : ' (up to 90s; longer videos are stopped at 90s)'}, with captions and vertical reframe. Counts as 1 generation, same as a 1-clip run.</p>}
+                {!wholeVideo && !wholeTooLong && curSecs > 0 && curSecs <= 90.5 && (
+                  <p role="note" data-testid="whole-offer" className="rounded-input border border-lime/40 px-3 py-2 text-xs text-soft">This video is only {Math.round(curSecs)}s. Want the whole thing as one clip? <button type="button" onClick={() => setWholeVideo(true)} className="font-semibold text-lime underline">Use whole video</button></p>
+                )}
+              </div>
+              {!wholeOn && srcSecs.secs > 0 && srcSecs.url === videoUrl.trim() && srcSecs.secs < clipLength + 1 && (
                 <p role="note" className="rounded-input border border-[#FFB64D]/50 px-3 py-2 text-xs text-[#FFB64D]">Your video is only {Math.round(srcSecs.secs)}s long, so clips will be about {Math.max(1, Math.floor(srcSecs.secs))}s, not {clipLength}s, and you&apos;ll get 1 clip.</p>
               )}
               <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
