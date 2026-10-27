@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { CropPanel, CutPanel, applyCuts, useSkipCuts, useClipEdits } from './StudioTools';
 import { createPortal } from 'react-dom';
 import { withCredit, reuseRisks, PreUploadWarning } from './PostCheck';
 
@@ -89,6 +90,14 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
   };
   const words = Array.isArray(clip.words) ? clip.words : [];
   const [text, setText] = useState(words.map(w => w.w).join(' '));
+  // Crop box + transcript cuts. Saved with the clip on render, and as a draft on this device meanwhile.
+  const { userCrop, setUserCrop, cutSet, setCutSet, cuts } = useClipEdits(clip, words);
+  // Previews use the clip as first generated (edits re-render from the source, not on top of the last render).
+  const baseUrl = clip.origVideoUrl || videoUrl;
+  const vertical = (clip.format || 'shorts_9_16') === 'shorts_9_16';
+  const previewRef = useRef(null);
+  useSkipCuts(previewRef, cuts, true);
+  const seek = t => { const v = previewRef.current; if (!v) return; v.currentTime = t; v.play?.().catch(() => {}); v.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); };
   const [brand, setBrand] = useState({ color: 'white', size: 'm', position: 'bottom', upper: true, logo: { on: false, pos: 'tl', size: 'm', opacity: 90 }, wm: { on: true, pos: 'br', size: 's', opacity: 60 } });
   const [logoPreview, setLogoPreview] = useState('');
   const [busy, setBusy] = useState('');
@@ -146,12 +155,12 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
     try {
       const res = await fetch('/api/rerender', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: clip.source, startSec: clip.startSec, endSec: clip.endSec, format: clip.format, style: clip.style, crop: clip.crop, caption: words.length ? '' : text, words: retime(words, text), brand, hook: hook.trim(), overlayUrl: overlayUrl.trim() || undefined }),
+        body: JSON.stringify({ source: clip.source, startSec: clip.startSec, endSec: clip.endSec, format: clip.format, style: clip.style, crop: clip.crop, caption: words.length ? '' : text, words: applyCuts(retime(words, text), cuts), userCrop: userCrop ? { x: userCrop.x, y: userCrop.y, w: userCrop.w, h: userCrop.h } : null, cuts, brand, hook: hook.trim(), overlayUrl: overlayUrl.trim() || undefined }),
       });
       const d = await res.json().catch(() => ({ success: false, message: `Server error (${res.status}). Try again.` }));
       if (!d.success || !d.videoUrl) throw new Error(d.message || `Re-render failed (${res.status}). Try again.`);
       const newWords = retime(words, text);
-      const saved = await onRendered?.(d.videoUrl, { videoUrl: d.videoUrl, words: newWords.length ? newWords : clip.words, caption: words.length ? clip.caption : text, hook: hook.trim(), brand, editedAt: Date.now() });
+      const saved = await onRendered?.(d.videoUrl, { videoUrl: d.videoUrl, words: newWords.length ? newWords : clip.words, caption: words.length ? clip.caption : text, hook: hook.trim(), brand, userCrop, cuts, origVideoUrl: clip.origVideoUrl || clip.videoUrl || videoUrl, editedAt: Date.now() });
       setT({ hook: hook.trim(), overlay: !!overlayUrl.trim() || transform.overlay });
       setFinalUrl(d.videoUrl);
       setMsgKind('ok');
@@ -207,7 +216,7 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4">
           <div className="flex flex-col gap-6 text-[15px] leading-relaxed text-soft">
             <div className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl bg-black" aria-label="Live preview">
-              {videoUrl && <video src={videoUrl} muted playsInline loop autoPlay className="h-full w-full object-cover" />}
+              {baseUrl && <video ref={previewRef} src={baseUrl} muted playsInline loop autoPlay className="h-full w-full object-cover" style={userCrop && vertical ? { clipPath: `inset(${userCrop.y * 100}% ${(1 - userCrop.x - userCrop.w) * 100}% ${(1 - userCrop.y - userCrop.h) * 100}% ${userCrop.x * 100}%)` } : undefined} />}
               {hook && <div className="absolute inset-x-2 top-2 rounded bg-black/70 px-2 py-1 text-center text-sm font-bold text-white">{hook}</div>}
               {(() => {
                 const cls = p => `absolute ${p[0] === 't' ? 'top-2' : 'bottom-4'} ${p[1] === 'l' ? 'left-2' : 'right-2'}`;
@@ -220,6 +229,8 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
               })()}
               <div className={`absolute inset-x-2 ${previewPos} text-center font-extrabold leading-tight`} style={{ color: BRAND_COLORS[brand.color] || '#fff', fontSize: previewSize, textShadow: '0 2px 4px #000, 0 0 2px #000', textTransform: brand.upper ? 'uppercase' : 'none' }}>{previewText}</div>
             </div>
+            <CropPanel videoUrl={baseUrl} vertical={vertical} value={userCrop} onChange={setUserCrop} />
+            <CutPanel words={words} cutSet={cutSet} onChange={setCutSet} onSeek={seek} />
             <label className="flex flex-col gap-2">
               <Heading>Captions</Heading>
               <span className="text-sm text-muted">{words.length ? 'Add, remove or fix words freely. Timing re-spreads across the clip automatically.' : 'Caption text'}</span>

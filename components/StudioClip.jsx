@@ -5,6 +5,7 @@ import ViralScoreMeter from './ViralScoreMeter';
 import { clipFileName, downloadHref } from './ClipPlayer';
 import { useCredit } from './PostCheck';
 import { BRAND_COLORS, loadBrand } from './ClipEditor';
+import { CropPanel, CutPanel, applyCuts, useSkipCuts, useClipEdits } from './StudioTools';
 
 const fmt = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const handleOf = (src, author) => {
@@ -48,6 +49,14 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
     hook: clip.hook || '', creditOn: true, credit: '', progress: false, rendered: false, zoom: '', bg: '', cam: '', trimmed: false,
     title: clip.title || '', description: clip.socialCaption || clip.caption || '', hashtags: clip.hashtags || '',
   }));
+  const clipWords = useMemo(() => (Array.isArray(clip.words) ? clip.words : []), [clip.words]);
+  const { userCrop, setUserCrop, cutSet, setCutSet, cuts } = useClipEdits(clip, clipWords);
+  const vertical = (clip.format || 'shorts_9_16') === 'shorts_9_16';
+  const baseUrl = clip.origVideoUrl || clip.videoUrl || '';
+  const videoRef = useRef(null);
+  // Before re-rendering, the preview is the original clip: skip the cut parts while it plays.
+  useSkipCuts(videoRef, cuts, videoUrl === baseUrl);
+  const seek = t => { const v = videoRef.current; if (!v) return; if (videoUrl !== baseUrl) setVideoUrl(baseUrl); setTimeout(() => { try { v.currentTime = t; v.play?.().catch(() => {}); } catch {} rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, videoUrl !== baseUrl ? 400 : 0); };
   const [ideas, setIdeas] = useState(null);
   const set = (p) => setEd(e => ({ ...e, ...p }));
   const rootRef = useRef(null);
@@ -102,11 +111,14 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
     setBusy('render'); setMsg({ ok: true, text: 'Re-rendering… about a minute.' });
     try {
       const start = Math.max(0, ed.start), end = Math.max(start + 3, ed.trimmed ? ed.end : (dur ? s0 + dur : ed.end));
-      const words = ed.captions && Array.isArray(clip.words) ? clip.words.map(w => ({ w: w.w, a: +(w.a + s0 - start).toFixed(2), b: +(w.b + s0 - start).toFixed(2) })).filter(w => w.a >= 0 && w.b <= end - start + 0.5) : [];
+      // Cuts are in original-clip time; shift them onto the trimmed window.
+      const off = start - s0;
+      const cutsT = cuts.map(([a, b]) => [+(a - off).toFixed(3), +(b - off).toFixed(3)]).filter(([a, b]) => b > 0 && a < end - start).map(([a, b]) => [Math.max(0, a), Math.min(end - start, b)]);
+      const words = ed.captions && Array.isArray(clip.words) ? applyCuts(clip.words.map(w => ({ w: w.w, a: +(w.a + s0 - start).toFixed(2), b: +(w.b + s0 - start).toFixed(2) })).filter(w => w.a >= 0 && w.b <= end - start + 0.5), cutsT) : [];
       const res = await fetch('/api/rerender', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         source: clip.source, startSec: start, endSec: end, format: clip.format, style: clip.style, crop: clip.crop,
         caption: '', words, brand: { color: ed.color, size: ed.size, position: ed.position, upper: true },
-        hook: ed.hook.trim(), credit: ed.creditOn ? ed.credit.trim() : '', progress: ed.progress, zoom: ed.zoom, bg: ed.bg, overlayUrl: ed.cam || undefined,
+        userCrop: userCrop ? { x: userCrop.x, y: userCrop.y, w: userCrop.w, h: userCrop.h } : null, cuts: cutsT, hook: ed.hook.trim(), credit: ed.creditOn ? ed.credit.trim() : '', progress: ed.progress, zoom: ed.zoom, bg: ed.bg, overlayUrl: ed.cam || undefined,
       }) });
       const d = await res.json();
       if (!d.success) throw new Error(d.message || 'Re-render failed');
@@ -190,7 +202,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   return (
     <article ref={rootRef} className="card flex min-w-0 flex-col overflow-hidden animate-fadeup" data-studio-clip data-clip-id={clip.id}>
       <div className="relative aspect-[9/16] max-h-[78vh] w-full bg-black">
-        <video src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0 && !dur) { setDur(d); setEd(x => x.trimmed ? x : { ...x, end: x.start + d }); } }} />
+        <video ref={videoRef} src={videoUrl ? `${videoUrl.split('#')[0]}#t=0.1` : undefined} className="absolute inset-0 h-full w-full object-contain" controls playsInline preload="metadata" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0 && !dur) { setDur(d); setEd(x => x.trimmed ? x : { ...x, end: x.start + d }); } }} />
         <label className="absolute left-3 top-3 z-10 flex h-9 items-center gap-2 rounded-full border border-line2 bg-ink/85 px-3 text-xs font-semibold">
           <input type="checkbox" className="h-4 w-4 accent-lime" checked={!!selected} onChange={e => onSelect?.(e.target.checked)} /> Select
         </label>
@@ -265,6 +277,8 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
                 {['top', 'middle', 'bottom'].map(p => <Toggle key={p} on={ed.position === p} onClick={() => set({ position: p })}>{p}</Toggle>)}
               </div>
             </div>
+            <CropPanel videoUrl={baseUrl} vertical={vertical} value={userCrop} onChange={setUserCrop} />
+            <CutPanel words={clipWords} cutSet={cutSet} onChange={setCutSet} onSeek={seek} />
             <label className="flex flex-col gap-1.5 text-xs font-semibold text-muted">Hook text (top of video)
               <input value={ed.hook} maxLength={60} onChange={e => set({ hook: e.target.value })} placeholder="Wait for it…" className={field} />
             </label>

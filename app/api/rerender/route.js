@@ -29,9 +29,33 @@ export async function POST(request) {
   if (!(await allowAttempt(`rerender:${clientIp(request)}`, 30, 24 * 3600))) {
     return NextResponse.json({ success: false, message: 'Re-render limit reached for today.' }, { status: 429 });
   }
+  // Studio crop box: fractions of the frame, validated to a sane rectangle.
+  let userCrop = null;
+  const uc = body.userCrop;
+  if (uc && typeof uc === 'object') {
+    const v = ['x', 'y', 'w', 'h'].map(k => Number(uc[k]));
+    if (v.every(Number.isFinite) && v[2] >= 0.1 && v[3] >= 0.1 && v[0] >= 0 && v[1] >= 0 && v[0] + v[2] <= 1.001 && v[1] + v[3] <= 1.001
+      && !(v[0] < 0.002 && v[1] < 0.002 && v[2] > 0.998 && v[3] > 0.998)) userCrop = { x: v[0], y: v[1], w: Math.min(v[2], 1 - v[0]), h: Math.min(v[3], 1 - v[1]) };
+  }
+  // Transcript cuts: clip-relative [a,b] ranges to remove. Merge, then keep the rest.
+  const cuts = (Array.isArray(body.cuts) ? body.cuts : []).slice(0, 200)
+    .map(c => [Math.max(0, Number(c?.[0])), Math.min(len, Number(c?.[1]))])
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b - a >= 0.05)
+    .sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const c of cuts) { const l = merged[merged.length - 1]; if (l && c[0] <= l[1] + 0.05) l[1] = Math.max(l[1], c[1]); else merged.push([...c]); }
+  let keep = null; let outLen = len;
+  if (merged.length) {
+    keep = []; let t = 0;
+    for (const [a, b] of merged) { if (a - t >= 0.1) keep.push([t, a]); t = b; }
+    if (len - t >= 0.1) keep.push([t, len]);
+    outLen = keep.reduce((s, [a, b]) => s + b - a, 0);
+    if (outLen < 1) return NextResponse.json({ success: false, message: 'You cut almost the whole clip. Keep at least a second of it.' }, { status: 400 });
+    if (keep.length > 60) return NextResponse.json({ success: false, message: 'Too many separate cuts (max 60). Merge some nearby cuts and try again.' }, { status: 400 });
+  }
   const words = (Array.isArray(body.words) ? body.words : []).slice(0, 1500)
     .map(x => ({ w: String(x?.w || '').slice(0, 40), a: Number(x?.a), b: Number(x?.b) }))
-    .filter(x => x.w.trim() && Number.isFinite(x.a) && Number.isFinite(x.b) && x.a >= 0 && x.b >= x.a && x.a <= len);
+    .filter(x => x.w.trim() && Number.isFinite(x.a) && Number.isFinite(x.b) && x.a >= 0 && x.b >= x.a && x.a <= outLen);
   const vertical = (body.format || 'shorts_9_16') === 'shorts_9_16';
   const crop = typeof body.crop === 'string' && SAFE_CROP.test(body.crop) ? body.crop : null;
   const hook = String(body.hook || '').slice(0, 60);
@@ -67,8 +91,8 @@ export async function POST(request) {
     }
   }
   try {
-    const url = await renderioCut(toFetchable(renderSrc), start, len, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
-      wordCaptions: true, timedWords: words, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark,
+    const url = await renderioCut(toFetchable(renderSrc), start, outLen, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
+      wordCaptions: true, timedWords: words, userCrop, keep, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark,
     });
     // RenderIO output links are temporary: keep a permanent copy for the library and Download.
     let videoUrl = url;
