@@ -1,12 +1,9 @@
 export const maxDuration = 120;
 import { NextResponse } from 'next/server';
-import { readCookie } from '../../../lib/session';
-import { refreshAccessToken, COOKIE_OPTS } from '../../../lib/youtube';
-import { validateVideoUrl } from '../../../lib/validate';
 import { routeGuard } from '../../../lib/ratelimit';
 
 const TARGETS = {
-  youtube: 'https://studio.youtube.com/',
+  youtube: 'https://www.youtube.com/upload',
   tiktok: 'https://www.tiktok.com/upload',
   reels: 'https://www.instagram.com/',
   x: 'https://x.com/compose/post',
@@ -39,9 +36,7 @@ function nextBestTime(bestTime, tz) {
   return null;
 }
 
-// One-click post prep. When the visitor connected YouTube (httpOnly cookies), the
-// clip is uploaded server-side as a private video and the Studio edit link is
-// returned so they can review and publish. Otherwise returns the upload page URL.
+// Post prep: returns the platform's upload page URL (no server-side uploads).
 export async function POST(request) {
   const limited = await routeGuard(request, 'post', 60, 3600);
   if (limited) return limited;
@@ -55,51 +50,8 @@ export async function POST(request) {
     const open = openWith(null);
     if (platform !== 'youtube') return open;
 
-    let access = readCookie(request, 'yt_access');
-    const refresh = readCookie(request, 'yt_refresh');
-    let refreshed = null;
-    if (!access && refresh) {
-      refreshed = await refreshAccessToken(refresh);
-      access = refreshed?.access_token || null;
-    }
-    if (!access) return openWith('not_connected');
-
-    const src = validateVideoUrl(videoUrl);
-    if (!src || !src.startsWith('https://')) return open;
-    const clip = await fetch(src, { cache: 'no-store' });
-    const len = Number(clip.headers.get('content-length') || 0);
-    if (!clip.ok || len > MAX_BYTES) return open;
-    const bytes = Buffer.from(await clip.arrayBuffer());
-    if (!bytes.length || bytes.length > MAX_BYTES) return open;
-
-    const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + access,
-        'Content-Type': 'application/json',
-        'X-Upload-Content-Type': 'video/mp4',
-        'X-Upload-Content-Length': String(bytes.length),
-      },
-      body: JSON.stringify({
-        snippet: { title: String(title).slice(0, 90), description: String(caption).slice(0, 4000), categoryId: '22' },
-        status: { privacyStatus: 'private', selfDeclaredMadeForKids: false, ...(publishAt ? { publishAt: publishAt.toISOString() } : {}) },
-      }),
-    });
-    const uploadUrl = init.headers.get('location');
-    if (!init.ok || !uploadUrl) {
-      console.warn('youtube init failed', init.status);
-      // 401/403: token expired, app still in Google "testing" without this user, or scope missing.
-      return openWith(init.status === 401 || init.status === 403 ? 'not_authorized' : 'upload_failed');
-    }
-    const up = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: bytes });
-    const video = await up.json().catch(() => ({}));
-    if (!up.ok || !video.id) {
-      console.warn('youtube upload failed', up.status);
-      return openWith('upload_failed');
-    }
-    const res = NextResponse.json({ success: true, data: { mode: publishAt ? 'youtube-scheduled' : 'youtube-uploaded', videoId: video.id, publishAt: publishAt?.toISOString() || null, url: `https://studio.youtube.com/video/${video.id}/edit`, caption } });
-    if (refreshed?.access_token) res.cookies.set('yt_access', refreshed.access_token, { ...COOKIE_OPTS, maxAge: Math.max(60, Number(refreshed.expires_in || 3600) - 60) });
-    return res;
+    // YouTube auto-upload was removed: every platform just opens its upload page.
+    return open;
   } catch (e) {
     console.error('post failed', e?.message);
     return NextResponse.json({ success: false, message: 'Post failed' }, { status: 500 });

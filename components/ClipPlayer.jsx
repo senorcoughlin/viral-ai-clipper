@@ -119,7 +119,6 @@ export default function ClipPlayer({ clip, compact = false, index }) {
     const risks = platform === 'youtube' ? reuseRisks(clip, transform) : [];
     if (!checked && risks.length) { setPendingPost({ platform, risks }); return; }
     setPendingPost(null);
-    if (platform === 'youtube') { setPostBusy(true); setPostMsg(null); }
     const text = withCredit(socialCaption, credit, creditOn);
     try {
       copy(text, platform);
@@ -130,18 +129,9 @@ export default function ClipPlayer({ clip, compact = false, index }) {
       });
       const data = await res.json();
       const d = data?.data || {};
-      if (platform === 'youtube') {
-        if (d.mode === 'youtube-uploaded' || d.mode === 'youtube-scheduled') setPostMsg({ ok: true, text: 'Uploaded to your YouTube as private. Review and publish in Studio.', url: d.url });
-        else if (d.why === 'not_connected') setPostMsg({ ok: false, text: 'Connect YouTube once and this button uploads the clip for you. Caption copied.', connect: true });
-        else if (d.why === 'not_authorized') setPostMsg({ ok: false, text: 'YouTube refused the upload (sign-in expired or this Google account is not approved yet). Reconnect, or upload manually — caption copied.', connect: true, url: d.url });
-        else setPostMsg({ ok: false, text: 'Auto-upload failed. Caption copied — upload it in YouTube Studio.', url: d.url || 'https://studio.youtube.com/' });
-        setPostBusy(false);
-        return;
-      }
       if (data.success && d.url) window.open(d.url, '_blank');
     } catch {
-      if (platform === 'youtube') { setPostBusy(false); setPostMsg({ ok: false, text: 'Could not reach the uploader. Caption copied — upload it in YouTube Studio.', url: 'https://studio.youtube.com/' }); return; }
-      window.open(platform === 'youtube' ? 'https://studio.youtube.com/' : 'https://www.tiktok.com/upload', '_blank');
+      window.open(platform === 'youtube' ? 'https://www.youtube.com/upload' : 'https://www.tiktok.com/upload', '_blank');
     }
   };
 
@@ -149,7 +139,6 @@ export default function ClipPlayer({ clip, compact = false, index }) {
           <div role="status" className={`rounded-input border px-3 py-2 text-xs leading-relaxed ${postMsg.ok ? 'border-lime text-lime' : 'border-line2 text-soft'}`}>
             {postMsg.text}{' '}
             {postMsg.url && <a href={postMsg.url} target="_blank" rel="noreferrer" className="underline">Open Studio</a>}
-            {postMsg.connect && <> {postMsg.url ? '· ' : ''}<a href={`/api/youtube/start?next=${typeof window !== 'undefined' ? window.location.pathname : '/'}`} className="underline">Connect YouTube</a></>}
           </div>
         );
 
@@ -224,9 +213,9 @@ export default function ClipPlayer({ clip, compact = false, index }) {
             </span>
           </div>
           {(renderedUrl || clip.editedAt) && <a data-testid="card-final-download" href={videoSrc} download onClick={onDownload} rel="noreferrer" className="btn-lime mt-1 grid h-11 w-full place-items-center text-sm font-bold">Download final render</a>}
-          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost mt-1 h-8 w-full px-2 text-[11px]">{postBusy ? 'Uploading…' : 'Upload to YouTube Shorts'}</button>
-          <p className="text-[10px] leading-snug text-muted">Opens app, caption copied — attach the downloaded clip:</p>
-          <div className="grid grid-cols-3 gap-1">
+          <p className="mt-1 text-[10px] leading-snug text-muted">Post it yourself: opens the app with your caption copied — attach the downloaded clip.</p>
+          <div className="grid grid-cols-4 gap-1">
+            <button type="button" onClick={() => postClip('youtube')} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">Shorts</button>
             <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">TikTok</button>
             <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">Reels</button>
             <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-7 min-w-0 px-1 text-[10px]">X</button>
@@ -284,14 +273,14 @@ export default function ClipPlayer({ clip, compact = false, index }) {
         {postStatus}
         {!unscored && <p className="text-[11px] text-muted">Viral score {score}/100 · AI estimate (hook, pacing, clarity), not a guarantee</p>}
 
-        <p className="text-[11px] leading-snug text-muted">Shorts uploads directly to your connected channel. TikTok, Reels and X open the app with your caption copied, so download the clip first.</p>
+        <p className="text-[11px] leading-snug text-muted">Post it yourself: download the clip, then YouTube Shorts, TikTok, Reels and X open with your caption copied.</p>
         <div className="flex flex-wrap gap-2 pt-1">
           <button type="button" onClick={() => copy(withCredit(socialCaption, credit, creditOn), 'cap')} className="btn-lime h-10 flex-1 text-sm">
             {copied === 'cap' ? 'Copied!' : 'Copy caption'}
           </button>
           <button type="button" onClick={() => postClip('tiktok')} className="btn-ghost h-10 px-3 text-xs">TikTok</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'reels'); window.open('https://www.instagram.com/', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">Reels</button>
-          <button type="button" onClick={() => postClip('youtube')} disabled={postBusy} className="btn-ghost h-10 px-3 text-xs">{postBusy ? 'Uploading…' : 'Upload to Shorts'}</button>
+          <button type="button" onClick={() => postClip('youtube')} className="btn-ghost h-10 px-3 text-xs">Shorts</button>
           <button type="button" onClick={() => { copy(withCredit(socialCaption, credit, creditOn), 'x'); window.open('https://x.com/compose/post', '_blank'); }} className="btn-ghost h-10 px-3 text-xs">X</button>
           <a href={videoSrc} download={`${title || 'clip'}.mp4`} onClick={onDownload} rel="noreferrer" aria-label="Download clip" title="Download" className="btn-ghost grid h-10 w-10 place-items-center p-0">
             {Icon.download}

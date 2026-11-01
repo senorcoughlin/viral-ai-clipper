@@ -20,7 +20,7 @@ const sections = [
     "Pick a length. Under 60 seconds is the safe zone for Shorts; 30 to 45 seconds suits most talking videos.",
     "Choose how many clips you want, from 1 to 8, and a caption pack such as Bold or Podcast.",
     "Generate, then review the clips in order of viral score. Fix any caption words, re-render if needed and download.",
-    "Upload to YouTube Shorts yourself, or connect your channel and send clips to YouTube as private videos so you can review them in YouTube Studio before publishing."
+    "Download the clip and upload it to YouTube Shorts yourself. The Shorts button copies your caption and opens YouTube's upload page."
    ]
   ]
  ],
@@ -57,7 +57,7 @@ const faqs = [
  ],
  [
   "Can it post to YouTube for me?",
-  "You can connect your YouTube channel and upload clips as private videos, then publish them from YouTube Studio when you are ready."
+  "Download the clip, then upload it to YouTube Shorts yourself. We copy your caption and open YouTube's upload page to make it quick."
  ],
  [
   "Does it add captions automatically?",

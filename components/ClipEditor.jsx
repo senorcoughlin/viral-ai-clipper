@@ -118,7 +118,6 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
 
   const [elapsed, setElapsed] = useState(0);
   const [finalUrl, setFinalUrl] = useState('');
-  const [ytMsg, setYtMsg] = useState(null);
   const fileName = () => `viral-clip-${String(clip.title || 'clip').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'clip'}-edited-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}.mp4`;
   const shareFinal = async () => {
     try {
@@ -129,18 +128,6 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
       setMsgKind('ok'); setMsg('Saved to your Downloads.');
     } catch (e) { if (e?.name !== 'AbortError') { setMsgKind('error'); setMsg('Could not share the file. Use Download final render instead.'); } else setMsg(''); }
-  };
-  const uploadYouTube = async () => {
-    setBusy('yt'); setYtMsg(null);
-    try {
-      const caption = withCredit([clip.socialCaption || clip.caption, clip.hashtags].filter(Boolean).join('\n\n'), credit, !!credit);
-      const d = await (await fetch('/api/post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'youtube', caption, videoUrl: finalUrl, title: clip.title }) })).json();
-      const r = d?.data || {};
-      if (r.mode === 'youtube-uploaded' || r.mode === 'youtube-scheduled') setYtMsg({ ok: true, text: 'Uploaded to your YouTube as private. Review and publish in Studio.', url: r.url });
-      else if (r.why === 'not_connected') setYtMsg({ ok: false, text: 'Connect YouTube first (Account → Connect YouTube), then tap Upload again.' });
-      else if (r.why === 'not_authorized') setYtMsg({ ok: false, text: 'YouTube refused the upload (sign-in expired or not approved yet). Reconnect, or download and upload in YouTube Studio.', url: 'https://studio.youtube.com/' });
-      else setYtMsg({ ok: false, text: d?.message || 'Upload failed. Download the file and upload it in YouTube Studio.', url: 'https://studio.youtube.com/' });
-    } catch { setYtMsg({ ok: false, text: 'Could not reach the uploader. Download the file and upload it in YouTube Studio.', url: 'https://studio.youtube.com/' }); } finally { setBusy(''); }
   };
   const [msgKind, setMsgKind] = useState('info');
   useEffect(() => {
@@ -166,26 +153,6 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
       setMsgKind('ok');
       setMsg(saved === false ? 'Done. The clip now uses your edits (couldn\'t save them to your library, so download it now).' : 'Done. Your edited clip is saved.');
     } catch (e) { setMsgKind('error'); setMsg(e?.message === 'Failed to fetch' ? 'Lost connection while rendering. Check your signal and try again.' : (e.message || 'Re-render failed. Try again.')); } finally { setBusy(''); }
-  };
-
-  const schedule = async (checked = false) => {
-    const risks = reuseRisks(clip, { ...transform, commentary });
-    if (!checked && risks.length) { setWarn(risks); return; }
-    setWarn(null);
-    setBusy('schedule'); setMsg('Scheduling on YouTube…');
-    try {
-      const res = await fetch('/api/post', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'youtube', schedule: true, bestTime: clip.bestTime, caption: withCredit([clip.socialCaption || clip.caption, clip.hashtags].filter(Boolean).join('\n\n'), credit, !!credit), videoUrl, title: clip.title, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
-      });
-      const d = await res.json();
-      if (d?.data?.mode === 'youtube-scheduled') {
-        setMsg(`Scheduled for ${new Date(d.data.publishAt).toLocaleString()}.`);
-        window.open(d.data.url, '_blank');
-      } else if (d?.data?.mode === 'open') {
-        setMsg('Connect YouTube first (top menu → Connect YouTube), then try again.');
-      } else throw new Error(d?.message || 'Scheduling failed');
-    } catch (e) { setMsg(e.message); } finally { setBusy(''); }
   };
 
   const Chip = ({ on, onClick, children, style }) => (
@@ -281,7 +248,6 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
               {script && <p className="text-sm text-muted">Record this in your own voice (or rewrite it) and add it as a voiceover in your editor before posting.</p>}
               <label className="flex min-h-[44px] items-center gap-3 text-[15px] text-fg"><input type="checkbox" className="h-5 w-5" checked={commentary} onChange={e => { setCommentary(e.target.checked); setT({ commentary: e.target.checked }); }} /> I added my own commentary to this clip</label>
             </section>
-            {warn && <PreUploadWarning risks={warn} onCancel={() => setWarn(null)} onProceed={() => schedule(true)} />}
           </div>
         </div>
         {(msg || busy === 'render') && <p role={msgKind === 'error' ? 'alert' : 'status'} data-testid="editor-status" className={`border-t border-line2 px-4 py-2 text-[15px] ${msgKind === 'error' ? 'bg-red-500/10 text-red-300' : msgKind === 'ok' ? 'text-lime' : 'text-soft'}`}>{msg}{busy === 'render' ? ` (${elapsed}s)` : ''}</p>}
@@ -289,13 +255,11 @@ export default function ClipEditor({ clip, videoUrl, credit, transform = {}, onT
           <a href={finalUrl} download={fileName()} onClick={e => { const n = fileName(); e.currentTarget.download = n; if (/\/api\/media\?/.test(finalUrl)) e.currentTarget.href = `${finalUrl}&dl=${encodeURIComponent(n)}`; }} className="btn-lime grid h-12 place-items-center text-base font-bold">Download final render</a>
           <div className="flex gap-2">
             {typeof navigator !== 'undefined' && navigator.share && <button type="button" onClick={shareFinal} className="btn-ghost h-12 flex-1 text-base">Share / Save to phone</button>}
-            <button type="button" disabled={busy === 'yt'} onClick={uploadYouTube} className="btn-ghost h-12 flex-1 text-base">{busy === 'yt' ? 'Uploading…' : 'Upload to YouTube'}</button>
           </div>
-          {ytMsg && <p role="status" className={`text-[15px] ${ytMsg.ok ? 'text-lime' : 'text-soft'}`}>{ytMsg.text} {ytMsg.url && <a href={ytMsg.url} target="_blank" rel="noreferrer" className="underline">Open</a>}</p>}
+          <p data-testid="post-yourself" className="text-[13px] leading-snug text-muted">Post it yourself: upload the downloaded MP4 to YouTube Shorts, TikTok or Instagram Reels.</p>
         </div>}
         <div className="sticky bottom-0 z-10 flex flex-wrap gap-2 border-t border-line2 bg-[#0b0b0b] px-4 py-3" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
           <button type="button" disabled={!!busy} onClick={rerender} className="btn-lime h-12 flex-1 whitespace-nowrap text-base">{busy === 'render' ? 'Rendering…' : 'Save & render'}</button>
-          {clip.bestTime && <button type="button" disabled={!!busy} onClick={() => schedule()} className="btn-ghost h-12 flex-1 text-base">{busy === 'schedule' ? 'Scheduling…' : `Post at ${clip.bestTime}`}</button>}
           <button type="button" onClick={onClose} className="btn-ghost h-12 px-5 text-base">Close</button>
         </div>
       </div>

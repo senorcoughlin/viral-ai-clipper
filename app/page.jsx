@@ -231,16 +231,6 @@ function HomeInner({ studio = false }) {
   };
 
   const lastRunRef = useRef(null);
-  const [ytFlash, setYtFlash] = useState('');
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search);
-    const y = q.get('youtube');
-    if (!y) return;
-    setYtFlash(y === 'connected' ? 'connected' : 'error');
-    q.delete('youtube');
-    const qs = q.toString();
-    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
-  }, []);
   const [selectedIds, setSelectedIds] = useState([]);
   const [dlAllBusy, setDlAllBusy] = useState(false);
   const [lastWasExample, setLastWasExample] = useState(false);
@@ -559,15 +549,6 @@ function HomeInner({ studio = false }) {
     setDlAllBusy(false);
   };
   const formBlock = (<>
-    {ytFlash && (
-      <div id="yt-flash" role="status" className={`flex items-start gap-3 rounded-card border p-3 text-sm ${ytFlash === 'connected' ? 'border-lime bg-lime-tint text-fg' : 'border-[#FF4D6D]/60 bg-[#FF4D6D]/10 text-fg'}`}>
-        <p className="flex-1">{ytFlash === 'connected'
-          ? 'YouTube connected. The Publish button can now upload clips to your channel as private videos.'
-          : 'YouTube didn\'t connect. While Google is still reviewing this app, only Google accounts added as testers can connect. Try again with that account, or download the clip and upload it in YouTube Studio.'}</p>
-        {ytFlash !== 'connected' && <a href={`/api/youtube/start?next=${studio ? '/studio' : '/'}`} className="shrink-0 font-semibold text-lime">Try again</a>}
-        <button type="button" aria-label="Dismiss" onClick={() => setYtFlash('')} className="shrink-0 text-muted">✕</button>
-      </div>
-    )}
             {/* FORM */}
             <form id="clip-form" ref={formRef} onSubmit={handleClipping} className="flex flex-col gap-3.5 rounded-card border border-line2 bg-surface p-3.5 shadow-card">
               <label htmlFor="urls" className={`px-1 text-xs font-semibold uppercase tracking-[.08em] text-muted ${studio && genCount < 3 && !isProcessing && !videoUrl ? 'invisible' : ''}`}>{studio ? 'Or paste your own link' : 'Paste your video link'}</label>
@@ -808,7 +789,6 @@ function HomeInner({ studio = false }) {
                   <p className="max-w-[560px] text-sm text-soft">The score is an AI estimate of how well a moment fits short-form, based on its hook, pacing and clarity. It is not a guarantee of views. Tap a clip to see the reasons.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {studio && selectedIds.length > 0 && <button type="button" onClick={() => { if (window.confirm(`Upload ${selectedIds.length} selected clip${selectedIds.length === 1 ? '' : 's'} to your YouTube as private?`)) window.dispatchEvent(new CustomEvent('studio-publish', { detail: { platform: 'youtube' } })); }} className="btn-lime h-10 px-4 text-sm">🚀 Publish selected to YouTube ({selectedIds.length})</button>}
                   {studio && clips.some(c => c.videoUrl) && <button type="button" onClick={downloadAll} disabled={dlAllBusy} className="btn-lime h-10 px-4 text-sm">{dlAllBusy ? 'Downloading…' : selectedIds.length ? `Download selected (${selectedIds.length})` : `Download all (${clips.filter(c => c.videoUrl).length})`}</button>}
                   <button onClick={() => { setClips([]); setSelectedIds([]); }} className="btn-ghost h-10 px-4 text-sm">Clear</button>
                 </div>
@@ -1205,7 +1185,7 @@ function HomeInner({ studio = false }) {
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14] pb-24 md:pb-0">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
           <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
-          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="/connectors" className="hover:text-fg">Connections</a><a href="/tools" className="hover:text-fg">AI Tools</a><a href="/assets" className="hover:text-fg">My Assets</a><a href="/channel" className="hover:text-fg">Channel</a><a href="/api/youtube/start?next=/" className="hover:text-fg">Connect YouTube</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
+          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="/connectors" className="hover:text-fg">Connections</a><a href="/tools" className="hover:text-fg">AI Tools</a><a href="/assets" className="hover:text-fg">My Assets</a><a href="/channel" className="hover:text-fg">Channel</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
 

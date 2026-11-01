@@ -52,7 +52,7 @@ function Guide() {
     { id: 'transform', ...S.transform, body: <>On your own channel, YouTube only pays for content that adds your own value. Lean on commentary: tap <b>Edit</b>, then <b>Transform</b>, and use the AI commentary script to record your take.</> },
     { id: 'credit', ...S.credit },
     { id: 'check', ...S.check },
-    { id: 'c_post', title: 'Post on your own channel consistently', body: <>Use the <b>Shorts</b> button (it uploads as private for review). Post on a steady schedule and use <b>Post at best time</b>.</>, action: <a href={back} className={btn}>Go post</a> },
+    { id: 'c_post', title: 'Post on your own channel consistently', body: <>Download the clip and post it yourself. The <b>Shorts</b> button copies your caption and opens YouTube upload. Post on a steady schedule.</>, action: <a href={back} className={btn}>Go post</a> },
     { id: 'c_ypp', title: 'Reach the Partner Program and apply', body: <>YouTube&apos;s official page lists the ad-revenue thresholds as <b>1,000 subscribers</b> plus either <b>4,000 qualified watch hours in the last 12 months</b> or <b>10 million qualified Shorts views in the last 90 days</b>. Then apply in YouTube Studio.</>, action: <a href={YPP_URL} target="_blank" rel="noreferrer" className={btn}>Check the current requirements</a> },
   ];
   const steps = path === 'creator' ? CREATOR : PRO;

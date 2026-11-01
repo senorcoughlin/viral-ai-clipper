@@ -97,16 +97,8 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       else { download(); setMsg({ ok: true, text: 'Saved the video. Caption copied — paste it in the app.' }); }
     } catch (e) { if (e?.name !== 'AbortError') setMsg({ ok: false, text: 'Sharing failed. Use Download instead.' }); } finally { setBusy(''); }
   };
-  const forApp = (url, key) => { report({ published: key === 'tt' ? 'tiktok (opened app)' : 'instagram (opened app)' }); download(); copy(postText, key); setMsg({ ok: true, text: 'Video downloading, caption copied. Upload it in the app.' }); window.open(url, '_blank'); };
-  const youtube = async () => {
-    setBusy('yt'); setMsg(null); copy(postText, 'yt');
-    try {
-      const d = (await (await fetch('/api/post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'youtube', caption: postText, videoUrl, title: (ed.title || clip.title || '').slice(0, 100) }) })).json())?.data || {};
-      if (d.mode === 'youtube-uploaded' || d.mode === 'youtube-scheduled') report({ published: 'youtube', postUrl: d.url || '' }), setMsg({ ok: true, text: 'Uploaded to your YouTube as private. Review and publish it in YouTube Studio.', url: d.url });
-      else if (d.why === 'not_connected' || d.why === 'not_authorized') setMsg({ ok: false, text: 'Connect your YouTube channel first (Google may show an "unverified app" screen while our review is pending — tap Advanced → continue). Caption copied.', connect: true });
-      else setMsg({ ok: false, text: 'Auto-upload failed. Caption copied — upload it in YouTube Studio.', url: d.url || 'https://studio.youtube.com/' });
-    } catch { setMsg({ ok: false, text: 'Could not reach the uploader. Caption copied.', url: 'https://studio.youtube.com/' }); } finally { setBusy(''); }
-  };
+  const forApp = (url, key) => { report({ published: key === 'tt' ? 'tiktok (opened app)' : key === 'yt' ? 'youtube (opened app)' : 'instagram (opened app)' }); download(); copy(postText, key); setMsg({ ok: true, text: 'Video downloading, caption copied. Upload it in the app.' }); window.open(url, '_blank'); };
+  const youtube = () => forApp('https://www.youtube.com/upload', 'yt');
   const rerender = async () => {
     setBusy('render'); setMsg({ ok: true, text: 'Re-rendering… about a minute.' });
     try {
@@ -135,13 +127,6 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       set({ cam: blob.url }); setMsg({ ok: true, text: 'Facecam ready. Tap Apply edits to add it.' });
     } catch (e) { setMsg({ ok: false, text: e.message || 'Upload failed' }); } finally { setBusy(''); }
   };
-  const ytRef = useRef(null);
-  ytRef.current = youtube;
-  useEffect(() => {
-    const h = (e) => { if (selected && e.detail?.platform === 'youtube') ytRef.current?.(); };
-    window.addEventListener('studio-publish', h);
-    return () => window.removeEventListener('studio-publish', h);
-  }, [selected]);
   const suggest = async () => {
     setBusy('ai');
     try {
@@ -231,19 +216,19 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
         </ul>
         {msg && (
           <p role="status" className={`rounded-input border p-2.5 text-xs ${msg.ok ? 'border-lime/50 text-soft' : 'border-[#FF4D6D]/60 text-fg'}`}>
-            {msg.text}{msg.url && <> <a href={msg.url} target="_blank" rel="noreferrer" className="font-semibold text-lime">Open →</a></>}{msg.connect && <> <a href="/api/youtube/start?next=/studio" className="font-semibold text-lime">Connect YouTube →</a></>}
+            {msg.text}{msg.url && <> <a href={msg.url} target="_blank" rel="noreferrer" className="font-semibold text-lime">Open →</a></>}
           </p>
         )}
 
         {open === 'publish' && (
           <div className="flex flex-col gap-2 rounded-input border border-line2 p-3" data-publish>
             {!ready && <p className="text-xs text-[#FFB64D]">Not every monetization check is green yet. You can still publish, but YouTube and TikTok may limit reach or monetization on reused clips.</p>}
-            <p className="text-[11px] text-muted">Direct upload — needs your YouTube channel connected:</p>
-            <button type="button" onClick={youtube} disabled={!!busy} className="btn-lime h-11 w-full text-sm">{busy === 'yt' ? 'Uploading…' : 'YouTube Shorts (uploads as private)'}</button>
-            <p className="mt-1 text-[11px] text-muted">Opens the app with your caption copied — attach the clip (it downloads first):</p>
-            <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={download} className="btn-lime h-11 w-full text-sm font-bold">Download clip</button>
+            <p className="mt-1 text-[11px] text-muted">Post it yourself: the clip downloads, your caption is copied, and the app opens — attach the clip there.</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button type="button" onClick={youtube} className="btn-ghost h-11 text-sm">YouTube Shorts</button>
               <button type="button" onClick={() => forApp('https://www.tiktok.com/upload', 'tt')} className="btn-ghost h-11 text-sm">TikTok</button>
-              <button type="button" onClick={() => forApp('https://www.instagram.com/', 'ig')} className="btn-ghost h-11 text-sm">Instagram Reels</button>
+              <button type="button" onClick={() => forApp('https://www.instagram.com/', 'ig')} className="btn-ghost h-11 text-sm">Reels</button>
             </div>
             <button type="button" onClick={share} disabled={!!busy} className="btn-ghost h-11 w-full text-sm">{busy === 'share' ? 'Preparing…' : 'Share… (save to phone / send to any app)'}</button>
           </div>

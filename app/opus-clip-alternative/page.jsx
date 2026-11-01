@@ -29,7 +29,7 @@ const sections = [
    [
     "A full timeline-style editor. Ours is lighter: you can edit caption words, change the brand kit, add hook text and re-render, but it is not a full video editor.",
     "Team workspaces and collaboration features.",
-    "A wider set of publishing and scheduling integrations. We can upload clips to your YouTube channel as private videos; we do not schedule posts to other platforms.",
+    "A wider set of publishing and scheduling integrations. We do not post or schedule for you; you download clips and post them yourself.",
     "Features like AI B-roll. We deliberately skip generic B-roll and let the captions carry the edit."
    ],
    "Check Opus Clip’s current pricing and plans on their own site, since they change over time."
@@ -45,7 +45,7 @@ const sections = [
     "Face-biased vertical reframing and an optional facecam overlay.",
     "Viral score with reasons for every clip.",
     "Caption editing and re-rendering.",
-    "Upload to YouTube as private videos.",
+    "Download clips and post them to Shorts, TikTok or Reels yourself.",
     "Batch processing of up to 10 links on Pro."
    ]
   ]
@@ -68,7 +68,7 @@ const faqs = [
  ],
  [
   "Can I schedule posts to TikTok or Instagram?",
-  "Not currently. You can download clips or upload them to YouTube as private videos."
+  "Not currently. You download clips and post them yourself."
  ],
  [
   "Is Viral AI Clipper affiliated with Opus Clip?",

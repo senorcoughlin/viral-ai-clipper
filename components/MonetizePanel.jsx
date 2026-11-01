@@ -36,7 +36,7 @@ function nextStep(clip, st, campaign, goal, dismissed) {
   const issues = campaignIssues(campaign, st);
   if (issues[0]?.patch) return { ...issues[0], action: 'accept' };
   if (!st?.reviewed) return { k: 'review', text: 'Review the captions (fix any wrong words) and the hook', action: 'adjust' };
-  if (!st?.published) return { k: 'publish', text: goal === 'campaign' ? 'Publish it, then paste the post link into the campaign card' : 'Publish it: YouTube direct upload, or TikTok/Reels with caption copied', action: 'publish' };
+  if (!st?.published) return { k: 'publish', text: goal === 'campaign' ? 'Publish it, then paste the post link into the campaign card' : 'Publish it: download and post to Shorts, TikTok or Reels (caption copied)', action: 'publish' };
   if (campaign && !st?.submitted) return { k: 'submit', text: 'Submit the post link to the campaign', action: 'submit' };
   return { k: 'done', text: 'All set for this clip', done: true };
 }
@@ -211,7 +211,7 @@ export default function MonetizePanel({ clips = [], onRestoreClips }) {
             </div>
           </div>
         </div>
-        <p className="text-[11px] leading-snug text-muted">Publishing: YouTube uploads directly (Google review pending, so you may see an "unverified app" screen). TikTok and Instagram: we download the clip and open the app with your caption copied. Direct TikTok/Instagram posting needs their approvals and is planned.</p>
+        <p className="text-[11px] leading-snug text-muted">Publishing: download the clip and post it yourself. The YouTube Shorts, TikTok and Instagram buttons download the clip and open the app with your caption copied.</p>
       </>}
     </section>
   );

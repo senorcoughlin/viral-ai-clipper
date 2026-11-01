@@ -10,7 +10,7 @@ const JOURNEY = [
   { t: 'Check its rules', d: 'Confirm clipping is allowed, the platforms, and any credit or split rules.', href: '/permissions', cta: 'Permission template' },
   { t: 'Create a clip', d: 'Paste the video link in the Studio and generate.', href: '/studio', cta: 'Open Studio' },
   { t: 'Review captions', d: 'Fix any words (timing adjusts automatically), add a hook and your own commentary.', href: '/studio', cta: 'Edit in Studio' },
-  { t: 'Publish', d: 'Direct upload to YouTube Shorts, or open TikTok / Reels with your caption copied.', href: '/connectors', cta: 'Publishing options' },
+  { t: 'Publish', d: 'Download, then open YouTube Shorts, TikTok or Reels with your caption copied.', href: '/connectors', cta: 'Publishing options' },
   { t: 'Track and submit results', d: 'Log views and submit approved posts to the campaign for payout.', href: '/monetize', cta: 'Monetization checklist' },
 ];
 
@@ -18,7 +18,7 @@ const STEPS = [
   { n: '01', title: 'Paste a YouTube link', desc: 'Copy any public YouTube URL and paste it in the box on the home page. It works with long videos, Shorts, and interviews.' },
   { n: '02', title: 'Pick length and how many clips', desc: 'Choose 15, 30, or 60 seconds. Then pick 1 clip if you want it fast, or up to 8 if you want more options.' },
   { n: '03', title: 'Hit Clip and wait for the first one', desc: 'The AI finds the best moments, cuts them, and burns a caption. The first clip appears as soon as it is ready. You do not have to wait for all of them.' },
-  { n: '04', title: 'Download and post', desc: 'Upload to YouTube Shorts directly once your channel is connected (it lands as private so you can review). For TikTok, Reels or X, download the clip and the button opens the app with your caption copied. Create a free account so your clips stay saved.' },
+  { n: '04', title: 'Download and post', desc: 'Download the clip and post it yourself. For YouTube Shorts, TikTok, Reels or X, download the clip and the button opens the app with your caption copied. Create a free account so your clips stay saved.' },
 ];
 
 export default function Tutorial() {
@@ -66,7 +66,7 @@ export default function Tutorial() {
           <li>• You get 3 free generations a day. 1 generation = 1 video link, up to 8 clips. A batch of 3 links uses 3. Failed runs are not counted.</li>
           <li>• Credits: 1 credit = 1 extra generation, and they never expire. Pro gives 200 generations a day with no watermark.</li>
           <li>• Your clips also show up on the Assets page.</li>
-          <li>• Publishing: YouTube Shorts uploads directly once you connect your channel. TikTok, Reels and X open the app with your caption copied, so you attach the downloaded clip there.</li>
+          <li>• Publishing: download the clip and post it yourself. YouTube Shorts, TikTok, Reels and X open the app with your caption copied, so you attach the downloaded clip there.</li>
         </ul>
       </div>
       <Link href="/" className="btn-lime h-12 no-underline">Start clipping</Link>

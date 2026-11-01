@@ -6,7 +6,7 @@ export default function Terms() {
     <LegalPage title="Terms of Service" updated="October 24, 2026">
       <p>By using Viral AI Clipper at viralaiclipper.com (the “Service”), you agree to these Terms.</p>
       <h2>The Service</h2>
-      <p>Viral AI Clipper uses AI to turn long videos into short clips with captions, and can optionally upload clips you choose to your YouTube channel.</p>
+      <p>Viral AI Clipper uses AI to turn long videos into short clips with captions. You download your clips and post them yourself.</p>
       <h2>Your account</h2>
       <p>You are responsible for activity under your account and for keeping access to your email secure. You must be at least 13 years old (or the minimum age in your country).</p>
       <h2>Your content and rights</h2>
