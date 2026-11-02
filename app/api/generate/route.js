@@ -290,7 +290,7 @@ async function geminiTranscribe(buf, lenSec) {
     const g = await geminiGenerate({
       contents: [{ parts: [{ inline_data: { mime_type: 'audio/mpeg', data: Buffer.from(buf).toString('base64') } }, { text: prompt }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 32768, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
-    }, { label: 'gemini transcribe', timeoutMs: 90000, primaryMs: 45000 });
+    }, { label: 'gemini transcribe', timeoutMs: 90000, primaryMs: 45000, fallbackMs: 60000 });
     if (!g.ok) { console.warn('gemini transcribe failed', g.status || '', g.error); return EMPTY_TRANSCRIPT; }
     const data = g.data;
     meterGemini('transcribe', data?.usageMetadata);
@@ -360,7 +360,7 @@ async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false, h
     const g = await geminiGenerate({
       contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: prompt }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
-    }, { label: 'gemini face', timeoutMs: 22000, primaryMs: 8000 });
+    }, { label: 'gemini face', timeoutMs: 22000, primaryMs: 8000, fallbackMs: 10000 });
     if (!g.ok) return null;
     const data = g.data;
     meterGemini('face', data?.usageMetadata);

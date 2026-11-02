@@ -34,7 +34,7 @@ export async function POST(request) {
     const g = await geminiGenerate({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 1200 },
-    }, { label: 'gemini ai', timeoutMs: 27000, primaryMs: 12000 });
+    }, { label: 'gemini ai', timeoutMs: 27000, primaryMs: 10000, fallbackMs: 12000 });
     if (!g.ok) return NextResponse.json({ success: false, message: 'AI request failed', detail: String(g.error || '').slice(0, 400) }, { status: 502 });
     const data = g.data;
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
