@@ -4,7 +4,7 @@ export const maxDuration = 30;
 import { NextResponse } from 'next/server';
 import { routeGuard } from '../../../lib/ratelimit';
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
+import { geminiGenerate } from '../../../lib/gemini';
 
 const TOOLS = {
   hooks: 'Generate 8 short viral hooks (under 12 words) for TikTok/Reels/Shorts. Return a JSON array of strings only.',
@@ -31,16 +31,12 @@ export async function POST(request) {
 
   const prompt = `${instruction}\n\nTopic or text:\n${String(input).slice(0, 4000)}`;
   try {
-    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 1200 },
-      }),
-    });
-    if (!res.ok) { const err = await res.text(); return NextResponse.json({ success: false, message: 'AI request failed', detail: err.slice(0, 400) }, { status: 502 }); }
-    const data = await res.json();
+    const g = await geminiGenerate({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1200 },
+    }, { label: 'gemini ai', timeoutMs: 27000, primaryMs: 10000, fallbackMs: 12000 });
+    if (!g.ok) return NextResponse.json({ success: false, message: 'AI request failed', detail: String(g.error || '').slice(0, 400) }, { status: 502 });
+    const data = g.data;
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     let result = match ? JSON.parse(match[0]) : { text };

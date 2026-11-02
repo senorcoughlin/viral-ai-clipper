@@ -18,6 +18,7 @@ import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioCut, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
+import { geminiGenerate } from '../../../lib/gemini';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept. Long sources make RenderIO's download+cut slower and
@@ -90,7 +91,6 @@ async function streamChunkTranscript(audioUrl, start, len, timeoutMs, mp4 = fals
 }
 
 const exec = promisify(execFile);
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
 // Handles watch, youtu.be, shorts, embed and /live/<id> links.
@@ -219,20 +219,12 @@ Style: ${style}
 Transcript:
 ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcript || '').slice(0, 14000)}`;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 55000);
-    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 8192, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
-      }),
-    });
-    clearTimeout(timer);
-    if (!res.ok) { console.warn('gemini failed', res.status, (await res.text().catch(() => '')).slice(0, 200)); return null; }
-    const data = await res.json();
+    const g = await geminiGenerate({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.5, maxOutputTokens: 8192, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
+    }, { label: 'gemini score', timeoutMs: 55000, primaryMs: 25000 });
+    if (!g.ok) { console.warn('gemini error', g.status || '', g.error); return null; }
+    const data = g.data;
     meterGemini('score', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
     let parsed = null;
@@ -294,19 +286,13 @@ async function geminiTranscribe(buf, lenSec) {
   const key = process.env.GEMINI_API_KEY;
   if (!key || !buf?.length) return EMPTY_TRANSCRIPT;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90000);
     const prompt = 'Transcribe this audio verbatim. Return ONLY JSON {"lines":[{"t":seconds_from_start,"text":"..."}]} with one entry per sentence or short phrase (max ~12 words), t = when it starts, in seconds as a number.';
-    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
-      method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ inline_data: { mime_type: 'audio/mpeg', data: Buffer.from(buf).toString('base64') } }, { text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 32768, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
-      }),
-    });
-    clearTimeout(timer);
-    if (!res.ok) { console.warn('gemini transcribe failed', res.status); return EMPTY_TRANSCRIPT; }
-    const data = await res.json();
+    const g = await geminiGenerate({
+      contents: [{ parts: [{ inline_data: { mime_type: 'audio/mpeg', data: Buffer.from(buf).toString('base64') } }, { text: prompt }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 32768, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
+    }, { label: 'gemini transcribe', timeoutMs: 90000, primaryMs: 45000, fallbackMs: 60000 });
+    if (!g.ok) { console.warn('gemini transcribe failed', g.status || '', g.error); return EMPTY_TRANSCRIPT; }
+    const data = g.data;
     meterGemini('transcribe', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
     const lines = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').lines || [])
@@ -371,19 +357,12 @@ async function faceCropFor(url, start, len, timeoutMs = 45000, direct = false, h
     const dims = jpegSize(jpg);
     const b64 = jpg.toString('base64');
     const prompt = 'This image is 3 video frames side by side (left, middle, right). For each frame, find the main speaker\'s face (the person talking or most prominent). Return ONLY JSON {"faces":[x1,x2,x3]} where each x is the horizontal center of that face as a fraction 0-1 of THAT frame\'s width, or null if no face.';
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 20000);
-    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(gkey)}`, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
-      }),
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const data = await res.json();
+    const g = await geminiGenerate({
+      contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: prompt }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
+    }, { label: 'gemini face', timeoutMs: 22000, primaryMs: 8000, fallbackMs: 10000 });
+    if (!g.ok) return null;
+    const data = g.data;
     meterGemini('face', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
     const xs = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}').faces || []).map(Number).filter(x => Number.isFinite(x) && x > 0.02 && x < 0.98) // 0/1 = model's "no face"
