@@ -15,7 +15,7 @@ import { flagOn } from '../../../lib/siteconfig';
 import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
-import { renderioRun, renderioCut, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
+import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
@@ -933,7 +933,7 @@ export async function POST(request) {
           : ctx.cachedSrc?.blob
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
           : (ytId && youtubeDownloader()
-              ? (async () => {
+              ? (async () => { try { return await (async () => {
                   const fmt = ytSourceFormat(ytSecs);
                   const u = await youtubeDownloader()(videoUrl, 150000, { format: fmt });
                   // Duration unknown (YouTube often hides it from our servers) or a heavy file:
@@ -963,7 +963,13 @@ export async function POST(request) {
                     catch (e) { console.warn('smaller tier failed; using original', e?.message); }
                   }
                   return u;
-                })()
+                })(); } catch (e) {
+                  // Hosted/own downloaders all failed: last resort is RenderIO's yt-dlp (with retries), if time allows.
+                  const deadlineAt = startedAt + RUN_BUDGET_MS - 150000;
+                  if (e?.capacity || Date.now() > deadlineAt - 45000) throw e;
+                  console.warn('youtube downloader failed; trying RenderIO', e?.message);
+                  return renderioRunRetry({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 90000, { deadlineAt });
+                } })()
               : (async () => {
                   // Facebook: resolve share links to the canonical reel/video URL, try the hosted
                   // download API first (RenderIO's yt-dlp is often blocked by Facebook), then RenderIO.
@@ -976,9 +982,18 @@ export async function POST(request) {
                       catch (e) { console.warn('facebook download api failed; trying RenderIO', e?.message); }
                     }
                   }
-                  return renderioRun({ input_urls: { in_video: dl }, format_selector: '720p' }, 'out_video', rioKey, 120000)
-                    // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
-                    .catch((e) => { if (e?.capacity) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: dl } }, 'out_video', rioKey, 120000); });
+                  // Retries with backoff on SOURCE_RATE_LIMITED / 429 / 5xx / timeouts, within the run budget.
+                  const deadlineAt = startedAt + RUN_BUDGET_MS - 120000;
+                  try {
+                    return await renderioRunRetry({ input_urls: { in_video: dl }, format_selector: '720p' }, 'out_video', rioKey, 120000, { deadlineAt })
+                      // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
+                      .catch((e) => { if (e?.capacity || isTransientRenderioError(e)) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: dl } }, 'out_video', rioKey, 120000); });
+                  } catch (e) {
+                    // RenderIO failed: try the hosted download API (if configured and not already tried) before giving up.
+                    if (e?.capacity || isFacebookUrl(videoUrl) || !(downloadApiEnabled || rapidEnabled) || Date.now() > deadlineAt) throw e;
+                    console.warn('renderio download failed; trying download api', e?.message);
+                    return await downloadFacebookViaApi(dl, Math.min(90000, Math.max(30000, deadlineAt + 60000 - Date.now())));
+                  }
                 })())
               .then(u => ({ url: u, direct: true }))
               .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
