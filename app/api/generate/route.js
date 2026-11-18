@@ -914,8 +914,9 @@ export async function POST(request) {
       send({ type: 'start', total: count, ...(media ? { stream: { live: !!media.live, minutes: media.liveMinutes || null, duration: Math.round(media.winLen), chunks: audioChunks } } : {}) });
       send({ type: 'status', step: 'transcript' });
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
-      const cachedTr = media?.live || noCache ? null : await getCachedTranscript(videoUrl).catch(() => null);
-      if (!cachedTr && ytId && !media && subtitlesEnabled) ctx.subsP = fetchYoutubeSubtitles(videoUrl, 60000);
+      // Start transcript cache + source URL resolution together so the file pull can
+      // overlap the YouTube subtitle fetch (that fetch alone can take ~60s).
+      const cachedTrP = media?.live || noCache ? Promise.resolve(null) : getCachedTranscript(videoUrl).catch(() => null);
       // Cold run: start the RenderIO audio -> Whisper path at the same time as the
       // YouTube caption fetch (captions are usually blocked from Vercel). If captions
       // win, the audio result is simply ignored.
@@ -927,8 +928,10 @@ export async function POST(request) {
         ctx.srcP = Promise.resolve({ url: media.videoUrl, direct: true });
       } else if (rioKey) {
         // A previous invocation of this job (or a recent run) may already have the source in Blob.
-        ctx.cachedSrc = ytId && youtubeDownloader() ? await kvGetJson(SRC_KEY(ytId)) : null;
-        ctx.srcP = isBlobUrl(videoUrl)
+        // Resolve the source URL without waiting on the subtitle/transcript cache.
+        ctx.srcP = (async () => {
+          ctx.cachedSrc = ytId && youtubeDownloader() ? await kvGetJson(SRC_KEY(ytId)) : null;
+          return await (isBlobUrl(videoUrl)
           ? Promise.resolve({ url: rioUrl, direct: true })
           : ctx.cachedSrc?.blob
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
@@ -996,7 +999,12 @@ export async function POST(request) {
                   }
                 })())
               .then(u => ({ url: u, direct: true }))
-              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; });
+              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; }));
+        })();
+      }
+      const cachedTr = await cachedTrP;
+      if (!cachedTr && ytId && !media && subtitlesEnabled) ctx.subsP = fetchYoutubeSubtitles(videoUrl, 60000);
+      if (rioKey && !media) {
         // Fail fast: if the link can't be downloaded, every per-clip yt-dlp fallback hangs
         // the same way, so stop now, refund the run and tell the user clearly.
         if (!isBlobUrl(videoUrl)) {
@@ -1047,7 +1055,7 @@ export async function POST(request) {
               }
               if (res.blobUrl) kvSetJson(SRC_KEY(ytId), { blob: res.blobUrl }, 30 * 24 * 3600).catch(() => {});
               ctx.sourceSec = await probeDuration(file);
-              console.log('local source', { ms: Date.now() - t0, bytes: res.size, sec: ctx.sourceSec, fromBlob: !!src.blob });
+              console.log('local source', { ms: Date.now() - t0, bytes: res.size, sec: ctx.sourceSec, fromBlob: !!src.blob, region: process.env.VERCEL_REGION || 'local', MBps: res.size ? +(res.size / 1e6 / Math.max(0.001, (Date.now() - t0) / 1000)).toFixed(2) : 0 });
               ctx.local = file;
               // Not enough time left in this invocation for transcription + cuts: hand the job to a
               // fresh invocation, which picks the source up from Blob and continues the same job.
