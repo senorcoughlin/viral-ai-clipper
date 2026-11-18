@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --import ./scripts/register-ext.mjs --test scripts/test-download.mjs"
   },
   "dependencies": {
     "@types/node": "^20.0.0",
