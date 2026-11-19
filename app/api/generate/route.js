@@ -43,8 +43,8 @@ const YT_MAX_SOURCE_BYTES = Number(process.env.YT_MAX_SOURCE_MB || 250) * 1e6; /
 const YT_MAX_FILE_BYTES = Number(process.env.YT_MAX_FILE_MB || 420) * 1e6; // /tmp is 512 MB; leave room for audio + cuts
 const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
-const WHOLE_MAX_SEC = 90;
-const WHOLE_TOO_LONG = (s) => `"Use whole video" works for videos up to 90 seconds, and this one is ${s >= 120 ? Math.round(s / 60) + ' minutes' : Math.round(s) + ' seconds'} long. Turn it off to get AI-picked clips instead. This run was not counted.`;
+const WHOLE_MAX_SEC = 120;
+const WHOLE_TOO_LONG = (s) => `"Use whole video" works for videos up to 2 minutes, and this one is ${s >= 120 ? Math.round(s / 60) + ' minutes' : Math.round(s) + ' seconds'} long. Turn it off to get AI-picked clips instead. This run was not counted.`;
 const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
 
 import { youtubeDuration } from '../../../lib/ytduration';
@@ -507,7 +507,7 @@ export async function POST(request) {
   const brand = sanitizeBrand(body.brand);
   const safeClientCrop = typeof faceCrop === 'string' && /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)\*[01]\.\d{3}$/.test(faceCrop) ? faceCrop : null;
   let clipLength = Math.min(900, Math.max(5, Math.round(Number(body.clipLength)) || 30));
-  // "Use whole video": the entire source (90s or less) becomes one clip. Counts as one clip.
+  // "Use whole video": the entire source (2 minutes or less) becomes one clip. Counts as one clip.
   const whole = body.wholeVideo === true;
   if (whole) clipLength = WHOLE_MAX_SEC;
   const aiStyle = ['clean_viral','character_swap','anime_action','kids_3d'].includes(rawStyle) ? rawStyle : 'clean_viral';
@@ -573,14 +573,15 @@ export async function POST(request) {
     if (!media.winLen) return NextResponse.json({ success: false, message: 'We could not read the length of that video. Try another link.' }, { status: 400 });
   }
 
-  // Whole-video mode: confirm the length before charging. Unknown length is capped at 90s.
+  // Whole-video mode: confirm the length before charging. Unknown length is capped at WHOLE_MAX_SEC.
+  // Too-long answers carry code 'whole_too_long' so the browser can rerun as highlight clips.
   let wholeSec = 0;
   if (whole) {
     if (media) wholeSec = media.live ? 0 : media.winLen;
     else if (ytId) wholeSec = ytSecs > 0 ? ytSecs : 0;
     else if (localFfmpegAvailable()) wholeSec = await probeRemoteDuration(rioUrl, null, null, 12000).catch(() => 0);
     if (media?.live) return NextResponse.json({ success: false, message: '"Use whole video" needs a finished video, not a live stream. Turn it off to clip the last few minutes.' }, { status: 400 });
-    if (wholeSec > WHOLE_MAX_SEC + 0.5) return NextResponse.json({ success: false, message: WHOLE_TOO_LONG(wholeSec), tooLong: true, whole: true }, { status: 400 });
+    if (wholeSec > WHOLE_MAX_SEC + 0.5) return NextResponse.json({ success: false, message: WHOLE_TOO_LONG(wholeSec), tooLong: true, whole: true, code: 'whole_too_long', secs: Math.round(wholeSec) }, { status: 400 });
     if (wholeSec > 0) clipLength = Math.max(1, Math.ceil(wholeSec));
     console.log('whole video', { wholeSec, clipLength });
   }
@@ -759,9 +760,9 @@ export async function POST(request) {
           win = hls ? await windowPlaylist(media.videoUrl, start, len, rio) : { url: src.url, offset: start };
         }
         if (whole && !wholeSec && !ctx.sourceSec && src.url && !hls && localFfmpegAvailable()) {
-          // Length still unknown (e.g. a resolved Facebook/direct URL): probe it now; otherwise stay capped at 90s.
+          // Length still unknown (e.g. a resolved Facebook/direct URL): probe it now; otherwise stay capped at WHOLE_MAX_SEC.
           const sec = await probeRemoteDuration(src.url, null, null, 10000).catch(() => 0);
-          if (sec > WHOLE_MAX_SEC + 0.5) { const e = new Error(WHOLE_TOO_LONG(sec)); throw e; }
+          if (sec > WHOLE_MAX_SEC + 0.5) { const e = new Error(WHOLE_TOO_LONG(sec)); e.code = 'whole_too_long'; throw e; }
           if (sec > 0) { ctx.sourceSec = sec; len = Math.min(len, Math.max(1, Math.ceil(sec))); }
         }
         const long = len > 90;
@@ -1134,8 +1135,8 @@ export async function POST(request) {
             if (whole && ctx.sourceSec > WHOLE_MAX_SEC + 0.5) {
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
               await refundUsage();
-              send({ type: 'error', message: WHOLE_TOO_LONG(ctx.sourceSec) });
-              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+              send({ type: 'error', message: WHOLE_TOO_LONG(ctx.sourceSec), code: 'whole_too_long' });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long', code: 'whole_too_long' });
               close();
               return;
             }
