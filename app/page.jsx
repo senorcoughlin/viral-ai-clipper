@@ -33,25 +33,44 @@ const fmtLen = (secs) => {
 };
 
 const FORMATS = [
-  { value: 'shorts_9_16', label: '9:16' },
-  { value: 'landscape_16_9', label: '16:9' },
-  { value: 'square_1_1', label: '1:1' },
+  { value: 'shorts_9_16', label: 'Vertical 9:16', short: 'vertical 9:16', hint: 'Tall, full-screen video for TikTok, Reels and YouTube Shorts. The AI keeps the speaker in frame.' },
+  { value: 'landscape_16_9', label: 'Wide 16:9', short: 'wide 16:9', hint: 'Regular widescreen for YouTube, X or websites.' },
+  { value: 'square_1_1', label: 'Square 1:1', short: 'square 1:1', hint: 'Square posts for Instagram and Facebook feeds.' },
 ];
 const PACKS = [
-  { value: '', label: 'Default' },
-  { value: 'bold', label: 'Bold captions' },
-  { value: 'podcast', label: 'Podcast' },
-  { value: 'gameplay', label: 'Gameplay zoom' },
+  { value: '', label: 'Standard', hint: 'Clean white captions near the bottom. A safe pick for most videos.' },
+  { value: 'bold', label: 'Bold', hint: 'Big yellow captions that grab attention. Good for hype, tips and storytime.' },
+  { value: 'podcast', label: 'Podcast', hint: 'Smaller, calm captions that stay out of the way. Good for talking heads and interviews.' },
+  { value: 'gameplay', label: 'Gameplay', hint: 'Zooms in slightly and puts big captions mid-screen. Good for gaming and stream clips.' },
 ];
+const WHOLE_MAX_SEC = 120; // "Whole video" mode: sources up to 2 minutes become one clip (server enforces the same cap).
+// 95 -> "1:35"
+const fmtClock = (secs) => { const t = Math.round(Number(secs) || 0); const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60; return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; };
+// A labelled row of choice chips with a one-line explanation of the current choice underneath.
+function OptionGroup({ id, title, options, value, onChange, help }) {
+  const cur = options.find(o => o.value === value);
+  return (
+    <div role="radiogroup" aria-labelledby={`${id}-t`} aria-describedby={`${id}-h`} className="flex min-w-0 flex-col gap-1.5">
+      <span id={`${id}-t`} className="text-xs font-semibold text-white">{title}</span>
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
+        {options.map(o => (
+          <button key={o.value} type="button" role="radio" aria-checked={value === o.value} title={o.hint || undefined} onClick={() => onChange(o.value)} className={`chip shrink-0 ${value === o.value ? 'chip-on' : ''}`}>{o.label}</button>
+        ))}
+      </div>
+      <p id={`${id}-h`} className="text-xs leading-snug text-muted">{help || cur?.hint || ''}</p>
+    </div>
+  );
+}
+const isWholeTooLongMsg = (m) => /"Use whole video" works for videos up to/.test(String(m || ''));
 const LENGTHS = [
-  { value: 15, label: '15s' },
-  { value: 30, label: '30s' },
-  { value: 45, label: '45s' },
-  { value: 60, label: '1m' },
-  { value: 180, label: '3m' },
-  { value: 300, label: '5m' },
-  { value: 600, label: '10m' },
-  { value: 900, label: '15m' },
+  { value: 15, label: '15s', hint: '15 seconds. Fastest to watch; great for one punchline or tip.' },
+  { value: 30, label: '30s', hint: '30 seconds. The sweet spot for TikTok, Reels and Shorts.' },
+  { value: 45, label: '45s', hint: '45 seconds. Room for a short story or explanation.' },
+  { value: 60, label: '1m', hint: '1 minute. Longer stories; still fits Shorts and Reels.' },
+  { value: 180, label: '3m', hint: '3 minutes. Full segments for TikTok or YouTube.' },
+  { value: 300, label: '5m', hint: '5 minutes. Long segments; best for YouTube.' },
+  { value: 600, label: '10m', hint: '10 minutes. Whole topics from a long video.' },
+  { value: 900, label: '15m', hint: '15 minutes. Full chapters; for YouTube or highlights reels.' },
 ];
 const CLIP_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }));
 const STREAM_STEPS = [
@@ -68,7 +87,7 @@ const FAQ = [
   ['Which links work?', 'Public YouTube videos and Shorts, Twitch and Kick replays (VODs), Twitch channels while live (clip the last few minutes), and direct MP4 links. You can also upload an MP4 from your phone or computer (up to 500 MB).'],
   ['How long can the video be?', 'Long videos work, but there is a length limit, shown under the link box. Hour-long videos take several minutes to process. Live YouTube streams and premieres can\u2019t be clipped until they have ended.'],
   ['How long does it take?', 'A short video is usually done in about a minute. Longer videos take a few minutes. You can switch apps while it works; your clips appear when you come back.'],
-  ['What do I get?', 'Up to 8 clips per link, cut to 9:16, 16:9 or 1:1, with captions burned in, an AI hook and a viral score for each clip. Download them and post to TikTok, Reels, Shorts or X.'],
+  ['What do I get?', 'A video up to 2 minutes can become one whole clip. Longer videos get up to 8 highlight clips per link, cut to 9:16, 16:9 or 1:1, with captions burned in, an AI hook and a viral score for each clip. Download them and post to TikTok, Reels, Shorts or X.'],
   ['Do I need an account?', 'No. A free account just keeps your clips saved and lets you use your purchases on other devices.'],
   ['What if a video fails?', 'Failed runs are not counted against your free generations or credits. Try again, or upload the file instead.'],
   ['Can I make money with clips?', 'Many clippers join paid clip campaigns or creator programs. Only clip content you have permission to use. Earnings aren\u2019t guaranteed.'],
@@ -169,9 +188,9 @@ function HomeInner({ studio = false }) {
   const [billingEmail, setBillingEmail] = useState('');
   const [uploading, setUploading] = useState(0);
   const [srcSecs, setSrcSecs] = useState({ url: "", secs: 0 }); // length of an uploaded file, for the short-source warning
-  const [wholeVideo, setWholeVideo] = useState(false); // "Use whole video (≤90s)": the entire source becomes one clip
+  const [wholeVideo, setWholeVideo] = useState(true); // "Whole video" (default): sources up to 2 minutes become one clip; longer ones fall back to highlights
   const [linkSecs, setLinkSecs] = useState({ url: '', secs: 0, checking: false }); // detected length of a pasted link
-  // Detect the pasted link's length (debounced) so we can offer "Use whole video" for 90s-or-less sources.
+  // Detect the pasted link's length (debounced): drives "Whole video" (2 minutes or less) and the up-front checks.
   useEffect(() => {
     const u = videoUrl.trim();
     if (!u || /\s/.test(u) || !/^https?:\/\//i.test(u)) { setLinkSecs({ url: '', secs: 0, checking: false }); return; }
@@ -186,7 +205,7 @@ function HomeInner({ studio = false }) {
     return () => { live = false; clearTimeout(t); };
   }, [videoUrl, srcSecs]);
   const curSecs = linkSecs.url && linkSecs.url === videoUrl.trim() ? linkSecs.secs : 0;
-  const wholeTooLong = curSecs > 90.5;
+  const wholeTooLong = curSecs > WHOLE_MAX_SEC + 0.5;
   // Length caps, shown before anything is pasted (CDN-cached on the server).
   const [limits, setLimits] = useState(null);
   useEffect(() => { fetch('/api/duration?limits=1').then(r => r.json()).then(j => { if (j?.maxSecs) setLimits(j); }).catch(() => {}); }, []);
@@ -201,7 +220,20 @@ function HomeInner({ studio = false }) {
   })();
   // Links the server already turned away this session (live, too long…), so a repeat paste gets the answer instantly.
   const rejectedRef = useRef(new Map());
-  const wholeOn = wholeVideo && !wholeTooLong;
+  const linkCount = parseLinks(videoUrl).links.length;
+  // Whole video needs one finished video: batches and Twitch "last X minutes" use highlights instead.
+  const wholeBlocked = wholeTooLong ? 'long' : linkCount > 1 ? 'batch' : liveChannel ? 'live' : '';
+  const wholeOn = wholeVideo && !wholeBlocked;
+  const planSummary = (() => {
+    const shape = (FORMATS.find(f => f.value === clipFormat) || FORMATS[0]).short;
+    const extras = [autoSubtitles ? 'captions' : 'no captions', aiHook ? 'an AI hook' : ''].filter(Boolean).join(' and ');
+    const n = Math.max(1, linkCount);
+    const uses = isPro ? '' : ` Uses ${n} generation${n === 1 ? '' : 's'}.`;
+    if (wholeOn) return `1 ${shape} clip of the whole video${curSecs > 0 ? ` (${fmtClock(curSecs)})` : ''}, with ${extras}.${uses}`;
+    const len = (LENGTHS.find(l => l.value === clipLength) || { label: `${clipLength}s` }).label;
+    const per = `${clipCount === 1 ? '1 clip' : `up to ${clipCount} clips`} of about ${len}`;
+    return `${n > 1 ? `${n} videos × ` : ''}${per}, ${shape}, with ${extras}.${uses}`;
+  })();
 
   // Upload straight from the browser to Vercel Blob, then use the blob URL as the source.
   const handleUploadFile = async (file) => {
@@ -338,6 +370,7 @@ function HomeInner({ studio = false }) {
       setProgressLabel(STEP_MAP[msg.step][1]);
     }
     if (msg.type === 'error') {
+      if (msg.code === 'whole_too_long' || isWholeTooLongMsg(msg.message)) st.wholeTooLong = true;
       if (msg.index === undefined) st.fatal = msg.message || 'Generation failed on the server.';
       else st.failed += 1;
       st.lastReason = msg.message || st.lastReason;
@@ -433,7 +466,7 @@ function HomeInner({ studio = false }) {
 
   const handleClipping = async (e, override) => {
     e?.preventDefault?.();
-    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength: wholeOn ? 90 : clipLength, clipCount: wholeOn ? 1 : clipCount, pack, liveMinutes, wholeVideo: wholeOn };
+    const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength: wholeOn ? WHOLE_MAX_SEC : clipLength, clipCount: wholeOn ? 1 : clipCount, pack, liveMinutes, wholeVideo: wholeOn, hlLength: clipLength, hlCount: clipCount };
     // Shadow state so a retry reuses exactly the same URL and settings.
     const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk } = settings;
     if (!runUrl.trim()) return;
@@ -504,6 +537,7 @@ function HomeInner({ studio = false }) {
           let err = {};
           try { err = JSON.parse(text); } catch {}
           if (err.limitReached) setShowPricing(true);
+          else if (err.code === 'whole_too_long' || isWholeTooLongMsg(err.message)) { const e2 = new Error(err.message); e2.wholeFallback = true; throw e2; }
           else if (res.status === 400 && err.message) rejectedRef.current.set(url, { message: err.message, at: Date.now() });
           throw new Error(err.message || `Generate failed (${res.status})`);
         }
@@ -553,6 +587,7 @@ function HomeInner({ studio = false }) {
         }
         all = st.all; failed = st.failed; lastReason = st.lastReason;
         const { fatal, gotDone, badLines } = st;
+        if (st.wholeTooLong && settings.wholeVideo && !st.all.length) { const e2 = new Error(fatal || st.lastReason); e2.wholeFallback = true; throw e2; }
         if (fatal) throw new Error(fatal);
         if (!gotDone) {
           throw new Error(badLines ? 'The server sent a garbled response and the stream ended early.' : 'The connection ended before generation finished.');
@@ -568,6 +603,7 @@ function HomeInner({ studio = false }) {
       const parts = [];
       if (failed) parts.push(`${failed} clip${failed === 1 ? '' : 's'} failed to render`);
       if (previews) parts.push(`${previews === all.length ? 'These are' : `${previews} are`} placeholder previews, not cuts from your video${lastReason ? ` (${lastReason})` : ''}`);
+      if (settings.note) parts.unshift(settings.note);
       if (parts.length) setNotice(parts.join('. ') + '.');
       all.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
       setClips([...all]);
@@ -583,6 +619,12 @@ function HomeInner({ studio = false }) {
       setHistory(prev => [{ id: Date.now(), url: runUrl, format: fmt, aiStyle: style, clips: all }, ...prev].slice(0, 5));
     } catch (e) {
       clearActiveJob();
+      // "Whole video" on a video over 2 minutes: rerun the same link as highlight clips instead of failing.
+      if (settings.wholeVideo && !all.length && (e?.wholeFallback || isWholeTooLongMsg(e?.message) || isWholeTooLongMsg(lastReason))) {
+        ft('whole_fallback');
+        await handleClipping(null, { ...settings, wholeVideo: false, clipLength: settings.hlLength || 30, clipCount: settings.hlCount || 1, note: 'This video is longer than 2 minutes, so we made highlight clips instead of one whole-video clip' });
+        return;
+      }
       setClips([...all]);
       ft('generate_error', { source: settings.source || 'manual', message: String(e?.message || 'unknown').slice(0, 120) });
       setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
@@ -666,6 +708,9 @@ function HomeInner({ studio = false }) {
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
+              <p data-testid="plan-summary" aria-live="polite" className="px-1 text-[13px] leading-snug text-soft">
+                <span className="font-semibold text-white">You&apos;ll get: </span>{planSummary}
+              </p>
               {linkIssue ? (
                 <p role="alert" data-testid="link-issue" className="rounded-input border border-[#FFB64D]/50 bg-[#FFB64D]/10 px-3 py-2 text-[13px] leading-snug text-[#FFD9A0]">{linkIssue.message}</p>
               ) : (
@@ -707,43 +752,67 @@ function HomeInner({ studio = false }) {
                   {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
                 </div>
               )}
-              <div className={studio ? 'flex flex-col gap-2 px-0.5' : 'flex flex-col gap-2 px-0.5 sm:flex-row sm:flex-wrap sm:items-center'}>
-                {[
-                  { label: 'Format', options: FORMATS, value: clipFormat, set: setClipFormat },
-                  { label: 'Pack', options: PACKS, value: pack, set: setPack },
-                  ...(wholeOn ? [] : [
-                  { label: 'Length', options: LENGTHS, value: clipLength, set: setClipLength },
-                  { label: 'Clips', options: CLIP_COUNTS, value: clipCount, set: setClipCount },
-                  ]),
-                ].map((g, gi) => (
-                  <div key={g.label} role="group" aria-label={g.label} className={studio ? 'flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]' : 'flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:overflow-visible sm:pb-0'}>
-                    {gi > 0 && !studio && <span aria-hidden className="mx-1.5 hidden h-5 w-px bg-line2 sm:block" />}
-                    <span className={`mr-1 w-12 shrink-0 text-xs text-muted ${studio ? '' : 'sm:w-auto'}`}>{g.label}</span>
-                    {g.options.map(o => (
-                      <button key={o.value} type="button" aria-pressed={g.value === o.value} onClick={() => g.set(o.value)} className={`chip shrink-0 ${g.value === o.value ? 'chip-on' : ''}`}>{o.label}</button>
-                    ))}
+              <div className="flex flex-col gap-4 rounded-input border border-line2/70 bg-ink/40 p-3">
+                {/* 1. What to make */}
+                <div role="radiogroup" aria-labelledby="mode-t" className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span id="mode-t" className="text-xs font-semibold uppercase tracking-[.08em] text-muted">1 · What to make</span>
+                    {linkSecs.checking && linkSecs.url === videoUrl.trim() && <span className="text-xs text-muted">Checking length…</span>}
+                    {!linkSecs.checking && curSecs > 0 && <span className="text-xs text-muted">Your video: {fmtClock(curSecs)}</span>}
                   </div>
-                ))}
-              </div>
-              <div role="group" aria-label="Whole video" className="flex flex-col gap-1.5 px-0.5">
-                <div className="flex items-center gap-2">
-                  <button type="button" data-testid="whole-toggle" aria-pressed={wholeOn} disabled={wholeTooLong} onClick={() => setWholeVideo(v => !v)} className={`chip shrink-0 ${wholeOn ? 'chip-on' : ''} ${wholeTooLong ? 'cursor-not-allowed opacity-50' : ''}`}>{wholeOn ? '✓ ' : ''}Use whole video (≤90s)</button>
-                  {linkSecs.checking && linkSecs.url === videoUrl.trim() && <span className="text-xs text-muted">Checking length…</span>}
-                  {!linkSecs.checking && curSecs > 0 && <span className="text-xs text-muted">Video is {Math.round(curSecs)}s</span>}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" role="radio" data-testid="whole-toggle" aria-checked={wholeOn} disabled={!!wholeBlocked} onClick={() => setWholeVideo(true)}
+                      className={`flex flex-col items-start gap-0.5 rounded-input border px-3 py-2.5 text-left transition-colors ${wholeOn ? 'border-lime bg-lime-tint' : 'border-line2 hover:border-soft'} ${wholeBlocked ? 'cursor-not-allowed opacity-50' : ''}`}>
+                      <span className={`text-sm font-bold ${wholeOn ? 'text-lime' : 'text-white'}`}>{wholeOn ? '✓ ' : ''}Whole video</span>
+                      <span className="text-[11px] leading-snug text-soft">Videos up to 2 min → 1 clip</span>
+                    </button>
+                    <button type="button" role="radio" data-testid="highlights-toggle" aria-checked={!wholeOn} onClick={() => setWholeVideo(false)}
+                      className={`flex flex-col items-start gap-0.5 rounded-input border px-3 py-2.5 text-left transition-colors ${!wholeOn ? 'border-lime bg-lime-tint' : 'border-line2 hover:border-soft'}`}>
+                      <span className={`text-sm font-bold ${!wholeOn ? 'text-lime' : 'text-white'}`}>{!wholeOn ? '✓ ' : ''}Best highlights</span>
+                      <span className="text-[11px] leading-snug text-soft">Any length → AI picks moments</span>
+                    </button>
+                  </div>
+                  {wholeVideo && wholeBlocked ? (
+                    <p role="note" data-testid="whole-fallback-note" className="rounded-input border border-lime/40 px-3 py-2 text-xs leading-snug text-soft">
+                      {wholeBlocked === 'long' ? <>This video is {fmtClock(curSecs)} long, so we&apos;ll pick the best highlights instead. Whole video works for videos up to 2 minutes.</>
+                        : wholeBlocked === 'batch' ? <>You pasted {linkCount} links, so each one gets highlight clips. Whole video works with one link at a time.</>
+                        : <>Live channels are clipped as highlights from the last few minutes.</>}
+                    </p>
+                  ) : (
+                    <p className="text-xs leading-snug text-muted">
+                      {wholeOn
+                        ? (curSecs > 0 ? 'Your whole video becomes one clip with captions, ready to post as-is. Best for short videos.' : 'Your whole video becomes one clip with captions. If it turns out to be longer than 2 minutes, we\u2019ll switch to highlights automatically.')
+                        : 'The AI finds the strongest moments and cuts each one into its own clip. Best for long videos, podcasts and streams.'}
+                    </p>
+                  )}
+                  {!wholeOn && (
+                    <div className={studio ? 'flex flex-col gap-3' : 'grid gap-3 sm:grid-cols-2'}>
+                      <OptionGroup id="opt-len" title="Clip length" options={LENGTHS} value={clipLength} onChange={setClipLength} />
+                      <OptionGroup id="opt-count" title="How many clips" options={CLIP_COUNTS} value={clipCount} onChange={setClipCount} help={clipCount === 1 ? '1 clip: the fastest result. Pick more to get extra options to choose from.' : `Up to ${clipCount} different moments, each as its own clip. More clips take a bit longer.`} />
+                    </div>
+                  )}
+                  {!wholeOn && srcSecs.secs > 0 && srcSecs.url === videoUrl.trim() && srcSecs.secs < clipLength + 1 && (
+                    <p role="note" className="rounded-input border border-[#FFB64D]/50 px-3 py-2 text-xs text-[#FFB64D]">Your video is only {Math.round(srcSecs.secs)}s long, so clips will be about {Math.max(1, Math.floor(srcSecs.secs))}s, not {clipLength}s, and you&apos;ll get 1 clip. Tip: pick Whole video.</p>
+                  )}
                 </div>
-                {wholeTooLong && <p role="note" className="text-xs text-muted">This video is over 90 seconds, so the whole-video option is off. Trim it to 90s or less, or let the AI pick clips.</p>}
-                {wholeOn && <p role="note" className="text-xs text-soft">The whole video becomes 1 clip{curSecs > 0 ? ` (${Math.round(curSecs)}s)` : ' (up to 90s; longer videos are stopped at 90s)'}, with captions and vertical reframe. Counts as 1 generation, same as a 1-clip run.</p>}
-                {!wholeVideo && !wholeTooLong && curSecs > 0 && curSecs <= 90.5 && (
-                  <p role="note" data-testid="whole-offer" className="rounded-input border border-lime/40 px-3 py-2 text-xs text-soft">This video is only {Math.round(curSecs)}s. Want the whole thing as one clip? <button type="button" onClick={() => setWholeVideo(true)} className="font-semibold text-lime underline">Use whole video</button></p>
-                )}
-              </div>
-              {!wholeOn && srcSecs.secs > 0 && srcSecs.url === videoUrl.trim() && srcSecs.secs < clipLength + 1 && (
-                <p role="note" className="rounded-input border border-[#FFB64D]/50 px-3 py-2 text-xs text-[#FFB64D]">Your video is only {Math.round(srcSecs.secs)}s long, so clips will be about {Math.max(1, Math.floor(srcSecs.secs))}s, not {clipLength}s, and you&apos;ll get 1 clip.</p>
-              )}
-              <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-0.5 text-xs text-muted">
-                <div className="flex gap-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} /> Captions</label>
-                  <label className="flex cursor-pointer items-center gap-2 text-soft"><input type="checkbox" className="accent-lime" checked={aiHook} onChange={e => setAiHook(e.target.checked)} /> Hook overlay</label>
+
+                {/* 2. Look */}
+                <div className="flex flex-col gap-3 border-t border-line2/70 pt-3">
+                  <span className="text-xs font-semibold uppercase tracking-[.08em] text-muted">2 · How it looks</span>
+                  <div className={studio ? 'flex flex-col gap-3' : 'grid gap-3 sm:grid-cols-2'}>
+                    <OptionGroup id="opt-shape" title="Shape" options={FORMATS} value={clipFormat} onChange={setClipFormat} />
+                    <OptionGroup id="opt-style" title="Caption style" options={PACKS} value={pack} onChange={setPack} />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex cursor-pointer items-start gap-2.5 text-sm text-white">
+                      <input type="checkbox" className="mt-0.5 h-4 w-4 accent-lime" checked={autoSubtitles} onChange={e => setAutoSubtitles(e.target.checked)} />
+                      <span className="flex flex-col"><span className="font-semibold">Captions</span><span className="text-xs text-muted">Subtitles that pop up word by word as people talk. Most viewers watch with sound off.</span></span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2.5 text-sm text-white">
+                      <input type="checkbox" className="mt-0.5 h-4 w-4 accent-lime" checked={aiHook} onChange={e => setAiHook(e.target.checked)} />
+                      <span className="flex flex-col"><span className="font-semibold">AI hook line</span><span className="text-xs text-muted">A short attention-grabbing line written by the AI for each clip, to stop the scroll.</span></span>
+                    </label>
+                  </div>
                 </div>
               </div>
             </form>
