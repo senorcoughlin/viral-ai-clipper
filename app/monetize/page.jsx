@@ -1,6 +1,5 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import SimpleHeader from '../../components/SimpleHeader';
 import { useCredit, creditLine, autoCreditOn, setAutoCredit, REUSE_URL } from '../../components/PostCheck';
 
@@ -8,7 +7,9 @@ const YPP_URL = 'https://support.google.com/youtube/answer/72851';
 const load = k => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } };
 
 function Guide() {
-  const q = useSearchParams();
+  // Query read after mount (useSearchParams would make the whole page client-only, empty in the HTML).
+  const [q, setQ] = useState(() => new URLSearchParams(''));
+  useEffect(() => { setQ(new URLSearchParams(window.location.search)); }, []);
   const clipId = q.get('clip') || 'general';
   const source = q.get('src') || '';
   const title = q.get('title') || '';

@@ -15,6 +15,12 @@ import { parseStreamUrl } from '../../../lib/stream';
 // Returns { secs: 0 } when it can't tell; the generate route re-checks on the server.
 
 export async function GET(request) {
+  const sp = new URL(request.url).searchParams;
+  // ?limits=1 -> the length caps, so the form can show them before anything is pasted. CDN-cached.
+  if (sp.get('limits')) {
+    const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
+    return NextResponse.json({ maxSecs: srcMax, ytMaxSecs: Math.min(srcMax, Number(process.env.YT_MAX_MINUTES || 60) * 60) }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+  }
   const limited = await routeGuard(request, 'duration', 60, 600);
   if (limited) return limited;
   const raw = new URL(request.url).searchParams.get('url') || '';
@@ -22,13 +28,20 @@ export async function GET(request) {
   const h = { 'Cache-Control': 'no-store' };
   if (!url) return NextResponse.json({ secs: 0 }, { headers: h });
   let secs = 0;
+  let live = false;
+  let upcoming = false;
+  const id = youtubeIdOf(url);
+  // Same caps the generate route enforces, so the form can warn before a run is wasted.
+  const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
+  const maxSecs = id ? Math.min(srcMax, Number(process.env.YT_MAX_MINUTES || 60) * 60) : srcMax;
   try {
-    const id = youtubeIdOf(url);
     if (id) {
       const page = await youtubeDuration(id);
-      secs = page > 0 ? page : (Number(await youtubeInfoDuration(url, 7000)) || 0);
+      if (page === -1) live = true;
+      else if (page === -2) upcoming = true;
+      else secs = page > 0 ? page : (Number(await youtubeInfoDuration(url, 7000)) || 0);
     }
     else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(toFetchable(url), null, null, 10000);
   } catch {}
-  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0 }, { headers: h });
+  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs }, { headers: h });
 }
