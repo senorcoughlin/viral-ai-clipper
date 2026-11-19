@@ -53,11 +53,12 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize } from '../../../lib/downloader';
+import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, downloaderEnabled, downloadViaRapid, startRapidJob, pollRapidJob, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize } from '../../../lib/downloader';
 import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
-import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig } from '../../../lib/jobs';
+import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation } from '../../../lib/jobs';
+import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sliceFor, hqClipCut, SLICE_MAX_HOPS, HQ_CLIP_FORMAT } from '../../../lib/slices';
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
@@ -705,6 +706,21 @@ export async function POST(request) {
     return { score, reason, reasons: { hook: segs.length ? 'Estimated from opening line' : 'Visual-only opening', pacing: `${wps.toFixed(1)} words/sec`, emotion: 'Estimate, not AI-rated' } };
   }
 
+  // Where clip i's picture comes from: the single local source, or (sliced long videos) its
+  // HQ cut when that arrived in time, else the light-resolution slice that contains it.
+  async function clipSource(start, len, i) {
+    if (!ctx.sliced) return { file: ctx.local, rel: start };
+    const hqP = ctx.hq?.[i];
+    if (hqP) {
+      const wait = Math.max(0, (ctx.hqDeadline || 0) - Date.now());
+      const hq = await Promise.race([hqP, new Promise(r => setTimeout(() => r(null), wait))]);
+      if (hq?.file) { ctx.hqUsed = (ctx.hqUsed || 0) + 1; return hq; }
+      console.warn('hq cut not ready; using slice', { i, fmt: ctx.sliced.fmt });
+    }
+    const sl = sliceFor(ctx.sliced.plan.slices, start, len);
+    return { file: ctx.sliced.files.get(sl.k), rel: sl.rel };
+  }
+
   async function runOne(c, i) {
     const start = Number(c.startSec || 0);
     let len = Number(clipLength);
@@ -728,7 +744,8 @@ export async function POST(request) {
           // Small pre-trimmed segment (starts at the clip start) instead of the full source.
           // Lossless stream-copy segment; `offset` is where the clip really starts inside it
           // (the cut snaps back to a keyframe), so RenderIO seeks there frame-accurately.
-          const seg = await segmentToBlob(ctx.local, ctx.dir, start, len, `${i}`);
+          const lf = await clipSource(start, len, i);
+          const seg = await segmentToBlob(lf.file, ctx.dir, lf.rel, len, `${i}`);
           win = { url: seg.url, offset: seg.offset };
           src = { ...src, direct: true };
           // YouTube captions only carry phrase (or approximate) timings. Re-time this clip's
@@ -737,7 +754,7 @@ export async function POST(request) {
             && Date.now() - (ctx.startedAt || Date.now()) < 200000 && await reserveAudioSec(len).catch(() => false)) {
             ctx.retimeSec = (ctx.retimeSec || 0) + len;
             try {
-              const tr = await transcribeBuffer(await clipAudio(ctx.local, ctx.dir, start, len, `${i}`));
+              const tr = await transcribeBuffer(await clipAudio(lf.file, ctx.dir, lf.rel, len, `${i}`));
               const ww = (tr.segments || []).filter(w => w.start < len).map(w => ({ w: w.text, a: Math.max(0, w.start), b: Math.min(len, Math.max(w.end, w.start + 0.05)) }));
               if (ww.length >= Math.max(3, timedWords.length * 0.5)) { timedWords = ww; c._retimed = true; }
               else await releaseAudioSec(len).catch(() => {});
@@ -837,12 +854,16 @@ export async function POST(request) {
       let stopRun = () => {};
       const stopP = new Promise(r => { stopRun = r; });
       // Continue this same job in a fresh invocation (fresh 300s budget). See local prep.
+      // hop = how many hand-offs led to this invocation (0 for the user's own request).
+      const hop = cont ? (cont.hops || 1) : 0;
+      const canHop = !!jobId && hop < SLICE_MAX_HOPS;
       const handOff = async () => {
+        console.log('handing off', { hop: hop + 1, ms: Date.now() - t0 });
         handedOff = true;
         if (watchdog) clearTimeout(watchdog);
         if (hb) clearInterval(hb);
         if (writer) await writer.flush();
-        await touchJob(jobId, {});
+        await armContinuation(jobId, hop + 1);
         try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
         const headers = { 'Content-Type': 'application/json', 'x-continue-job': jobId, 'x-continue-sig': continueSig(jobId) };
         try { const t = await getVercelOidcToken(); if (t) headers['x-vercel-trusted-oidc-idp-token'] = t; } catch {}
@@ -924,6 +945,12 @@ export async function POST(request) {
       // as plain ffmpeg jobs on that file (fast seeks) instead of each re-downloading it.
       // Uploads are already direct files. If the download fails, fall back to per-job yt-dlp.
       const rioKey = process.env.RENDERIO_API_KEY;
+      // Long YouTube videos are fetched as parallel time slices (see lib/slices.js).
+      if (rioKey && ctx.dir && ytId && !media && !whole && shouldSlice(ytSecs) && rapidEnabled && !downloaderEnabled && jobsEnabled && localFfmpegAvailable()
+        && !process.env.YT_DOWNLOAD_FORMAT && process.env.SLICE_DISABLE !== '1' && !(await rapidDown())) {
+        ctx.slicePlan = planSlices(ytSecs, clipLength);
+        ctx.sliceFmt = sliceFormat(ytSecs);
+      }
       if (rioKey && media) {
         ctx.srcP = Promise.resolve({ url: media.videoUrl, direct: true });
       } else if (rioKey) {
@@ -935,6 +962,8 @@ export async function POST(request) {
           ? Promise.resolve({ url: rioUrl, direct: true })
           : ctx.cachedSrc?.blob
             ? Promise.resolve({ url: ctx.cachedSrc.blob, direct: true, blob: true })
+          : ctx.slicePlan
+            ? Promise.resolve({ url: null, direct: true, sliced: true })
           : (ytId && youtubeDownloader()
               ? (async () => { try { return await (async () => {
                   const fmt = ytSourceFormat(ytSecs);
@@ -1003,7 +1032,7 @@ export async function POST(request) {
         })();
       }
       const cachedTr = await cachedTrP;
-      if (!cachedTr && ytId && !media && subtitlesEnabled) ctx.subsP = fetchYoutubeSubtitles(videoUrl, 60000);
+      if (!cachedTr && ytId && !media && subtitlesEnabled && !cont) ctx.subsP = fetchYoutubeSubtitles(videoUrl, 60000);
       if (rioKey && !media) {
         // Fail fast: if the link can't be downloaded, every per-clip yt-dlp fallback hangs
         // the same way, so stop now, refund the run and tell the user clearly.
@@ -1030,7 +1059,39 @@ export async function POST(request) {
           // segments locally, so RenderIO never has to fetch the whole (possibly huge) source.
           // Without a local ffmpeg binary, skip local prep and let RenderIO's ffmpeg fetch the source.
           if (ytId && youtubeDownloader() && ctx.dir && !localFfmpegAvailable()) console.error('[ffmpeg] local binary missing; using RenderIO for this run');
-          if (ytId && youtubeDownloader() && ctx.dir && localFfmpegAvailable()) {
+          if (ytId && ctx.dir && (await ctx.srcP).sliced) {
+            const plan = ctx.slicePlan;
+            const fmt = ctx.sliceFmt;
+            // With hops left, pull until near the budget and hand off; the last hop must leave
+            // room for transcript + cuts, so it only tops up what's missing.
+            // (Measured from the request start, which is what the watchdog and the 300s limit use.)
+            const deadline = reqStart + (canHop ? RUN_BUDGET_MS - 30000 : Math.min(RUN_BUDGET_MS - 150000, 120000));
+            send({ type: 'status', step: 'download', parts: plan.slices.length, hop });
+            const start = (o) => startRapidJob(videoUrl, o);
+            let got = null;
+            try {
+              got = await fetchSlices({ videoUrl, ytId, fmt, plan, dir: ctx.dir, deadline, start, poll: pollRapidJob, maxBytes: YT_MAX_FILE_BYTES,
+                blobHeaders: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` } });
+            } catch (e) { console.warn('slices failed', e?.message); }
+            if (got && got.missing.length && canHop) { await handOff(); return; }
+            if (!got || got.missing.length) {
+              console.warn('slices incomplete; giving up', { ytId, hop, missing: got?.missing?.length ?? -1, n: plan.slices.length });
+              try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+              await refundUsage();
+              send({ type: 'error', message: 'YouTube is sending this video to us too slowly right now, so it couldn\u2019t finish downloading. Try again in a few minutes (the parts we already got are saved, so it\u2019ll be faster), or upload the file instead. This run was not counted.' });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'download slow' });
+              close();
+              return;
+            }
+            // All parts are in Blob now; a fresh invocation re-reads them in seconds.
+            if (Date.now() - startedAt > HANDOFF_AFTER_MS && canHop) { await handOff(); return; }
+            const t1 = Date.now();
+            ctx.localAudio = await buildSliceAudio(plan, got.files, path.join(ctx.dir, 'audio.mp3')).catch((e) => { console.warn('slice audio failed', e?.message); return null; });
+            ctx.sliced = { plan, files: got.files, fmt };
+            ctx.local = got.files.get(0);
+            ctx.sourceSec = plan.dur;
+            console.log('sliced source', { ytId, fmt, parts: plan.slices.length, hop, audioMs: Date.now() - t1, ms: Date.now() - startedAt });
+          } else if (ytId && youtubeDownloader() && ctx.dir && localFfmpegAvailable()) {
             const src = await ctx.srcP;
             const file = path.join(ctx.dir, 'src.mp4');
             const t0 = Date.now();
@@ -1059,7 +1120,7 @@ export async function POST(request) {
               ctx.local = file;
               // Not enough time left in this invocation for transcription + cuts: hand the job to a
               // fresh invocation, which picks the source up from Blob and continues the same job.
-              if (!cont && res.blobUrl && Date.now() - startedAt > HANDOFF_AFTER_MS) {
+              if (canHop && res.blobUrl && Date.now() - startedAt > HANDOFF_AFTER_MS) {
                 await handOff();
                 return;
               }
@@ -1112,7 +1173,7 @@ export async function POST(request) {
         // YouTube captions (RapidAPI) first; Groq Whisper (hourly quota) then Gemini as fallbacks.
         audioP = (ctx.subsP || Promise.resolve(EMPTY_TRANSCRIPT)).then(sub => sub?.segments?.length
           ? sub
-          : localTranscript(ctx.local, ctx.dir, process.env.GROQ_API_KEY ? transcribeBuffer : async () => EMPTY_TRANSCRIPT, {
+          : localTranscript(ctx.localAudio || ctx.local, ctx.dir, process.env.GROQ_API_KEY ? transcribeBuffer : async () => EMPTY_TRANSCRIPT, {
               maxSec: Number(process.env.GROQ_RUN_MAX_SEC || 2400), reserve: reserveAudioSec, release: releaseAudioSec, fallback: geminiTranscribe,
             })).catch((e) => { console.warn('local transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       } else if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
@@ -1232,6 +1293,16 @@ export async function POST(request) {
         else console.warn('generate: no transcript; used heuristic scores', videoUrl);
       }
       const base = scored?.clips?.length ? scored.clips.slice(0, count).map(c => ({ ...c, scored: true })) : unscoredClips(count);
+      // Sliced long video: fetch each picked moment again at clip resolution, in parallel,
+      // while leaving enough of the budget to render from the light slice if a cut is late.
+      if (ctx.sliced && HQ_CLIP_FORMAT !== 'off') {
+        ctx.hqDeadline = reqStart + RUN_BUDGET_MS - Number(process.env.HQ_RENDER_RESERVE_MS || 110000);
+        if (ctx.hqDeadline - Date.now() > 30000) {
+          const resolveHq = ({ startTime, endTime, format, timeoutMs }) => downloadViaRapid(videoUrl, Math.min(150000, timeoutMs), { format, startTime, endTime });
+          ctx.hq = base.map((c, i) => hqClipCut({ resolve: resolveHq, dir: ctx.dir, start: Number(c.startSec || 0), len: Number(clipLength), dur: ctx.sourceSec, tag: `${i}`, deadline: ctx.hqDeadline })
+            .catch((e) => { console.warn('hq cut failed', { i, err: String(e?.message || e).slice(0, 120) }); return null; }));
+        }
+      }
 
       send({ type: 'status', step: 'cutting', total: base.length });
       // Cut all requested clips in parallel; each one streams to the client the

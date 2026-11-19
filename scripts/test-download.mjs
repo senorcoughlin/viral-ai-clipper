@@ -143,3 +143,207 @@ test('downloadViaApi treats insufficient_balance as a fast skip and remembers it
     _resetDownloadApiDownForTests();
   }
 });
+
+// ---- Long-video time slices (lib/slices.js) ----
+const slices = await import('../lib/slices.js');
+const { execFileSync } = await import('node:child_process');
+const { ffmpegPath } = await import('../lib/ffmpegbin.js');
+
+test('planSlices covers the whole video with overlap > clip length', () => {
+  const p = slices.planSlices(4036, 30, 360);
+  assert.equal(p.ov, 60);
+  assert.equal(p.slices[0].start, 0);
+  assert.equal(p.slices.at(-1).end, 4036);
+  for (let i = 1; i < p.slices.length; i++) {
+    assert.equal(p.slices[i].start, i * p.S);
+    assert.ok(p.slices[i - 1].end - p.slices[i].start >= 60, 'adjacent slices overlap by >= 60s');
+  }
+  // Every possible 30s clip fits wholly inside one slice.
+  for (let t = 0; t + 30 <= 4036; t += 7) {
+    const s = slices.sliceFor(p.slices, t, 30);
+    assert.ok(s.start <= t && t + 30 <= s.end, `clip at ${t} fits`);
+    assert.equal(s.rel, t - s.start);
+  }
+  // Long clips widen the overlap and the slice size.
+  const q = slices.planSlices(3600, 300, 360);
+  assert.equal(q.ov, 305);
+  assert.ok(q.S >= 610);
+  assert.ok(slices.sliceFor(q.slices, 1234, 300).end >= 1534);
+});
+
+test('slicing is only for videos over the threshold, light formats for long ones', () => {
+  assert.equal(slices.shouldSlice(120), false);
+  assert.equal(slices.shouldSlice(slices.SLICE_MIN_SEC), false);
+  assert.equal(slices.shouldSlice(slices.SLICE_MIN_SEC + 1), true);
+  assert.equal(slices.sliceFormat(10 * 60), '360');
+  assert.equal(slices.sliceFormat(67 * 60), '240');
+});
+
+function fakeSliceEnv({ saved = {}, failK = new Set(), slowK = new Set() } = {}) {
+  const calls = { start: [], poll: [], download: [], upload: [], kvSet: [] };
+  const kv = new Map(Object.entries(saved));
+  const tries = new Map();
+  return {
+    calls, kv,
+    start: async ({ startTime, endTime, format }) => {
+      calls.start.push({ startTime, endTime, format });
+      const k = startTime / 360;
+      tries.set(k, (tries.get(k) || 0) + 1);
+      return `https://p.example/progress?k=${k}&try=${tries.get(k)}&f=${format}&s=${startTime}&e=${endTime}`;
+    },
+    poll: async (p, timeoutMs) => {
+      calls.poll.push(p);
+      const q = new URL(p).searchParams; const k = Number(q.get('k'));
+      if (failK.has(k)) { const e = new Error('download api failed'); e.failed = true; throw e; }
+      if (slowK.has(k)) { await new Promise(r => setTimeout(r, Math.min(timeoutMs, 50))); const e = new Error('download api timeout'); e.timeout = true; throw e; }
+      return `https://cdn.example/${q.get('f')}/${q.get('s')}-${q.get('e')}.mp4`;
+    },
+    download: async (u, file) => {
+      calls.download.push(u);
+      await fs.writeFile(file, bytes(2000, 1));
+      return { size: 2000 };
+    },
+    upload: async (p) => { calls.upload.push(p); return `https://blob.example/${p}`; },
+    kvGet: async (k) => kv.get(k) || null,
+    kvSet: async (k, v) => { calls.kvSet.push(k); kv.set(k, v); return true; },
+  };
+}
+
+test('fetchSlices pulls every slice in parallel, saves each to Blob + KV', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const env = fakeSliceEnv();
+  const r = await slices.fetchSlices({ videoUrl: 'https://youtu.be/x', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, conc: 3, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.files.size, plan.slices.length);
+  assert.equal(env.calls.start.length, plan.slices.length);
+  assert.ok(env.calls.start.every(c => c.format === '240'));
+  for (const sl of plan.slices) {
+    assert.ok(env.kv.get(slices.sliceKey('abc', '240', plan, sl.k))?.blob, 'slice saved');
+    assert.ok(!env.kv.get(slices.slicePendingKey('abc', '240', plan, sl.k))?.p, 'pending job cleared');
+  }
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('fetchSlices re-reads saved slices from Blob and only pulls the missing ones', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const saved = { [slices.sliceKey('abc', '240', plan, 0)]: { blob: 'https://blob.example/s0' }, [slices.sliceKey('abc', '240', plan, 2)]: { blob: 'https://blob.example/s2' } };
+  const env = fakeSliceEnv({ saved });
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.stats.fromBlob, 2);
+  assert.equal(env.calls.start.length, plan.slices.length - 2);
+  assert.ok(!env.calls.start.some(c => c.startTime === 0 || c.startTime === 720));
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('fetchSlices retries a failed provider job once, then reports it missing', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const env = fakeSliceEnv({ failK: new Set([1]) });
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, [1]);
+  assert.equal(env.calls.start.filter(c => c.startTime === 360).length, 2, 'one fresh job after the provider gave up');
+  assert.equal(r.stats.failed, 1);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('a slice still preparing at the deadline keeps its provider job for the next invocation', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const env = fakeSliceEnv({ slowK: new Set([2]) });
+  const r1 = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r1.missing, [2]);
+  const pk = slices.slicePendingKey('abc', '240', plan, 2);
+  const kept = env.kv.get(pk);
+  assert.ok(kept?.p, 'progress URL kept in KV');
+  // Next invocation: the job finished meanwhile; it polls the SAME job (no new start) and gets the rest from Blob.
+  const env2 = fakeSliceEnv({ saved: Object.fromEntries(env.kv) });
+  const r2 = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env2 });
+  assert.deepEqual(r2.missing, []);
+  assert.equal(env2.calls.start.length, 0, 'no new provider jobs');
+  assert.deepEqual(env2.calls.poll, [kept.p]);
+  assert.equal(r2.stats.fromBlob, plan.slices.length - 1);
+  assert.equal(r2.stats.resumed, 1);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('with too little time left, jobs are started (for the next invocation) but not awaited', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const env = fakeSliceEnv();
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 10000, minPullMs: 75000, ...env });
+  assert.equal(env.calls.start.length, plan.slices.length);
+  assert.equal(env.calls.poll.length, 0);
+  assert.equal(r.missing.length, plan.slices.length);
+  assert.ok(plan.slices.every(sl => env.kv.get(slices.slicePendingKey('abc', '240', plan, sl.k))?.p));
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('slice audio is continuous in source time and clips cut from slices match the source', { skip: !ffmpegPath() }, async () => {
+  const ff = ffmpegPath();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sla-'));
+  const src = path.join(dir, 'src.mp4');
+  // 100s source with keyframes every 137 frames (not aligned with slice starts), like YouTube.
+  execFileSync(ff, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30000/1001', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100',
+    '-t', '100', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '137', '-keyint_min', '137', '-sc_threshold', '0', '-c:a', 'aac', '-b:a', '48k', '-shortest', src]);
+  const plan = slices.planSlices(100, 10, 30);
+  // Hand-built small plan (real plans use >= 60s overlap) so the 100s source has 3 slices.
+  const small = { dur: 100, S: 30, ov: 15, slices: [{ k: 0, start: 0, end: 45 }, { k: 1, start: 30, end: 75 }, { k: 2, start: 60, end: 100 }] };
+  assert.ok(plan.slices.length >= 1);
+  const files = new Map();
+  for (const s of small.slices) {
+    const f = path.join(dir, `slice_${s.k}.mp4`);
+    // Same cut the provider makes: input seek + stream copy (snaps back to a keyframe, edit list).
+    execFileSync(ff, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(s.start), '-to', String(s.end), '-i', src, '-c', 'copy', f]);
+    files.set(s.k, f);
+  }
+  const audio = await slices.buildSliceAudio(small, files, path.join(dir, 'audio.mp3'));
+  const { probeDuration } = await import('../lib/localprep.js');
+  const d = await probeDuration(audio);
+  assert.ok(Math.abs(d - 100) < 0.6, `audio duration ${d}`);
+  // A frame at absolute time t taken from the right slice equals the source frame (within one frame of seek rounding).
+  const frame = (file, t) => execFileSync(ff, ['-hide_banner', '-loglevel', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'gray', '-']).toString('base64');
+  for (const t of [5, 33.3, 52, 71.5, 90]) {
+    const sl = slices.sliceFor(small.slices, t, 3);
+    const got = frame(files.get(sl.k), sl.rel);
+    const near = [-1, 0, 1].map(d => frame(src, Math.max(0, t + d * 1001 / 30000)));
+    assert.ok(near.includes(got), `frame at ${t}s`);
+  }
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('hqClipCut pads the window and returns the clip offset inside the cut', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-hq-'));
+  let asked;
+  const r = await slices.hqClipCut({
+    resolve: async (o) => { asked = o; return 'https://cdn.example/hq.mp4'; },
+    download: async (_u, file) => { await fs.writeFile(file, bytes(3000)); return { size: 3000 }; },
+    dir, start: 125.4, len: 30, dur: 4000, tag: 't', deadline: Date.now() + 60000, format: '720',
+  });
+  assert.equal(asked.startTime, 123);
+  assert.equal(asked.endTime, 158);
+  assert.equal(asked.format, '720');
+  assert.ok(Math.abs(r.rel - 2.4) < 1e-9);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('downloadViaRapid sends start_time/end_time for cut downloads', async () => {
+  process.env.YT_RAPIDAPI_KEY = process.env.YT_RAPIDAPI_KEY || 'test-rapid-key';
+  const mod = await import('../lib/downloader.js?rapid=' + Date.now());
+  const orig = globalThis.fetch;
+  let first;
+  globalThis.fetch = async (u) => {
+    if (!first) { first = String(u); return jsonResponse(200, { success: true, progress_url: 'https://p.example/progress?id=1' }); }
+    return jsonResponse(200, { success: 1, progress: 1000, download_url: 'https://cdn.example/cut.mp4' });
+  };
+  try {
+    const u = await mod.downloadViaRapid('https://www.youtube.com/watch?v=abc', 20000, { format: '240', startTime: 360.7, endTime: 780.2 });
+    assert.equal(u, 'https://cdn.example/cut.mp4');
+    const q = new URL(first).searchParams;
+    assert.equal(q.get('format'), '240');
+    assert.equal(q.get('start_time'), '360');
+    assert.equal(q.get('end_time'), '781');
+  } finally { globalThis.fetch = orig; }
+});
