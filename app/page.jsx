@@ -17,6 +17,7 @@ import MonetizePanel from '../components/MonetizePanel';
 import StudioClip from '../components/StudioClip';
 import { funnel } from '../lib/funnel';
 import RaffleBanner from '../components/RaffleBanner';
+import RedeemCode from '../components/RedeemCode';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
@@ -1029,6 +1030,7 @@ function HomeInner({ studio = false }) {
                 </div>
                 <p className="mt-2 text-[11px] text-muted">1 credit = 1 generation (1 link, up to 8 clips), used after your free ones. Bigger packs cost less per generation.</p>
               </div>
+              <div className="border-t border-line pt-4"><RedeemCode onRedeemed={() => refreshBilling()} /></div>
               <div className="flex items-center justify-between text-xs text-muted">
                 <span>Secure checkout via Stripe · cancel anytime</span>
               </div>

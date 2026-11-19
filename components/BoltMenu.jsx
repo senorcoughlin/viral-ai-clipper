@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useInstall } from './PwaInstall';
 import AccountBar from './AccountBar';
 import ReferralCard from './ReferralCard';
+import RedeemCode from './RedeemCode';
 
 const LINKS = [
   ['Home', '/#top'], ['Generations remaining', '/#remaining'], ['Your clips', '/#clips'], ['Tutorial', '/tutorial'],
@@ -30,6 +31,7 @@ export default function BoltMenu({ icon, onAccountChange }) {
             <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted">Account</div>
             <AccountBar inline onChange={onAccountChange} />
             <div className="mt-3"><ReferralCard compact /></div>
+            <div className="mt-3"><RedeemCode compact onRedeemed={() => onAccountChange?.()} /></div>
           </div>
           <nav className="flex flex-col py-1">
             {LINKS.map(([label, href]) => (
