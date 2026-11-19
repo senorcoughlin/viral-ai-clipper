@@ -951,7 +951,7 @@ function HomeInner({ studio = false }) {
               </div>
               <div className={studio ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3' : 'mx-auto grid w-full max-w-[420px] grid-cols-1 gap-5 sm:max-w-none sm:grid-cols-2 lg:grid-cols-3'}>
                 {clips.map((c, i) => studio
-                  ? <StudioClip key={c.id} clip={c} index={i} selected={selectedIds.includes(c.id)} onSelect={on => setSelectedIds(ids => on ? [...ids, c.id] : ids.filter(x => x !== c.id))} />
+                  ? <StudioClip key={c.id} clip={c} index={i} isPro={isPro} onUpgrade={() => setShowPricing(true)} selected={selectedIds.includes(c.id)} onSelect={on => setSelectedIds(ids => on ? [...ids, c.id] : ids.filter(x => x !== c.id))} />
                   : <ClipPlayer key={c.id} clip={c} index={i} />)}
                 {isProcessing && Array.from({ length: Math.max(0, expected - clips.length) }, (_, i) => (
                   <div key={`pending-${i}`} aria-hidden className="flex flex-col gap-2">
@@ -1006,11 +1006,13 @@ function HomeInner({ studio = false }) {
               <h3 id="up-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[38px]">
                 Keep the clips coming.<br /><span className="text-lime">Go Pro.</span>
               </h3>
-              <p className="text-[15px] leading-relaxed text-soft">Pro gives you 200 generations a day, removes the watermark, and saves your history so you never lose a banger.</p>
+              <p className="text-[15px] leading-relaxed text-soft">Pro gives you 200 generations a day, removes the watermark, unlocks Pro editing in the Studio, and saves your history so you never lose a banger.</p>
               <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
                 <li className="flex items-center gap-2"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2"><Check />No watermark</li>
                 <li className="flex items-center gap-2"><Check />Batch up to 10 links</li>
+                <li className="flex items-center gap-2"><Check />Pro editing: color looks, speed, caption styles</li>
+                <li className="flex items-center gap-2"><Check />Your own watermark + .srt caption files</li>
               </ul>
               <div className="flex flex-col gap-2.5 sm:flex-row">
                 <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
@@ -1279,7 +1281,7 @@ function HomeInner({ studio = false }) {
               <li>• Start with 1 clip and 15 seconds if you want the fastest result.</li>
               <li>• Longer videos give the AI more moments to choose from.</li>
               <li>• You get {FREE_DAILY_LIMIT} free generations a day. 1 generation = 1 link, up to 8 clips. Credits never expire.</li>
-              <li>• Pro gives 200 generations a day and removes the watermark.</li>
+              <li>• Pro gives 200 generations a day, removes the watermark and unlocks Pro editing in the Studio.</li>
               <li>• Your clips also show up on the Assets page.</li>
               <li>• The publish buttons open the app with your caption already copied.</li>
             </ul>
@@ -1324,6 +1326,8 @@ function HomeInner({ studio = false }) {
                 <li className="flex items-center gap-2.5"><Check />No watermark</li>
                 <li className="flex items-center gap-2.5"><Check />Batch up to 10 links</li>
                 <li className="flex items-center gap-2.5"><Check />CSV export + priority</li>
+                <li className="flex items-center gap-2.5"><Check />Pro editing: color looks, speed control, boxed / 1-word captions, loudness boost, fades</li>
+                <li className="flex items-center gap-2.5"><Check />Your own @handle watermark, 0.1s trims, .srt caption download</li>
               </ul>
               <button onClick={() => handleUpgrade(price.plan)} className="btn-lime mt-auto h-12">
                 {isPro ? 'You’re on Pro' : 'Upgrade to Pro'}{!isPro && <Arrow />}
