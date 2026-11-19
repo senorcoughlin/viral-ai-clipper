@@ -39,9 +39,14 @@ export function useInstall() {
 export default function PwaInstall() {
   const { canPrompt, ios, prompt } = useInstall();
   const [dismissed, setDismissed] = useState(true);
+  // Don't cover the headline on a first visit: offer install only after someone has made clips.
+  const [engaged, setEngaged] = useState(false);
 
   useEffect(() => {
     try { setDismissed(localStorage.getItem(KEY) === '1'); } catch { setDismissed(false); }
+    try { setEngaged((parseInt(localStorage.getItem('vac_gen_count') || '0', 10) || 0) >= 1); } catch {}
+    const onDone = () => setEngaged(true);
+    window.addEventListener('vac:clip-done', onDone);
     if ('serviceWorker' in navigator) {
       const reg = () => navigator.serviceWorker.register('/sw.js').catch(() => {});
       if (document.readyState === 'complete') reg(); else window.addEventListener('load', reg, { once: true });
@@ -52,13 +57,13 @@ export default function PwaInstall() {
     window.addEventListener('appinstalled', onInstalled);
     const openHint = () => { setDismissed(false); setForceIos(true); };
     window.addEventListener('vac:install-hint', openHint);
-    return () => { window.removeEventListener('beforeinstallprompt', onBip); window.removeEventListener('appinstalled', onInstalled); window.removeEventListener('vac:install-hint', openHint); };
+    return () => { window.removeEventListener('beforeinstallprompt', onBip); window.removeEventListener('appinstalled', onInstalled); window.removeEventListener('vac:install-hint', openHint); window.removeEventListener('vac:clip-done', onDone); };
   }, []);
   const [forceIos, setForceIos] = useState(false);
 
   const dismiss = () => { setDismissed(true); setForceIos(false); try { localStorage.setItem(KEY, '1'); } catch {} };
   const iosSafari = ios && typeof navigator !== 'undefined' && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
-  if (dismissed || !(canPrompt || iosSafari || forceIos)) return null;
+  if (dismissed || !(forceIos || (engaged && (canPrompt || iosSafari)))) return null;
 
   return (
     <div role="dialog" aria-label="Install app"

@@ -106,7 +106,7 @@ export default function SpinWheel({ onWon, onUpgrade }) {
       <button type="button" aria-label="Daily free spin" onClick={() => setOpen(true)}
         className={`fixed bottom-[calc(84px+env(safe-area-inset-bottom))] right-4 z-40 grid h-14 w-14 md:bottom-5 place-items-center rounded-full border-2 border-lime bg-ink text-2xl shadow-lg ${available ? 'spin-pulse' : 'opacity-80'}`}>
         <span aria-hidden>🎁</span>
-        {available && <span className="absolute -right-1 -top-1 rounded-full bg-[#FF4D6D] px-1.5 text-[10px] font-bold text-white">1</span>}
+        {available && <span aria-hidden className="absolute -right-1 -top-1 rounded-full bg-[#FF4D6D] px-1.5 text-[10px] font-bold text-white">1</span>}
       </button>
 
       {open && (

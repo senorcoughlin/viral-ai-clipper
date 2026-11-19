@@ -4,7 +4,6 @@ import ReferralCard from '../components/ReferralCard';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import SeeItWork from '../components/SeeItWork';
-import { useSearchParams } from 'next/navigation';
 import ClipPlayer, { clipFileName, downloadHref } from '../components/ClipPlayer';
 import { detectFaceBox, cropFromFace } from '../lib/face';
 import ViralScoreMeter from '../components/ViralScoreMeter';
@@ -24,6 +23,14 @@ const ACTIVE_JOB_KEY = 'vac_active_job';
 const ft = (e, p) => funnel(e, p);
 
 const FREE_DAILY_LIMIT = 3;
+// 7200 -> "2 hours", 5400 -> "90 minutes", 45 -> "45 seconds"
+const fmtLen = (secs) => {
+  const s = Math.round(Number(secs) || 0);
+  if (s < 120) return `${s} seconds`;
+  const m = Math.round(s / 60);
+  if (m >= 120 && m % 60 === 0) return `${m / 60} hours`;
+  return `${m} minutes`;
+};
 
 const FORMATS = [
   { value: 'shorts_9_16', label: '9:16' },
@@ -56,6 +63,44 @@ const STREAM_STEPS = [
   { t: 'Track views, submit and scale', d: 'Submit approved posts to your campaign for view payouts. As you grow, you may qualify for YouTube Partner Program Shorts revenue or TikTok Creator Rewards (1-min+ original videos). Check each program\u2019s eligibility. Go Pro for 200 generations a day.', tools: [['YouTube Partner Program', 'https://support.google.com/youtube/answer/72851'], ['TikTok Creator Rewards', 'https://www.tiktok.com/creator-academy/en/article/creator-rewards-program'], ['Go Pro', '#pricing']] },
 ];
 const LIVE_MINUTES = [5, 10, 15];
+const FAQ = [
+  ['Is Viral AI Clipper free?', `Yes. You get ${FREE_DAILY_LIMIT} free generations a day with no signup and no card. 1 generation = 1 video link, making up to 8 clips. Free clips carry a small watermark; Pro removes it.`],
+  ['Which links work?', 'Public YouTube videos and Shorts, Twitch and Kick replays (VODs), Twitch channels while live (clip the last few minutes), and direct MP4 links. You can also upload an MP4 from your phone or computer (up to 500 MB).'],
+  ['How long can the video be?', 'Long videos work, but there is a length limit, shown under the link box. Hour-long videos take several minutes to process. Live YouTube streams and premieres can\u2019t be clipped until they have ended.'],
+  ['How long does it take?', 'A short video is usually done in about a minute. Longer videos take a few minutes. You can switch apps while it works; your clips appear when you come back.'],
+  ['What do I get?', 'Up to 8 clips per link, cut to 9:16, 16:9 or 1:1, with captions burned in, an AI hook and a viral score for each clip. Download them and post to TikTok, Reels, Shorts or X.'],
+  ['Do I need an account?', 'No. A free account just keeps your clips saved and lets you use your purchases on other devices.'],
+  ['What if a video fails?', 'Failed runs are not counted against your free generations or credits. Try again, or upload the file instead.'],
+  ['Can I make money with clips?', 'Many clippers join paid clip campaigns or creator programs. Only clip content you have permission to use. Earnings aren\u2019t guaranteed.'],
+];
+const GUIDES = [
+  ['/free-ai-clip-maker', 'Free AI clip maker'],
+  ['/youtube-shorts-clip-maker', 'YouTube to Shorts'],
+  ['/podcast-to-shorts', 'Podcast to Shorts'],
+  ['/how-to-clip-twitch-streams', 'Clip Twitch streams'],
+  ['/opus-clip-alternative', 'Opus Clip alternative'],
+  ['/tutorial', 'Beginner tutorial'],
+  ['/monetize', 'Earn with clips'],
+  ['/tools', 'More AI tools'],
+];
+const SITE_URL = 'https://viralaiclipper.com';
+const JSON_LD = JSON.stringify([
+  {
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'Viral AI Clipper',
+    url: SITE_URL,
+    applicationCategory: 'MultimediaApplication',
+    operatingSystem: 'Web',
+    description: 'Paste a video link and get up to 8 short vertical clips with captions, an AI hook and a viral score, ready for TikTok, Reels and YouTube Shorts.',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD', description: `${FREE_DAILY_LIMIT} free generations a day` },
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: FAQ.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
+  },
+]).replace(/</g, '\\u003c');
 // twitch.tv/<channel> (not a VOD or clip link): eligible for "clip the last X minutes".
 const TWITCH_CHANNEL_RE = /^https?:\/\/(?:www\.|m\.)?twitch\.tv\/([a-zA-Z0-9_]{2,25})\/?(?:\?.*)?$/;
 const twitchChannelOf = (u) => { const m = String(u || '').trim().match(TWITCH_CHANNEL_RE); return m && !['videos', 'directory', 'downloads', 'settings', 'search', 'p'].includes(m[1].toLowerCase()) ? m[1] : null; };
@@ -134,14 +179,28 @@ function HomeInner({ studio = false }) {
     let live = true;
     setLinkSecs({ url: u, secs: 0, checking: true });
     const t = setTimeout(async () => {
-      let secs = 0;
-      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) secs = Number((await r.json()).secs) || 0; } catch {}
-      if (live) setLinkSecs({ url: u, secs, checking: false });
+      let secs = 0, isLive = false, upcoming = false, maxSecs = 0;
+      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; } } catch {}
+      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs });
     }, 600);
     return () => { live = false; clearTimeout(t); };
   }, [videoUrl, srcSecs]);
   const curSecs = linkSecs.url && linkSecs.url === videoUrl.trim() ? linkSecs.secs : 0;
   const wholeTooLong = curSecs > 90.5;
+  // Length caps, shown before anything is pasted (CDN-cached on the server).
+  const [limits, setLimits] = useState(null);
+  useEffect(() => { fetch('/api/duration?limits=1').then(r => r.json()).then(j => { if (j?.maxSecs) setLimits(j); }).catch(() => {}); }, []);
+  // Problems we can spot before a run is wasted: live/upcoming YouTube streams and over-length videos.
+  const linkIssue = (() => {
+    if (!linkSecs.url || linkSecs.url !== videoUrl.trim() || linkSecs.checking) return null;
+    if (linkSecs.live) return { code: 'live', message: 'This YouTube video is live right now. Live YouTube streams can\u2019t be clipped yet. Paste it again after the stream ends (the replay works), or paste a Twitch channel link to clip its last few minutes.' };
+    if (linkSecs.secs > 24 * 3600) return { code: 'live', message: 'This looks like a live or 24/7 stream. Live YouTube streams can\u2019t be clipped yet. Paste a finished video or replay instead.' };
+    if (linkSecs.upcoming) return { code: 'upcoming', message: 'This video hasn\u2019t started yet (it\u2019s a scheduled premiere or stream). Paste it again once it\u2019s published.' };
+    if (linkSecs.maxSecs && linkSecs.secs > linkSecs.maxSecs) return { code: 'too_long', message: `This video is ${fmtLen(linkSecs.secs)} long. Links can be up to ${fmtLen(linkSecs.maxSecs)}. Pick a shorter video, or trim it and upload the MP4.` };
+    return null;
+  })();
+  // Links the server already turned away this session (live, too long…), so a repeat paste gets the answer instantly.
+  const rejectedRef = useRef(new Map());
   const wholeOn = wholeVideo && !wholeTooLong;
 
   // Upload straight from the browser to Vercel Blob, then use the blob URL as the source.
@@ -174,8 +233,10 @@ function HomeInner({ studio = false }) {
   };
   const formRef = useRef(null);
 
-  const searchParams = useSearchParams();
+  // Read the query string in an effect, not with useSearchParams(): that hook makes Next.js skip
+  // server rendering of the whole page (the HTML was just "Loading…"), hurting SEO and load time.
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
     const b = searchParams.get('billing');
     if (b === 'monthly' || b === 'yearly') setBilling(b);
     const preset = searchParams.get('url');
@@ -239,6 +300,12 @@ function HomeInner({ studio = false }) {
   useEffect(() => {
     try { setGenCount(parseInt(localStorage.getItem(GUIDE_KEY) || '0', 10) || 0); } catch { setGenCount(0); }
     ft('landing_view', { path: window.location.pathname, ref: document.referrer ? new URL(document.referrer).hostname : 'direct' });
+  }, []);
+  // Count clip downloads (any <a download> on the page) without touching the player components.
+  useEffect(() => {
+    const onClick = (e) => { const a = e.target?.closest?.('a[download]'); if (a) ft('clip_download'); };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
   }, []);
   const bumpGenCount = () => { setGenCount(c => { const n = c + 1; try { localStorage.setItem(GUIDE_KEY, String(n)); } catch {} return n; }); };
   const focusInput = e => {
@@ -379,7 +446,19 @@ function HomeInner({ studio = false }) {
 
     // Splits links glued together with no separator, dedupes, caps at 10.
     const urls = parseLinks(runUrl, settings.wholeVideo ? 1 : undefined).links;
-    if (!urls.length) return;
+    if (!urls.length) {
+      setError({ message: 'That doesn\u2019t look like a video link. Paste a full link that starts with https://, like https://www.youtube.com/watch?v=…' });
+      return;
+    }
+    if (!isExample && urls.length === 1) {
+      const prev = rejectedRef.current.get(urls[0]);
+      const blocked = (linkIssue && runUrl.trim() === linkSecs.url) ? linkIssue.message : (prev && Date.now() - prev.at < 20 * 60 * 1000 ? prev.message : '');
+      if (blocked) {
+        ft('generate_blocked', { reason: linkIssue?.code || 'repeat' });
+        setError({ message: blocked });
+        return;
+      }
+    }
     lastRunRef.current = settings;
     ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
 
@@ -425,6 +504,7 @@ function HomeInner({ studio = false }) {
           let err = {};
           try { err = JSON.parse(text); } catch {}
           if (err.limitReached) setShowPricing(true);
+          else if (res.status === 400 && err.message) rejectedRef.current.set(url, { message: err.message, at: Date.now() });
           throw new Error(err.message || `Generate failed (${res.status})`);
         }
         const st = { all, failed, lastReason, fatal: '', gotDone: false, badLines: 0, setLabel: (l) => { label = l; } };
@@ -571,7 +651,7 @@ function HomeInner({ studio = false }) {
                     placeholder="https://youtube.com/watch?v=…  (one per line for batch)"
                     rows={studio ? 4 : 2}
                     required
-                    aria-describedby="urls-hint"
+                    aria-describedby="urls-hint source-guide"
                     className="min-w-0 flex-1 resize-none bg-transparent text-[15px] text-fg outline-none placeholder:text-muted"
                   />
                   {canPaste && !videoUrl && (
@@ -586,6 +666,13 @@ function HomeInner({ studio = false }) {
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
+              {linkIssue ? (
+                <p role="alert" data-testid="link-issue" className="rounded-input border border-[#FFB64D]/50 bg-[#FFB64D]/10 px-3 py-2 text-[13px] leading-snug text-[#FFD9A0]">{linkIssue.message}</p>
+              ) : (
+                <p id="source-guide" className="px-1 text-xs leading-relaxed text-muted">
+                  Works with YouTube, Twitch &amp; Kick replays, and MP4 links or uploads{limits ? ` · YouTube up to ${fmtLen(limits.ytMaxSecs)}, other links up to ${fmtLen(limits.maxSecs)}` : ''} · Live YouTube streams aren&apos;t supported yet
+                </p>
+              )}
               {!studio && (
                 <div className="-mt-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p id="trust-line" className="px-1 text-[13px] text-soft">{FREE_DAILY_LIMIT} free a day · No signup needed · No card</p>
@@ -980,6 +1067,9 @@ function HomeInner({ studio = false }) {
             <h1 className="font-display text-[26px] font-extrabold leading-[1.08] tracking-tight text-white sm:text-[40px] md:text-[52px]">
               Paste a video link. Get <span className="text-lime">up to 8 viral clips</span>.
             </h1>
+            <p className="max-w-[520px] text-[15px] leading-relaxed text-soft sm:hidden">
+              The AI finds the best moments, adds captions and makes them vertical for TikTok, Reels and Shorts. Free, no signup.
+            </p>
             <p className="hidden max-w-[520px] text-base leading-relaxed text-soft sm:block">
               YouTube, podcast or stream links, or up to 10 at once. The AI finds the hooks, burns in captions and scores every clip for TikTok, Reels and Shorts.
             </p>
@@ -1179,6 +1269,38 @@ function HomeInner({ studio = false }) {
           </p>
           <ReferralCard />
         </section>
+
+        {/* FAQ */}
+        <section id="faq" aria-labelledby="faq-title" className="flex flex-col gap-8 pb-24">
+          <div className="flex max-w-[640px] flex-col gap-3">
+            <span className="eyebrow">FAQ</span>
+            <h2 id="faq-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Questions, answered.</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {FAQ.map(([q, a]) => (
+              <details key={q} className="card group p-5 [&_summary::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-start justify-between gap-4 text-base font-bold text-white">
+                  {q}<span aria-hidden className="mt-0.5 text-lime transition-transform group-open:rotate-45">+</span>
+                </summary>
+                <p className="mt-3 text-sm leading-relaxed text-soft">{a}</p>
+              </details>
+            ))}
+          </div>
+          <div className="card flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <h3 className="font-display text-xl font-extrabold text-white">Ready to try it?</h3>
+              <p className="text-sm text-soft">Paste any public video link. Your first clips are free.</p>
+            </div>
+            <a href="#urls" onClick={e => { ft('bottom_cta'); focusInput(e); }} className="btn-lime h-12 px-6 no-underline"><Bolt /> Paste a link</a>
+          </div>
+          <nav aria-label="Guides" className="flex flex-col gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-[.08em] text-muted">Guides</h3>
+            <ul className="flex flex-wrap gap-2">
+              {GUIDES.map(([href, label]) => <li key={href}><a href={href} className="chip text-xs hover:border-lime">{label}</a></li>)}
+            </ul>
+          </nav>
+        </section>
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON_LD }} />
       </main>
 
       {modalBlock}
@@ -1191,12 +1313,18 @@ function HomeInner({ studio = false }) {
 
       <SpinWheel onWon={() => refreshBilling()} onUpgrade={() => setShowPricing(true)} />
 
-      {/* Sticky mobile CTA */}
+      {/* Sticky mobile CTA: first-timers are sent to the free link box; Upgrade once they've used it. */}
       {!isPro && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-line bg-ink/95 p-3 backdrop-blur md:hidden">
-          <button onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
-            Upgrade to Pro
-          </button>
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-line bg-ink/95 p-3 pb-[calc(12px+env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+          {freeLeft > 0 && !clips.length && !isProcessing ? (
+            <button type="button" onClick={e => { ft('sticky_cta'); focusInput(e); }} className="btn-lime h-11 w-full text-sm">
+              <Bolt /> Make clips free
+            </button>
+          ) : (
+            <button type="button" onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
+              Upgrade to Pro
+            </button>
+          )}
         </div>
       )}
     </div>
