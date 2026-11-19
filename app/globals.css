@@ -50,3 +50,32 @@ body {
 @keyframes spinConfetti { 0% { transform: translateY(-10px) rotate(0); opacity: 1; } 100% { transform: translateY(480px) rotate(540deg); opacity: 0; } }
 .spin-confetti { animation-name: spinConfetti; animation-timing-function: ease-in; animation-fill-mode: forwards; }
 @media (prefers-reduced-motion: reduce) { .spin-pulse, .spin-confetti { animation: none; } }
+
+/* ---- Spin wheel ---- */
+.sw-fab { background: radial-gradient(circle at 30% 30%, #2A1650, #0A0A0F 70%); box-shadow: 0 0 0 2px #C6FF3D, 0 0 18px rgba(198,255,61,.55), 0 0 36px rgba(167,139,255,.35); }
+.sw-card { background: conic-gradient(from var(--sw-a, 0deg), #C6FF3D, #67E8F9, #A78BFF, #FF4D6D, #FFE066, #C6FF3D); animation: swRing 6s linear infinite; box-shadow: 0 40px 120px rgba(0,0,0,.8), 0 0 60px rgba(167,139,255,.25); }
+.sw-card-jackpot { background: conic-gradient(from var(--sw-a, 0deg), #FFE066, #F59E0B, #FFF7D6, #FF4D6D, #FFE066); animation: swRing 1.6s linear infinite, swGlow 1s ease-in-out infinite; }
+@property --sw-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes swRing { to { --sw-a: 360deg; } }
+@keyframes swGlow { 0%,100% { box-shadow: 0 0 40px rgba(255,224,102,.35), 0 40px 120px rgba(0,0,0,.8); } 50% { box-shadow: 0 0 90px rgba(255,224,102,.75), 0 40px 120px rgba(0,0,0,.8); } }
+.sw-halo { background: conic-gradient(from 0deg, rgba(198,255,61,.35), rgba(103,232,249,.3), rgba(167,139,255,.35), rgba(255,77,109,.35), rgba(255,224,102,.35), rgba(198,255,61,.35)); filter: blur(22px); opacity: .55; animation: spin 8s linear infinite; }
+.sw-spinning .sw-halo { opacity: .95; animation-duration: 1.5s; }
+.sw-bulb { fill: #FFF3B0; filter: drop-shadow(0 0 2.5px #FFE066); animation: swBulb 1.2s steps(1) infinite; }
+.sw-bulb-b { animation-delay: .6s; }
+.sw-spinning .sw-bulb { animation-duration: .25s; }
+.sw-spinning .sw-bulb-b { animation-delay: .125s; }
+@keyframes swBulb { 0% { fill: #FFF3B0; opacity: 1; } 50% { fill: #FF4D6D; opacity: .55; } }
+.sw-flick { animation: swFlick .12s ease-out; }
+@keyframes swFlick { 0% { transform: translateX(-50%) rotate(0); } 40% { transform: translateX(-50%) rotate(-16deg); } 100% { transform: translateX(-50%) rotate(0); } }
+.sw-hubbtn { background: radial-gradient(circle at 35% 30%, #F4FFB8, #C6FF3D 45%, #7ED321); box-shadow: 0 0 0 2px #0A0A0F, 0 0 16px rgba(198,255,61,.7); transition: transform .15s; }
+.sw-hubbtn:not(:disabled):hover { transform: translate(-50%, -50%) scale(1.08); }
+.sw-cta { background: linear-gradient(90deg, #C6FF3D, #FFE066, #FF7A93, #A78BFF, #C6FF3D); background-size: 300% 100%; animation: swCta 4s linear infinite; box-shadow: 0 10px 30px rgba(198,255,61,.35), inset 0 1px 0 rgba(255,255,255,.5); transition: transform .15s; }
+.sw-cta:not(:disabled):hover { transform: translateY(-2px) scale(1.01); }
+@keyframes swCta { to { background-position: 300% 0; } }
+.sw-burst { left: 0; top: 0; animation-name: swBurst; animation-timing-function: cubic-bezier(.15,.7,.3,1); animation-fill-mode: forwards; opacity: 0; }
+@keyframes swBurst { 0% { transform: translate(0,0) rotate(0) scale(.6); opacity: 1; } 75% { opacity: 1; } 100% { transform: translate(var(--dx), calc(var(--dy) + 140px)) rotate(var(--r)) scale(1); opacity: 0; } }
+.sw-jackpot-text { background: linear-gradient(90deg, #FFE066, #FFF7D6, #F59E0B, #FFE066); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: swCta 1.5s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .sw-card, .sw-card-jackpot, .sw-halo, .sw-bulb, .sw-cta, .sw-jackpot-text, .sw-flick { animation: none !important; }
+  .sw-burst { display: none; }
+}

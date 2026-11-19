@@ -3,7 +3,7 @@ import RaffleClient from '../../components/RaffleClient';
 
 export const metadata = {
   title: 'Win Pro for a Month: Monthly Raffle',
-  description: 'Enter the Viral AI Clipper monthly raffle to win 1 month of Pro: unlimited clipping and every Pro feature. $1 for 1 entry, $4 for 5 entries, or enter free. Drawn on the last day of every month.',
+  description: 'Enter the Viral AI Clipper monthly raffle to win 1 month of Pro: unlimited clipping and every Pro feature. $1 for 1 entry, $4 for 5 entries, or enter free every day. Drawn on the last day of every month.',
   alternates: { canonical: '/raffle' },
   openGraph: { title: 'Win Viral AI Clipper Pro for a month', description: 'Unlimited clipping + every Pro feature. Drawn the last day of every month. Enter from $1 or free.', url: '/raffle' },
 };

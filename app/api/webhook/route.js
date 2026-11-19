@@ -1,8 +1,37 @@
 import { NextResponse } from 'next/server';
-import { reportError } from '../../../lib/alerts';
+import { reportError, emailOwner } from '../../../lib/alerts';
 import { markPro } from '../../../lib/pro';
 import { addCredits, setPro, emailForCustomer } from '../../../lib/billing';
 import { logPaidEntry } from '../../../lib/raffle';
+import { kvEnabled, kvCommand } from '../../../lib/kv';
+
+const etNow = (ms) => new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET';
+const usd = (c) => `$${((Number(c) || 0) / 100).toFixed(2)}`;
+
+// Email the owner whenever a Stripe promotion code (e.g. LAUNCH50) is redeemed at checkout. Never throws.
+async function alertPromo(stripe, session, email, whenMs) {
+  try {
+    if (!(Number(session.total_details?.amount_discount) > 0)) return;
+    if (kvEnabled && (await kvCommand(['SET', `promoalert:${session.id}`, '1', 'NX', 'EX', String(30 * 86400)])) !== 'OK') return; // Stripe retries
+    const full = await stripe.checkout.sessions.retrieve(session.id, { expand: ['discounts.promotion_code', 'discounts.coupon'] });
+    const codes = (full.discounts || []).map(d => {
+      const pc = typeof d.promotion_code === 'object' ? d.promotion_code : null;
+      const cp = (pc && pc.coupon) || (typeof d.coupon === 'object' ? d.coupon : null);
+      const off = cp ? (cp.percent_off ? `${cp.percent_off}% off` : cp.amount_off ? `${usd(cp.amount_off)} off` : '') + (cp.duration ? ` (${cp.duration}${cp.duration_in_months ? `, ${cp.duration_in_months} months` : ''})` : '') : '';
+      return { code: pc?.code || cp?.name || cp?.id || 'unknown', off };
+    });
+    const plan = session.metadata?.type === 'credits' ? `${session.metadata.credits} credits pack` : (session.metadata?.plan || 'pro_monthly');
+    await emailOwner(`[Viral AI Clipper] Promo code ${codes.map(c => c.code).join(', ') || ''} redeemed by ${email}`,
+`A promo code was redeemed at checkout.
+
+Code: ${codes.map(c => c.code).join(', ') || 'unknown'}
+Redeemed by: ${email}
+Reward: ${codes.map(c => c.off).filter(Boolean).join('; ') || 'discount'}; ${usd(session.total_details.amount_discount)} off this payment
+Purchase: ${plan}, paid ${usd(session.amount_total)}
+Time: ${etNow(whenMs)}
+Stripe session: ${session.id}`);
+  } catch (e) { console.error('promo alert failed', e?.message); }
+}
 
 async function resolveEmail(stripe, customerId) {
   if (!customerId) return null;
@@ -50,6 +79,7 @@ export async function POST(request) {
         await setPro(email, true, session.customer);
         try { await markPro({ email, customerId: session.customer }); } catch (e) { console.error('legacy markPro', e); }
       }
+      await alertPromo(stripe, session, email, (event.created || 0) * 1000 || Date.now());
     } else if (event.type === 'customer.subscription.deleted') {
       const sub = event.data.object;
       const email = await resolveEmail(stripe, sub.customer);

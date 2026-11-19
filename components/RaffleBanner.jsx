@@ -32,7 +32,7 @@ export default function RaffleBanner() {
             {info ? <>Drawing in <b className="font-mono text-fg tabular-nums">{d}d {pad(h)}:{pad(m)}:{pad(s)}</b> · {info.entries} {info.entries === 1 ? 'entry' : 'entries'} so far · from $1 or free</> : 'Monthly drawing · from $1 or enter free'}
           </span>
         </span>
-        <span className="btn-lime relative h-10 shrink-0 px-3.5 text-[13px] sm:px-4 sm:text-sm">Enter<span className="hidden sm:inline">&nbsp;the raffle</span><span aria-hidden className="hidden transition group-hover:translate-x-0.5 sm:inline">→</span></span>
+        <span className="btn-lime relative h-10 shrink-0 px-3.5 text-[13px] sm:px-4 sm:text-sm"><span>Enter<span className="hidden sm:inline"> the raffle</span></span><span aria-hidden className="hidden transition group-hover:translate-x-0.5 sm:inline">→</span></span>
       </a>
     </div>
   );

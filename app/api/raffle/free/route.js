@@ -3,7 +3,7 @@ import { routeGuard, allowAttempt, clientIp } from '../../../../lib/ratelimit';
 import { reportError } from '../../../../lib/alerts';
 import { cleanName, cleanEmail, validEmail, logFreeEntry, monthLabel } from '../../../../lib/raffle';
 
-// Free entry (no purchase necessary): 1 entry per person (email) per month.
+// Free entry (no purchase necessary): 1 entry per person (email) per ET day.
 export async function POST(request) {
   const limited = await routeGuard(request, 'raffle-free', 6, 3600);
   if (limited) return limited;
@@ -24,9 +24,9 @@ export async function POST(request) {
     }
     const r = await logFreeEntry({ name, email, ip });
     if (!r.added) {
-      return NextResponse.json({ ok: true, duplicate: true, message: `You already have your free entry for the ${monthLabel(r.month)} drawing. Come back next month!` });
+      return NextResponse.json({ ok: true, duplicate: true, message: `You already used today's free entry. Come back tomorrow for another one!` });
     }
-    return NextResponse.json({ ok: true, month: r.month, message: `You're in! 1 free entry for the ${monthLabel(r.month)} drawing.` });
+    return NextResponse.json({ ok: true, month: r.month, message: `You're in! 1 free entry for the ${monthLabel(r.month)} drawing. You can enter free again tomorrow.` });
   } catch (e) {
     console.error(e);
     await reportError('raffle-free', e);

@@ -81,6 +81,10 @@ test('paid entries are idempotent and free entry is once per email per month', a
   const f1 = await R.logFreeEntry({ name: 'Free Person', email: 'free.person+1@gmail.com', ip: '1.2.3.4' });
   const f2 = await R.logFreeEntry({ name: 'Free Person', email: 'freeperson@gmail.com', ip: '1.2.3.4' });
   assert.equal(f1.added, true); assert.equal(f2.added, false);
+  // Next ET day: the same person can enter free again (counted in whatever month that day belongs to).
+  const tomorrow = await R.logFreeEntry({ name: 'Free Person', email: 'freeperson@gmail.com', ip: '1.2.3.4', now: Date.now() + 86400000 });
+  assert.equal(tomorrow.added, true);
+  await R.removeEntry(tomorrow.month, tomorrow.entry.id);
   const s = await R.stats('2026-11');
   assert.equal(s.entrants, month === '2026-11' ? 3 : 2);
   assert.equal(s.votes, month === '2026-11' ? 7 : 6);
@@ -110,4 +114,28 @@ test('draw is idempotent, refuses open months, and late webhooks roll forward', 
   assert.equal(late.added, true);
   assert.notEqual(late.month, '2026-11');
   assert.equal(R.publicName('jane van doe'), 'jane D.');
+});
+
+test('awarding a raffle winner grants 31 days of Pro and emails the winner and the owner once', async () => {
+  process.env.RESEND_API_KEY = 'test-resend';
+  const sent = [];
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://api.resend.com')) { sent.push(JSON.parse(init.body)); return new Response('{}', { status: 200 }); }
+    return prev(url, init);
+  };
+  const month = '2026-09';
+  await R.addEntry(month, { id: 'free:x', kind: 'free', name: 'Win Ner', email: 'winner@example.com', votes: 1, amountCents: 0 });
+  const d = await R.drawMonth(month, { now: Date.UTC(2026, 9, 1, 3, 10) });
+  assert.equal(d.winner.winner.email, 'winner@example.com');
+  const { awardWinner } = await import('../lib/raffleaward.js');
+  const a = await awardWinner(month);
+  assert.equal(a.winner.granted, true);
+  assert.ok(a.winner.proUntil > Date.now() + 30 * 86400000);
+  const { getEntitlement } = await import('../lib/billing.js');
+  assert.equal((await getEntitlement('winner@example.com')).pro, true);
+  assert.deepEqual(sent.map(m => m.to[0]).sort(), ['senorcoughlin@gmail.com', 'winner@example.com']);
+  await awardWinner(month); // idempotent: no second grant or emails
+  assert.equal(sent.length, 2);
+  globalThis.fetch = prev;
 });
