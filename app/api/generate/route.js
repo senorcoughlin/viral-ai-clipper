@@ -17,7 +17,7 @@ import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billin
 import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
-import { toFetchable, isBlobUrl } from '../../../lib/media';
+import { toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
@@ -54,7 +54,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, downloaderEnabled, downloadViaRapid, startRapidJob, pollRapidJob, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize } from '../../../lib/downloader';
-import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable } from '../../../lib/localprep';
+import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation } from '../../../lib/jobs';
@@ -522,8 +522,9 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
   }
   const ytId = youtubeId(videoUrl);
-  // Private uploads are handed to RenderIO through a signed, expiring proxy URL.
-  const rioUrl = toFetchable(videoUrl);
+  // Private uploads are handed to RenderIO as a short-lived presigned Blob URL (read straight
+  // from Blob, not streamed through /api/media).
+  const rioUrl = await toRenderUrl(videoUrl);
   let ytSecs = 0;
   if (ytId) {
     const secs = (await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId));
@@ -930,7 +931,12 @@ export async function POST(request) {
       ctx.startedAt = startedAt;
       send({ type: 'start', total: count, ...(media ? { stream: { live: !!media.live, minutes: media.liveMinutes || null, duration: Math.round(media.winLen), chunks: audioChunks } } : {}) });
       send({ type: 'status', step: 'transcript' });
+      // Clear work dirs left by killed invocations, then size this job's pull budget from the
+      // /tmp space that's really free (it's shared with any other job on this instance).
+      await sweepStaleTmp().catch(() => {});
       ctx.dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clip-')).catch(() => null);
+      ctx.tmpCap = ctx.dir ? await tmpBudget(ctx.dir, YT_MAX_FILE_BYTES) : YT_MAX_FILE_BYTES;
+      if (ctx.tmpCap < YT_MAX_FILE_BYTES) console.log('tmp budget', { mb: Math.round(ctx.tmpCap / 1e6) });
       // Start transcript cache + source URL resolution together so the file pull can
       // overlap the YouTube subtitle fetch (that fetch alone can take ~60s).
       const cachedTrP = media?.live || noCache ? Promise.resolve(null) : getCachedTranscript(videoUrl).catch(() => null);
@@ -1066,7 +1072,7 @@ export async function POST(request) {
             const start = (o) => startRapidJob(videoUrl, o);
             let got = null;
             try {
-              got = await fetchSlices({ videoUrl, ytId, fmt, plan, dir: ctx.dir, deadline, start, poll: pollRapidJob, maxBytes: YT_MAX_FILE_BYTES,
+              got = await fetchSlices({ videoUrl, ytId, fmt, plan, dir: ctx.dir, deadline, start, poll: pollRapidJob, maxBytes: ctx.tmpCap,
                 blobHeaders: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` } });
             } catch (e) { console.warn('slices failed', e?.message); }
             if (got && got.missing.length && canHop) { await handOff(); return; }
@@ -1096,9 +1102,9 @@ export async function POST(request) {
               // A slow-but-progressing pull can finish and hand off once the file is in Blob.
               const left = Math.max(30000, RUN_BUDGET_MS - 15000 - (Date.now() - startedAt));
               let res;
-              if (src.blob) res = await downloadToFile(src.url, file, left, { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` });
+              if (src.blob) res = await downloadToFile(src.url, file, left, { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }, null, ctx.tmpCap);
               else {
-                try { res = await downloadToFile(src.url, file, left, {}, cont ? null : `sources/${ytId}.mp4`, YT_MAX_FILE_BYTES); }
+                try { res = await downloadToFile(src.url, file, left, {}, cont ? null : `sources/${ytId}.mp4`, ctx.tmpCap); }
                 catch (e) {
                   if (!e?.tooBig || process.env.YT_DOWNLOAD_FORMAT) throw e;
                   // Bigger than /tmp allows (usually a long video whose duration YouTube hid): pull the 360p tier instead.
@@ -1107,7 +1113,7 @@ export async function POST(request) {
                   const left2 = RUN_BUDGET_MS - 15000 - (Date.now() - startedAt);
                   if (left2 < 60000) throw e;
                   const u360 = await youtubeDownloader()(videoUrl, Math.min(90000, left2 - 30000), { format: '360' });
-                  res = await downloadToFile(u360, file, RUN_BUDGET_MS - 15000 - (Date.now() - startedAt), {}, cont ? null : `sources/${ytId}.mp4`, YT_MAX_FILE_BYTES);
+                  res = await downloadToFile(u360, file, RUN_BUDGET_MS - 15000 - (Date.now() - startedAt), {}, cont ? null : `sources/${ytId}.mp4`, ctx.tmpCap);
                 }
               }
               if (res.blobUrl) kvSetJson(SRC_KEY(ytId), { blob: res.blobUrl }, 30 * 24 * 3600).catch(() => {});
@@ -1122,7 +1128,8 @@ export async function POST(request) {
               }
             } catch (e) {
               console.warn('local source download failed', e?.message);
-              if (src.blob) kvSetJson(SRC_KEY(ytId), {}, 1).catch(() => {});
+              // Keep the saved source when only this instance's disk was short; drop it if it's unreadable.
+              if (src.blob && !e?.tooBig) kvSetJson(SRC_KEY(ytId), {}, 1).catch(() => {});
             }
             if (!ctx.local) {
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}

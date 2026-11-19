@@ -403,3 +403,90 @@ test('downloadViaRapid sends start_time/end_time for cut downloads', async () =>
     assert.equal(q.get('end_time'), '781');
   } finally { globalThis.fetch = orig; }
 });
+
+// ---- Fast Origin Transfer / disk fixes ----
+test('saved slices are not read from Blob while provider slices are still missing (no wasted re-reads before a hand-off)', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const saved = { [slices.sliceKey('abc', '240', plan, 0)]: { blob: 'https://blob.example/s0' }, [slices.sliceKey('abc', '240', plan, 1)]: { blob: 'https://blob.example/s1' } };
+  const env = fakeSliceEnv({ saved, slowK: new Set([3]) });
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, [3], 'only the truly missing slice is reported');
+  assert.equal(r.stats.fromBlob, 0);
+  assert.equal(r.stats.deferred, 2);
+  assert.ok(!env.calls.download.some(u => u.startsWith('https://blob.example/')), 'no Blob reads');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('saved slices are read once every provider slice is in', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const saved = { [slices.sliceKey('abc', '240', plan, 0)]: { blob: 'https://blob.example/s0' } };
+  const env = fakeSliceEnv({ saved });
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.files.size, plan.slices.length);
+  assert.equal(r.stats.fromBlob, 1);
+  assert.equal(env.calls.download.at(-1), 'https://blob.example/s0', 'Blob read last');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+const canUseDevFull = process.platform === 'linux' && process.getuid?.() !== 0 && await fs.access('/dev/full').then(() => true, () => false);
+test('a full /tmp (ENOSPC) fails fast as tooBig/noSpace instead of retrying', { skip: !canUseDevFull }, async () => {
+  const lp = await import('../lib/localprep.js');
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response(streamChunks([bytes(70000), bytes(70000)])); };
+  try {
+    // Every write to /dev/full fails with a real ENOSPC.
+    const err = await lp.downloadToFile('https://cdn.example/v.mp4', '/dev/full', 10000).then(() => null, e => e);
+    assert.ok(err, 'download must fail');
+    assert.equal(err.noSpace, true);
+    assert.equal(err.tooBig, true, 'callers treat it like an oversize source (lighter tier / no retry)');
+    assert.equal(calls, 1, 'no retries into a full disk');
+  } finally { globalThis.fetch = realFetch; }
+  assert.ok(lp.isNoSpace(new Error('x', { cause: { code: 'ENOSPC' } })));
+  assert.ok(!lp.isNoSpace(new Error('source fetch 500')));
+});
+
+test('tmp sweep removes only work dirs older than any live invocation', async () => {
+  const lp = await import('../lib/localprep.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sweep-'));
+  const old = path.join(root, 'clip-old'); const fresh = path.join(root, 'clip-new'); const other = path.join(root, 'keep-me');
+  for (const d of [old, fresh, other]) await fs.mkdir(d);
+  await fs.writeFile(path.join(old, 'src.mp4'), bytes(1000));
+  const past = new Date(Date.now() - 10 * 60 * 1000);
+  await fs.utimes(old, past, past); await fs.utimes(other, past, past);
+  const r = await lp.sweepStaleTmp({ dir: root, force: true });
+  assert.equal(r.removed, 1);
+  assert.deepEqual((await fs.readdir(root)).sort(), ['clip-new', 'keep-me']);
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('tmp budget splits free space between live jobs and never exceeds the max', async () => {
+  const lp = await import('../lib/localprep.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-bud-'));
+  const own = path.join(root, 'clip-a'); await fs.mkdir(own); await fs.mkdir(path.join(root, 'clip-b'));
+  const statfs = async () => ({ bavail: 448e6 / 4096, bsize: 4096 }); // 448 MB free
+  const cap = await lp.tmpBudget(own, 420e6, { dir: root, statfs });
+  assert.equal(cap, Math.floor((448e6 - 48e6) / 2)); // 2 jobs share 400 MB
+  assert.equal(await lp.tmpBudget(own, 100e6, { dir: root, statfs }), 100e6);
+  assert.equal(await lp.tmpBudget(own, 420e6, { dir: root, statfs: async () => { throw new Error('no statfs'); } }), 420e6);
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('toRenderUrl: non-Blob and public Blob URLs pass through; a presign failure falls back to the signed /api/media proxy', async () => {
+  const m = await import('../lib/media.js');
+  assert.equal(await m.toRenderUrl('https://cdn.example/v.mp4'), 'https://cdn.example/v.mp4');
+  const pub = 'https://abc.public.blob.vercel-storage.com/clips/x.mp4';
+  assert.equal(await m.toRenderUrl(pub), pub);
+  const priv = 'https://abc.private.blob.vercel-storage.com/segments/1_0-RAND.mp4';
+  const saved = process.env.BLOB_READ_WRITE_TOKEN; delete process.env.BLOB_READ_WRITE_TOKEN;
+  process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-secret';
+  try {
+    const u = await m.toRenderUrl(priv);
+    assert.match(u, /^https:\/\/viralaiclipper\.com\/api\/media\?u=/);
+    const q = new URL(u).searchParams;
+    assert.ok(m.verifyMedia(q.get('u'), q.get('x'), q.get('s')));
+  } finally { if (saved) process.env.BLOB_READ_WRITE_TOKEN = saved; }
+});

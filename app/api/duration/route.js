@@ -6,7 +6,7 @@ import { routeGuard } from '../../../lib/ratelimit';
 import { validateVideoUrl } from '../../../lib/validate';
 import { youtubeInfoDuration } from '../../../lib/downloader';
 import { probeRemoteDuration, localFfmpegAvailable } from '../../../lib/localprep';
-import { toFetchable } from '../../../lib/media';
+import { toRenderUrl } from '../../../lib/media';
 import { youtubeDuration } from '../../../lib/ytduration';
 import { youtubeIdOf } from '../../../lib/links';
 import { parseStreamUrl } from '../../../lib/stream';
@@ -41,7 +41,7 @@ export async function GET(request) {
       else if (page === -2) upcoming = true;
       else secs = page > 0 ? page : (Number(await youtubeInfoDuration(url, 7000)) || 0);
     }
-    else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(toFetchable(url), null, null, 10000);
+    else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(await toRenderUrl(url, 10 * 60), null, null, 10000);
   } catch {}
   return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs }, { headers: h });
 }

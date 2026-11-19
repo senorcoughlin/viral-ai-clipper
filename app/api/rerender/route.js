@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { head, put } from '@vercel/blob';
 import { renderioCut, sanitizeBrand, sanitizePro } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
-import { toFetchable, isBlobUrl } from '../../../lib/media';
+import { toFetchable, toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 import { routeGuard } from '../../../lib/ratelimit';
 import { paidEmail } from '../../../lib/session';
@@ -66,7 +66,7 @@ export async function POST(request) {
     if (!o || !o.startsWith('https://') || !(isBlobUrl(o) || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(o))) {
       return NextResponse.json({ success: false, message: 'Facecam must be an uploaded video or a direct https link to an MP4/MOV/WebM file.' }, { status: 400 });
     }
-    overlayUrl = toFetchable(o);
+    overlayUrl = await toRenderUrl(o);
   }
   // Free accounts keep the watermark on re-renders; Pro and credit holders don't.
   const email = paidEmail(request);
@@ -94,8 +94,8 @@ export async function POST(request) {
     }
   }
   try {
-    const url = await renderioCut(toFetchable(renderSrc), start, outLen, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
-      wordCaptions: true, timedWords: words, userCrop, keep, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark, pro,
+    const url = await renderioCut(await toRenderUrl(renderSrc), start, outLen, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
+      wordCaptions: true, timedWords: words, userCrop, keep, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? await toRenderUrl(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark, pro,
     });
     // RenderIO output links are temporary: keep a permanent copy for the library and Download.
     let videoUrl = url;
