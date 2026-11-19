@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { reportError } from '../../../lib/alerts';
 import { markPro } from '../../../lib/pro';
 import { addCredits, setPro, emailForCustomer } from '../../../lib/billing';
+import { logPaidEntry } from '../../../lib/raffle';
 
 async function resolveEmail(stripe, customerId) {
   if (!customerId) return null;
@@ -32,6 +33,12 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
+    // Raffle entries ($1 / $4). Must run before the Pro/credits branch so a raffle payment never grants Pro.
+    if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && event.data.object?.metadata?.type === 'raffle') {
+      const r = await logPaidEntry(event.data.object, (event.created || 0) * 1000 || Date.now());
+      console.log('Raffle entry:', event.data.object.id, r.added ? `added to ${r.month}` : (r.reason || 'duplicate'));
+      return NextResponse.json({ received: true });
+    }
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       const email = (session.customer_details?.email || session.customer_email || '').toLowerCase();

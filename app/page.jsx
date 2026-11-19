@@ -16,6 +16,7 @@ import SpinWheel from '../components/SpinWheel';
 import MonetizePanel from '../components/MonetizePanel';
 import StudioClip from '../components/StudioClip';
 import { funnel } from '../lib/funnel';
+import RaffleBanner from '../components/RaffleBanner';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
@@ -1103,6 +1104,7 @@ function HomeInner({ studio = false }) {
             <a href="/tutorial" className="hover:text-fg">How It Works</a>
             <a href="/monetize" className="hover:text-fg">Earn With Clips</a>
             <a href="#pricing" className="hover:text-fg">Pricing</a>
+            <a href="/raffle" className="hover:text-fg">Win Pro</a>
             <AccountBar onChange={() => refreshBilling()} />
           </nav>
           <div className="flex items-center gap-2.5">
@@ -1119,6 +1121,7 @@ function HomeInner({ studio = false }) {
         </div>
       </header>
 
+      <RaffleBanner />
       {!isPro && !promoHidden && (
         <div className="relative mx-auto mt-3 flex max-w-6xl items-center justify-center gap-3 px-5">
           <div className="flex items-center gap-3 rounded-full border border-lime bg-lime-tint px-4 py-1.5 text-[13px] font-semibold text-lime">
@@ -1380,7 +1383,7 @@ function HomeInner({ studio = false }) {
       <footer className="relative border-t border-[#1E1E29] bg-[#0D0D14] pb-24 md:pb-0">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-7 text-[13px] text-muted">
           <span className="flex items-center gap-2"><EasterEgg onUnlocked={() => refreshBilling()}><span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-lime"><Bolt size={13} /></span></EasterEgg>Viral AI Clipper © {new Date().getFullYear()}</span>
-          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="/connectors" className="hover:text-fg">Connections</a><a href="/tools" className="hover:text-fg">AI Tools</a><a href="/assets" className="hover:text-fg">My Assets</a><a href="/channel" className="hover:text-fg">Channel</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
+          <span className="flex flex-wrap gap-x-5 gap-y-2"><a href="/raffle" className="hover:text-fg">Win Pro Raffle</a><a href="/terms" className="hover:text-fg">Terms</a><a href="/privacy" className="hover:text-fg">Privacy</a><a href="/dmca" className="hover:text-fg">DMCA</a><a href="/feedback" className="hover:text-fg">Feedback</a><a href="/free-ai-clip-maker" className="hover:text-fg">Guides</a><a href="/opus-clip-alternative" className="hover:text-fg">Compare</a><a href="/connectors" className="hover:text-fg">Connections</a><a href="/tools" className="hover:text-fg">AI Tools</a><a href="/assets" className="hover:text-fg">My Assets</a><a href="/channel" className="hover:text-fg">Channel</a><a href="mailto:support@viralaiclipper.com" className="hover:text-fg">Support</a></span>
         </div>
       </footer>
 
