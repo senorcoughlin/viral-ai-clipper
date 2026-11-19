@@ -160,7 +160,7 @@ export default function RaffleClient() {
             Win <span className="bg-gradient-to-r from-lime to-[#7CFFB2] bg-clip-text text-transparent">Pro for a month</span>.
           </h1>
           <p className="max-w-[540px] text-[16px] leading-relaxed text-soft sm:text-[17px]">
-            Unlimited clipping* and every Pro feature for 31 days. One winner is drawn at random on the last day of every month. Entries start at $1, and there's always a free way to enter.
+            Unlimited clipping* and every Pro feature for 31 days. One winner is drawn at random on the last day of every month. Entries start at $1, and you can enter free every day.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <a href="#enter" className="btn-lime h-[52px] px-6 text-[15px]"><Bolt />Enter the raffle</a>
@@ -241,7 +241,7 @@ export default function RaffleClient() {
           <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-line2 bg-ink text-2xl">🎟️</div>
           <div className="flex-1">
             <h3 className="font-display text-xl font-bold text-fg">Free entry, no purchase necessary</h3>
-            <p className="mt-1 text-sm text-soft">Use your name and email above to get 1 free entry, once per person each month. It has exactly the same chance as a paid entry.</p>
+            <p className="mt-1 text-sm text-soft">Use your name and email above to get 1 free entry, once per person every day (ET). Come back daily for more. Each one has exactly the same chance as a paid entry.</p>
           </div>
           <button disabled={!!busy} onClick={free} className="btn-ghost h-12 w-full shrink-0 px-5 text-[15px] sm:w-auto">{busy === 'free' ? 'Entering…' : 'Get my free entry'}</button>
         </div>
@@ -252,7 +252,7 @@ export default function RaffleClient() {
         <h2 className="text-center font-display text-2xl font-extrabold tracking-tight text-fg sm:text-3xl">How it works</h2>
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           {[
-            ['1', 'Enter', 'Get 1 entry for $1, 5 entries for $4, or 1 free entry each month.'],
+            ['1', 'Enter', 'Get 1 entry for $1, 5 entries for $4, or 1 free entry every day.'],
             ['2', 'Drawing', `On the last day of the month, after entries close at 10 PM ET, one entry is picked at random. Each entry counts once.`],
             ['3', 'Win Pro', 'We email the winner, and Pro turns on for their email address for 31 days. It never renews and is never charged.'],
           ].map(([n, t, d], i) => (

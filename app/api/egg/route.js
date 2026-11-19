@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { paidEmail, getSession } from '../../../lib/session';
 import { addCredits } from '../../../lib/billing';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
+import { emailOwner } from '../../../lib/alerts';
 
 const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 
@@ -21,5 +22,7 @@ export async function POST(request) {
   }
   const r = await addCredits(email, 500, `egg:${email}`);
   if (r.duplicate) return NextResponse.json({ success: false, message: 'You already claimed this one.', credits: r.credits }, { status: 409 });
+  await emailOwner(`[Viral AI Clipper] Easter egg code redeemed by ${email}`,
+    `The hidden easter egg code was redeemed.\n\nCode: easter egg password (not shown here)\nRedeemed by: ${email}\nReward: 500 credits (total now ${r.credits})\nTime: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} ET`);
   return NextResponse.json({ success: true, message: '500 free generations unlocked!', credits: r.credits });
 }

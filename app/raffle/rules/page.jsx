@@ -4,7 +4,7 @@ export const metadata = { title: 'Monthly Raffle Official Rules', alternates: { 
 
 export default function RaffleRules() {
   return (
-    <LegalPage title="Monthly Raffle: Official Rules" updated="November 19, 2026">
+    <LegalPage title="Monthly Raffle: Official Rules" updated="November 19, 2026 (free entry changed to once per day)">
       <p><b>NO PURCHASE OR PAYMENT OF ANY KIND IS NECESSARY TO ENTER OR WIN. A PURCHASE OR PAYMENT WILL NOT INCREASE YOUR CHANCES OF WINNING BEYOND THE ENTRIES IT PROVIDES, AND A FREE ENTRY HAS EXACTLY THE SAME CHANCE AS A PAID ENTRY. VOID WHERE PROHIBITED.</b></p>
 
       <h2>1. Sponsor</h2>
@@ -18,7 +18,7 @@ export default function RaffleRules() {
 
       <h2>4. How to enter</h2>
       <ul>
-        <li><b>Free entry (no purchase necessary):</b> visit <a href="/raffle#free">viralaiclipper.com/raffle</a>, enter your name and email address, confirm you are 18+ and agree to these rules, and select "Get my free entry." Limit: 1 free entry per person and email address per monthly entry period.</li>
+        <li><b>Free entry (no purchase necessary):</b> visit <a href="/raffle#free">viralaiclipper.com/raffle</a>, enter your name and email address, confirm you are 18+ and agree to these rules, and select "Get my free entry." Limit: 1 free entry per person and email address per day. A "day" runs from 12:00 AM to 11:59 PM ET. You may come back and enter free once every day of the entry period.</li>
         <li><b>Paid entries:</b> on the same page, enter your name and email address and choose 1 entry for US $1 or 5 entries for US $4, paid securely through Stripe. Paid entries are counted once payment is confirmed.</li>
       </ul>
       <p>The words "entry" and "vote" mean the same thing: one chance in the drawing. Each entry, paid or free, has an equal chance of being drawn. You must give your real name and a working email address. Entries made by bots, scripts, fake or disposable identities, or any attempt to get around the limits are void, and the Sponsor may disqualify anyone who tampers with the Raffle.</p>
