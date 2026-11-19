@@ -4,6 +4,7 @@ import PwaInstall from '../components/PwaInstall'
 import VersionCheck from '../components/VersionCheck'
 import GoogleAds from '../components/GoogleAds'
 import ReferralCapture from '../components/ReferralCapture'
+import PageBeacon from '../components/PageBeacon'
 import { Analytics } from '@vercel/analytics/next'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 import localFont from 'next/font/local'
@@ -40,7 +41,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body><SiteBanner />{children}<PwaInstall /><VersionCheck /><GoogleAds /><ReferralCapture /><Analytics /><SpeedInsights /></body>
+      <body><SiteBanner />{children}<PwaInstall /><VersionCheck /><GoogleAds /><ReferralCapture /><PageBeacon /><Analytics /><SpeedInsights /></body>
     </html>
   )
 }

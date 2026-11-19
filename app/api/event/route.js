@@ -1,8 +1,9 @@
 // First-party funnel counter: ev:<YYYY-MM-DD ET>:<name> in Redis, plus ev:<day>:<name>:u (unique IPs, HyperLogLog).
 import { kvCommand, kvEnabled } from '../../../lib/kv';
+import { recordCity } from '../../../lib/geo';
 
 export const runtime = 'nodejs';
-const ALLOWED = new Set(['landing_view', 'url_input_focus', 'url_pasted', 'generate_click', 'generate_success', 'generate_error', 'spin_view', 'spin_click', 'spin_win', 'sample_click', 'paste_click', 'generate_blocked', 'sticky_cta', 'bottom_cta', 'clip_download']);
+const ALLOWED = new Set(['landing_view', 'url_input_focus', 'url_pasted', 'generate_click', 'generate_success', 'generate_error', 'spin_view', 'spin_click', 'spin_win', 'sample_click', 'paste_click', 'generate_blocked', 'page_view', 'sticky_cta', 'bottom_cta', 'clip_download']);
 const BOT = /bot|crawl|spider|slurp|headless|lighthouse|preview|facebookexternalhit|curl|wget|python|node-fetch|axios/i;
 
 export async function POST(req) {
@@ -22,6 +23,9 @@ export async function POST(req) {
     await kvCommand(['PFADD', key + ':u', ip]);
     await kvCommand(['EXPIRE', key, String(86400 * 120)]);
     await kvCommand(['EXPIRE', key + ':u', String(86400 * 120)]);
+    // City stats (page views and Generate clicks) from Vercel's geo headers.
+    if (name === 'landing_view' || name === 'page_view') await recordCity('view', { headers: req.headers, ip, ua, day }).catch(() => {});
+    else if (name === 'generate_click') await recordCity('gen', { headers: req.headers, ip, ua, day }).catch(() => {});
   } catch {}
   return new Response(null, { status: 204 });
 }
