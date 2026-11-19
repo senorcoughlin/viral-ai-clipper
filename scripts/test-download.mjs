@@ -314,18 +314,74 @@ test('slice audio is continuous in source time and clips cut from slices match t
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('hqClipCut pads the window and returns the clip offset inside the cut', async () => {
+function hqEnv({ ready = {}, fail = new Set(), delay = {} } = {}) {
+  const calls = { start: [], poll: [], download: [] };
+  return {
+    calls,
+    start: async ({ startTime, endTime, format }) => { calls.start.push({ startTime, endTime, format }); return `https://p.example/${format}?s=${startTime}&e=${endTime}`; },
+    poll: async (p, timeoutMs) => {
+      calls.poll.push(p);
+      const f = new URL(p).pathname.slice(1);
+      if (fail.has(f)) { const e = new Error('no such format'); e.failed = true; throw e; }
+      const d = delay[f] ?? 0;
+      if (d > timeoutMs || ready[f] === false) { await new Promise(r => setTimeout(r, Math.min(timeoutMs, 30))); const e = new Error('download api timeout'); e.timeout = true; throw e; }
+      await new Promise(r => setTimeout(r, d));
+      return `https://cdn.example/${f}.mp4`;
+    },
+    download: async (u, file) => { calls.download.push(u); await fs.writeFile(file, bytes(3000)); return { size: 3000 }; },
+  };
+}
+
+test('startHqJobs starts 1080p and 720p jobs for the padded clip window', async () => {
+  const env = hqEnv();
+  const hq = await slices.startHqJobs({ start: env.start, clipStart: 125.4, len: 30, dur: 4000 });
+  assert.equal(hq.s0, 123);
+  assert.equal(hq.e0, 158);
+  assert.deepEqual(env.calls.start.map(c => c.format).sort(), ['1080', '720']);
+  assert.ok(hq.jobs['1080'] && hq.jobs['720']);
+});
+
+test('fetchHqClip prefers 1080p and returns the clip offset inside the cut', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-hq-'));
-  let asked;
-  const r = await slices.hqClipCut({
-    resolve: async (o) => { asked = o; return 'https://cdn.example/hq.mp4'; },
-    download: async (_u, file) => { await fs.writeFile(file, bytes(3000)); return { size: 3000 }; },
-    dir, start: 125.4, len: 30, dur: 4000, tag: 't', deadline: Date.now() + 60000, format: '720',
-  });
-  assert.equal(asked.startTime, 123);
-  assert.equal(asked.endTime, 158);
-  assert.equal(asked.format, '720');
+  const env = hqEnv({ delay: { '720': 5, '1080': 40 } });
+  const hq = await slices.startHqJobs({ start: env.start, clipStart: 125.4, len: 30, dur: 4000 });
+  const r = await slices.fetchHqClip({ hq, clipStart: 125.4, len: 30, dir, tag: 't', deadline: Date.now() + 60000, poll: env.poll, start: env.start, download: env.download, preferWaitMs: 2000 });
+  assert.equal(r.fmt, '1080');
   assert.ok(Math.abs(r.rel - 2.4) < 1e-9);
+  assert.deepEqual(env.calls.download, ['https://cdn.example/1080.mp4']);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('fetchHqClip takes 720p when the video has no 1080p', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-hq-'));
+  const env = hqEnv({ fail: new Set(['1080']) });
+  const hq = await slices.startHqJobs({ start: env.start, clipStart: 10, len: 30, dur: 600 });
+  const r = await slices.fetchHqClip({ hq, clipStart: 10, len: 30, dir, tag: 't', deadline: Date.now() + 60000, poll: env.poll, start: env.start, download: env.download, preferWaitMs: 50 });
+  assert.equal(r.fmt, '720');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('fetchHqClip reports .timeout (hand off and keep polling) while jobs are still preparing', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-hq-'));
+  const env = hqEnv({ ready: { '1080': false, '720': false } });
+  const hq = await slices.startHqJobs({ start: env.start, clipStart: 10, len: 30, dur: 600 });
+  await assert.rejects(slices.fetchHqClip({ hq, clipStart: 10, len: 30, dir, tag: 't', deadline: Date.now() + 9500, poll: env.poll, start: env.start, download: env.download }), (e) => e.timeout === true && !e.failed);
+  // The next invocation polls the very same jobs (no new starts) and gets the cut.
+  const env2 = hqEnv();
+  const r = await slices.fetchHqClip({ hq, clipStart: 10, len: 30, dir, tag: 't', deadline: Date.now() + 60000, poll: env2.poll, start: env2.start, download: env2.download, preferWaitMs: 50 });
+  assert.equal(r.fmt, '1080');
+  assert.equal(env2.calls.start.length, 0);
+  assert.deepEqual(env2.calls.poll.sort(), [hq.jobs['1080'], hq.jobs['720']].sort());
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('fetchHqClip falls back to one 480p job only when every HQ job failed', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-hq-'));
+  const env = hqEnv({ fail: new Set(['1080', '720']) });
+  const hq = await slices.startHqJobs({ start: env.start, clipStart: 10, len: 30, dur: 600 });
+  const r = await slices.fetchHqClip({ hq, clipStart: 10, len: 30, dir, tag: 't', deadline: Date.now() + 60000, poll: env.poll, start: env.start, download: env.download });
+  assert.equal(r.fmt, '480');
+  assert.ok(hq.jobs['480'], 'the 480p job is kept with the clip for later hops');
   await fs.rm(dir, { recursive: true, force: true });
 });
 

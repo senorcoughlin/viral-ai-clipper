@@ -58,7 +58,7 @@ import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, se
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation } from '../../../lib/jobs';
-import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sliceFor, hqClipCut, SLICE_MAX_HOPS, HQ_CLIP_FORMAT } from '../../../lib/slices';
+import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sliceFor, startHqJobs, fetchHqClip, SLICE_MAX_HOPS, HQ_FORMATS } from '../../../lib/slices';
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
@@ -649,7 +649,7 @@ export async function POST(request) {
   try {
   const vertical = clipFormat === 'shorts_9_16';
   // Shared state filled in by the setup steps inside the stream.
-  const ctx = { dir: null, source: null, transcript: EMPTY_TRANSCRIPT, downloadError: null };
+  const ctx = { dir: null, source: null, transcript: EMPTY_TRANSCRIPT, downloadError: null, resumeHq: cont?.hq || null };
   // When the AI can't score (no transcript, or the model call failed) we still
   // cut evenly spaced clips, but we say so instead of inventing viral scores.
   const unscoredClips = (n) => {
@@ -710,13 +710,8 @@ export async function POST(request) {
   // HQ cut when that arrived in time, else the light-resolution slice that contains it.
   async function clipSource(start, len, i) {
     if (!ctx.sliced) return { file: ctx.local, rel: start };
-    const hqP = ctx.hq?.[i];
-    if (hqP) {
-      const wait = Math.max(0, (ctx.hqDeadline || 0) - Date.now());
-      const hq = await Promise.race([hqP, new Promise(r => setTimeout(() => r(null), wait))]);
-      if (hq?.file) { ctx.hqUsed = (ctx.hqUsed || 0) + 1; return hq; }
-      console.warn('hq cut not ready; using slice', { i, fmt: ctx.sliced.fmt });
-    }
+    const hq = ctx.hq?.[i];
+    if (hq?.file) { ctx.hqUsed = (ctx.hqUsed || 0) + 1; return hq; }
     const sl = sliceFor(ctx.sliced.plan.slices, start, len);
     return { file: ctx.sliced.files.get(sl.k), rel: sl.rel };
   }
@@ -732,7 +727,7 @@ export async function POST(request) {
     if (rio) {
       try {
         const label = autoSubtitles !== false && c.scored !== false ? (c.hook || c.title || '') : '';
-        let timedWords = autoSubtitles !== false ? wordsInWindow(ctx.transcript, start, len) : [];
+        let timedWords = autoSubtitles !== false ? (c._presetWords || wordsInWindow(ctx.transcript, start, len)) : [];
         // Track the speaker for vertical clips while there's time left in the 300s budget.
         let crop = null;
         // Skip face tracking when the monthly RenderIO budget is getting tight.
@@ -1086,7 +1081,7 @@ export async function POST(request) {
             // All parts are in Blob now; a fresh invocation re-reads them in seconds.
             if (Date.now() - startedAt > HANDOFF_AFTER_MS && canHop) { await handOff(); return; }
             const t1 = Date.now();
-            ctx.localAudio = await buildSliceAudio(plan, got.files, path.join(ctx.dir, 'audio.mp3')).catch((e) => { console.warn('slice audio failed', e?.message); return null; });
+            if (!cachedTr) ctx.localAudio = await buildSliceAudio(plan, got.files, path.join(ctx.dir, 'audio.mp3')).catch((e) => { console.warn('slice audio failed', e?.message); return null; });
             ctx.sliced = { plan, files: got.files, fmt };
             ctx.local = got.files.get(0);
             ctx.sourceSec = plan.dur;
@@ -1241,8 +1236,8 @@ export async function POST(request) {
         return;
       }
       send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
-      let scored = null;
-      if (whole) {
+      let scored = ctx.resumeHq?.clips?.length ? { clips: ctx.resumeHq.clips } : null;
+      if (whole && !scored) {
         // No highlight picking: one clip from 0s for the whole length. One Gemini call only for title/caption.
         const r = ctx.transcript?.text ? await scoreWithGemini(ctx.transcript, videoUrl, clipFormat, aiStyle, clipLength, 1).catch(() => null) : null;
         const g = r?.clips?.[0] || {};
@@ -1257,7 +1252,7 @@ export async function POST(request) {
         for (const sg of segsT) { const g = Math.floor(sg.start / W); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(sg); }
         ctx.chunkTranscripts = [...groups.values()].map(sgs => ({ text: sgs.map(x => x.text).join(' '), segments: sgs }));
       }
-      if (whole) {
+      if (whole || ctx.resumeHq?.clips?.length) {
         // scored above
       } else if ((media || (ctx.chunkTranscripts && ctx.chunkTranscripts.length > 1)) && ctx.transcript?.segments?.length) {
         // Score each chunk on its own (keeps prompts small and parallel), then keep the best
@@ -1293,15 +1288,35 @@ export async function POST(request) {
         else console.warn('generate: no transcript; used heuristic scores', videoUrl);
       }
       const base = scored?.clips?.length ? scored.clips.slice(0, count).map(c => ({ ...c, scored: true })) : unscoredClips(count);
-      // Sliced long video: fetch each picked moment again at clip resolution, in parallel,
-      // while leaving enough of the budget to render from the light slice if a cut is late.
-      if (ctx.sliced && HQ_CLIP_FORMAT !== 'off') {
+      // Sliced video: every clip is rendered from its own best-quality cut (1080p/720p jobs for
+      // just its time range, started now in parallel). If the cuts aren't in by the deadline, hand
+      // the job (picked clips, caption words and job URLs) to a fresh invocation that keeps polling
+      // the same jobs. The light slice is only used on the final allowed hop, as a last resort.
+      if (ctx.sliced && HQ_FORMATS.length) {
+        const L = Number(clipLength);
+        if (ctx.resumeHq) console.log('hq resume', { hop, clips: base.length });
+        await Promise.all(base.map(async (c) => {
+          if (autoSubtitles !== false && !c._presetWords) c._presetWords = wordsInWindow(ctx.transcript, Number(c.startSec || 0), L);
+          if (!c._hq) c._hq = await startHqJobs({ start: (o) => startRapidJob(videoUrl, o), clipStart: Number(c.startSec || 0), len: L, dur: ctx.sourceSec });
+        }));
+        const finalHop = !canHop;
         ctx.hqDeadline = reqStart + RUN_BUDGET_MS - Number(process.env.HQ_RENDER_RESERVE_MS || 110000);
-        if (ctx.hqDeadline - Date.now() > 30000) {
-          const resolveHq = ({ startTime, endTime, format, timeoutMs }) => downloadViaRapid(videoUrl, Math.min(150000, timeoutMs), { format, startTime, endTime });
-          ctx.hq = base.map((c, i) => hqClipCut({ resolve: resolveHq, dir: ctx.dir, start: Number(c.startSec || 0), len: Number(clipLength), dur: ctx.sourceSec, tag: `${i}`, deadline: ctx.hqDeadline })
-            .catch((e) => { console.warn('hq cut failed', { i, err: String(e?.message || e).slice(0, 120) }); return null; }));
+        send({ type: 'status', step: 'cutting', total: base.length });
+        const results = await Promise.all(base.map((c, i) => fetchHqClip({ hq: c._hq, clipStart: Number(c.startSec || 0), len: L, dir: ctx.dir, tag: `${i}`,
+          deadline: ctx.hqDeadline, poll: pollRapidJob, start: (o) => startRapidJob(videoUrl, o) })
+          .catch((e) => { console.warn('hq cut not ready', { i, hop, timeout: !!e?.timeout, err: String(e?.message || e).slice(0, 160) }); return { err: e }; })));
+        const waiting = results.some(r => r.err?.timeout);
+        if (waiting && !finalHop) {
+          // Keep only what the next invocation needs (no file paths, no full transcript).
+          const clipsState = base.map(({ _hq, _presetWords, ...c }) => ({ ...c, _hq, _presetWords }));
+          await touchJob(jobId, { hq: { clips: clipsState } });
+          await handOff();
+          return;
         }
+        ctx.hq = results.map(r => (r.err ? null : r));
+        const low = results.filter(r => r.err).length;
+        if (low) console.warn('LOW-RES FALLBACK: rendering from the light slice', { ytId, hop, clips: low, of: base.length, fmt: ctx.sliced.fmt });
+        console.log('hq clips', { ytId, hop, ok: results.length - low, of: results.length, fmts: results.map(r => r.fmt || null) });
       }
 
       send({ type: 'status', step: 'cutting', total: base.length });
