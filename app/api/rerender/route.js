@@ -2,7 +2,7 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { head, put } from '@vercel/blob';
-import { renderioCut, sanitizeBrand } from '../../../lib/render';
+import { renderioCut, sanitizeBrand, sanitizePro } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
 import { toFetchable, isBlobUrl } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
@@ -72,6 +72,9 @@ export async function POST(request) {
   const email = paidEmail(request);
   const ent = email ? await getEntitlement(email).catch(() => null) : null;
   const watermark = !(ent?.pro || ent?.credits > 0);
+  // Pro editing options (color grade, speed, loudness, fades, caption looks, own watermark): Pro plan only.
+  const pro = sanitizePro(body.pro);
+  if (pro && !ent?.pro) return NextResponse.json({ success: false, code: 'pro_required', message: 'These editing options are part of Pro. Upgrade to Pro to use them, or turn them off and render again.' }, { status: 403 });
   const brand = sanitizeBrand(body.brand);
   // Library clips keep pointing at their source. Fail clearly if it's gone.
   if (isBlobUrl(source)) {
@@ -92,7 +95,7 @@ export async function POST(request) {
   }
   try {
     const url = await renderioCut(toFetchable(renderSrc), start, outLen, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
-      wordCaptions: true, timedWords: words, userCrop, keep, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark,
+      wordCaptions: true, timedWords: words, userCrop, keep, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? toFetchable(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark, pro,
     });
     // RenderIO output links are temporary: keep a permanent copy for the library and Download.
     let videoUrl = url;

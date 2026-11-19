@@ -8,6 +8,8 @@ import { BRAND_COLORS, loadBrand } from './ClipEditor';
 import { CropPanel, CutPanel, applyCuts, useSkipCuts, useClipEdits } from './StudioTools';
 
 const fmt = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+// 75.3 -> "1:15.3" (whole seconds stay "1:15")
+const fmtT = (s) => { s = Math.max(0, Number(s) || 0); const d = Math.round((s % 1) * 10); return d && d < 10 ? `${fmt(Math.floor(s))}.${d}` : fmt(s); };
 const handleOf = (src, author) => {
   const m = String(src || '').match(/twitch\.tv\/(?!videos\b)([A-Za-z0-9_]{3,25})/i) || String(src || '').match(/kick\.com\/([A-Za-z0-9_-]{3,25})/i);
   if (m) return '@' + m[1];
@@ -35,7 +37,38 @@ export function monetizationChecks(clip, ed, dur) {
   ];
 }
 
-export default function StudioClip({ clip, index, selected, onSelect }) {
+// ---------- Pro editing ----------
+export const PRO_DEFAULTS = { grade: '', speed: 1, loud: false, fade: false, capStyle: '', wordsPer: 0, accent: '', wmText: '', noWatermark: false };
+export const GRADES = [['', 'Original'], ['vivid', 'Vivid'], ['warm', 'Warm'], ['cool', 'Cool'], ['bright', 'Bright'], ['cinematic', 'Cinematic'], ['vintage', 'Vintage'], ['bw', 'Black & white']];
+// Only the options that differ from the defaults go to the server (it re-validates them).
+export function proPayload(p) {
+  if (!p) return null;
+  const out = {};
+  if (p.grade) out.grade = p.grade;
+  if (p.speed && p.speed !== 1) out.speed = p.speed;
+  if (p.loud) out.loud = true;
+  if (p.fade) out.fade = true;
+  if (p.capStyle) out.capStyle = p.capStyle;
+  if (p.wordsPer) out.wordsPer = p.wordsPer;
+  if (p.accent) out.accent = p.accent;
+  if (p.noWatermark) out.noWatermark = true;
+  else if (String(p.wmText || '').trim()) out.wmText = String(p.wmText).trim().slice(0, 30);
+  return Object.keys(out).length ? out : null;
+}
+// SRT subtitles from timed words ({w,a,b} in clip seconds): lines of up to 7 words, split at sentence ends and pauses.
+const srtTime = (t) => { const ms = Math.max(0, Math.round(t * 1000)); const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
+export function toSrt(words) {
+  const lines = []; let cur = null;
+  for (const w of (Array.isArray(words) ? words : [])) {
+    const t = String(w.w || '').trim(); if (!t) continue;
+    if (cur && (cur.n >= 7 || Number(w.a) - cur.b > 0.8 || /[.!?]$/.test(cur.text))) { lines.push(cur); cur = null; }
+    if (!cur) cur = { text: t, a: Number(w.a), b: Number(w.b), n: 1 }; else { cur.text += ' ' + t; cur.b = Number(w.b); cur.n++; }
+  }
+  if (cur) lines.push(cur);
+  return lines.map((l, i) => `${i + 1}\n${srtTime(l.a)} --> ${srtTime(Math.max(l.b, l.a + 0.3))}\n${l.text}\n`).join('\n');
+}
+
+export default function StudioClip({ clip, index, selected, onSelect, isPro = false, onUpgrade }) {
   const credit = useCredit(clip.source);
   const s0 = Number(clip.startSec) || 0;
   const e0 = Number(clip.endSec) || s0 + (Number(clip.duration) || 30);
@@ -48,7 +81,9 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
     start: s0, end: e0, captions: true, color: 'white', size: 'm', position: 'bottom',
     hook: clip.hook || '', creditOn: true, credit: '', progress: false, rendered: false, zoom: '', bg: '', cam: '', trimmed: false,
     title: clip.title || '', description: clip.socialCaption || clip.caption || '', hashtags: clip.hashtags || '',
+    pro: { ...PRO_DEFAULTS },
   }));
+  const setPro = (p) => setEd(e => ({ ...e, pro: { ...e.pro, ...p } }));
   const clipWords = useMemo(() => (Array.isArray(clip.words) ? clip.words : []), [clip.words]);
   const { userCrop, setUserCrop, cutSet, setCutSet, cuts } = useClipEdits(clip, clipWords);
   const vertical = (clip.format || 'shorts_9_16') === 'shorts_9_16';
@@ -99,6 +134,25 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
   };
   const forApp = (url, key) => { report({ published: key === 'tt' ? 'tiktok (opened app)' : key === 'yt' ? 'youtube (opened app)' : 'instagram (opened app)' }); download(); copy(postText, key); setMsg({ ok: true, text: 'Video downloading, caption copied. Upload it in the app.' }); window.open(url, '_blank'); };
   const youtube = () => forApp('https://www.youtube.com/upload', 'yt');
+  // Caption words on the edited timeline (trim + transcript cuts), in output-clip seconds.
+  const editedWords = (start, end, cutsT) => Array.isArray(clip.words) ? applyCuts(clip.words.map(w => ({ w: w.w, a: +(w.a + s0 - start).toFixed(2), b: +(w.b + s0 - start).toFixed(2) })).filter(w => w.a >= 0 && w.b <= end - start + 0.5), cutsT) : [];
+  const editWindow = () => {
+    const start = Math.max(0, ed.start), end = Math.max(start + 3, ed.trimmed ? ed.end : (dur ? s0 + dur : ed.end));
+    const off = start - s0;
+    const cutsT = cuts.map(([a, b]) => [+(a - off).toFixed(3), +(b - off).toFixed(3)]).filter(([a, b]) => b > 0 && a < end - start).map(([a, b]) => [Math.max(0, a), Math.min(end - start, b)]);
+    return { start, end, cutsT };
+  };
+  // Pro: download the captions as an .srt file (matches the trimmed/cut/sped-up clip).
+  const downloadSrt = () => {
+    if (!isPro) { onUpgrade?.(); return; }
+    const { start, end, cutsT } = editWindow();
+    const sp = ed.pro.speed || 1;
+    const words = editedWords(start, end, cutsT).map(w => ({ ...w, a: w.a / sp, b: w.b / sp }));
+    if (!words.length) { setMsg({ ok: false, text: 'This clip has no timed captions to export.' }); return; }
+    const url = URL.createObjectURL(new Blob([toSrt(words)], { type: 'application/x-subrip' }));
+    const a = document.createElement('a'); a.href = url; a.download = fileName().replace(/\.mp4$/i, '') + '.srt'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
   const rerender = async () => {
     setBusy('render'); setMsg({ ok: true, text: 'Re-rendering… about a minute.' });
     try {
@@ -106,13 +160,16 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
       // Cuts are in original-clip time; shift them onto the trimmed window.
       const off = start - s0;
       const cutsT = cuts.map(([a, b]) => [+(a - off).toFixed(3), +(b - off).toFixed(3)]).filter(([a, b]) => b > 0 && a < end - start).map(([a, b]) => [Math.max(0, a), Math.min(end - start, b)]);
-      const words = ed.captions && Array.isArray(clip.words) ? applyCuts(clip.words.map(w => ({ w: w.w, a: +(w.a + s0 - start).toFixed(2), b: +(w.b + s0 - start).toFixed(2) })).filter(w => w.a >= 0 && w.b <= end - start + 0.5), cutsT) : [];
+      const words = ed.captions ? editedWords(start, end, cutsT) : [];
+      const pro = isPro ? proPayload(ed.pro) : null;
       const res = await fetch('/api/rerender', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         source: clip.source, startSec: start, endSec: end, format: clip.format, style: clip.style, crop: clip.crop,
         caption: '', words, brand: { color: ed.color, size: ed.size, position: ed.position, upper: true },
         userCrop: userCrop ? { x: userCrop.x, y: userCrop.y, w: userCrop.w, h: userCrop.h } : null, cuts: cutsT, hook: ed.hook.trim(), credit: ed.creditOn ? ed.credit.trim() : '', progress: ed.progress, zoom: ed.zoom, bg: ed.bg, overlayUrl: ed.cam || undefined,
+        ...(pro ? { pro } : {}),
       }) });
       const d = await res.json();
+      if (d.code === 'pro_required') onUpgrade?.();
       if (!d.success) throw new Error(d.message || 'Re-render failed');
       setVideoUrl(d.videoUrl); set({ rendered: true });
       setMsg({ ok: true, text: 'Done — the preview now shows your edits.' });
@@ -241,9 +298,11 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
               {[['Start', 'start'], ['End', 'end']].map(([l, k]) => (
                 <div key={k} className="flex items-center gap-2 text-sm">
                   <span className="w-10 text-xs text-soft">{l}</span>
-                  <button type="button" onClick={() => set({ [k]: Math.max(0, ed[k] - 1), trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} earlier`}>−1s</button>
-                  <span className="w-14 text-center font-mono text-sm">{fmt(ed[k])}</span>
-                  <button type="button" onClick={() => set({ [k]: ed[k] + 1, trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} later`}>+1s</button>
+                  <button type="button" onClick={() => set({ [k]: Math.max(0, ed[k] - 1), trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} 1 second earlier`}>−1s</button>
+                  <button type="button" onClick={() => isPro ? set({ [k]: Math.max(0, +(ed[k] - 0.1).toFixed(1)), trimmed: true }) : onUpgrade?.()} className="btn-ghost h-9 w-12 p-0 text-xs" aria-label={`${l} 0.1 second earlier${isPro ? '' : ' (Pro)'}`} title={isPro ? '' : 'Frame-precise trim is a Pro feature'}>{isPro ? '' : '🔒'}−0.1</button>
+                  <span className="w-16 text-center font-mono text-sm">{fmtT(ed[k])}</span>
+                  <button type="button" onClick={() => isPro ? set({ [k]: +(ed[k] + 0.1).toFixed(1), trimmed: true }) : onUpgrade?.()} className="btn-ghost h-9 w-12 p-0 text-xs" aria-label={`${l} 0.1 second later${isPro ? '' : ' (Pro)'}`} title={isPro ? '' : 'Frame-precise trim is a Pro feature'}>{isPro ? '' : '🔒'}+0.1</button>
+                  <button type="button" onClick={() => set({ [k]: ed[k] + 1, trimmed: true })} className="btn-ghost h-9 w-11 p-0" aria-label={`${l} 1 second later`}>+1s</button>
                 </div>
               ))}
               <span className="text-[11px] text-muted">Length {Math.round(clipLength(ed, dur))}s · Shorts up to 3 min, longer = regular YouTube video</span>
@@ -306,6 +365,7 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
                 </div>
               ))}
             </div>
+            <ProTools isPro={isPro} onUpgrade={onUpgrade} p={ed.pro} setPro={setPro} Toggle={Toggle} field={field} onSrt={downloadSrt} />
             <button type="button" onClick={rerender} disabled={!!busy || !clip.source} className="btn-lime h-11 w-full text-sm">{busy === 'render' ? 'Re-rendering…' : 'Apply edits (re-render)'}</button>
             <div className="flex flex-col gap-1.5 border-t border-line pt-3">
               <div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted">Post details</span>
@@ -320,5 +380,75 @@ export default function StudioClip({ clip, index, selected, onSelect }) {
         )}
       </div>
     </article>
+  );
+}
+
+// Pro-only editing options. Free users see them locked with an upgrade prompt.
+function ProTools({ isPro, onUpgrade, p, setPro, Toggle, field, onSrt }) {
+  const row = 'flex flex-wrap items-center gap-1.5';
+  const lbl = 'text-[11px] font-semibold text-muted';
+  const help = 'text-[11px] leading-snug text-muted';
+  return (
+    <section data-pro-tools aria-labelledby="pro-tools-t" className="relative flex flex-col gap-3 rounded-input border border-lime/50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span id="pro-tools-t" className="text-xs font-bold uppercase tracking-wide text-lime">⚡ Pro editing</span>
+        {!isPro && <span className="text-[11px] text-soft">🔒 Pro only</span>}
+      </div>
+      <div className={`flex flex-col gap-3 ${isPro ? '' : 'pointer-events-none select-none opacity-45'}`} aria-hidden={!isPro} inert={isPro ? undefined : ''}>
+        <div className="flex flex-col gap-1">
+          <span className={lbl}>Color look</span>
+          <div className={row}>{GRADES.map(([v, l]) => <Toggle key={v || 'none'} on={p.grade === v} onClick={() => setPro({ grade: v })}>{l}</Toggle>)}</div>
+          <span className={help}>A color filter for the whole clip, like a photo filter.</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={lbl}>Speed</span>
+          <div className={row}>{[0.75, 1, 1.25, 1.5].map(v => <Toggle key={v} on={(p.speed || 1) === v} onClick={() => setPro({ speed: v })}>{v}×</Toggle>)}</div>
+          <span className={help}>Speed up slow talkers (1.25×) or slow down a big moment (0.75×). Captions stay in sync.</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={lbl}>Caption look</span>
+          <div className={row}>
+            {[['', 'Classic'], ['boxed', 'Boxed'], ['shadow', 'Shadow'], ['outline', 'Thick outline']].map(([v, l]) => <Toggle key={v || 'c'} on={p.capStyle === v} onClick={() => setPro({ capStyle: v })}>{l}</Toggle>)}
+          </div>
+          <div className={row}>
+            {[[0, 'Auto words'], [1, '1 word at a time'], [2, '2 words']].map(([v, l]) => <Toggle key={v} on={(p.wordsPer || 0) === v} onClick={() => setPro({ wordsPer: v })}>{l}</Toggle>)}
+          </div>
+          <div className={row}>
+            <span className={help}>Accent color</span>
+            {[['', 'Off'], ['yellow', 'Yellow'], ['lime', 'Lime'], ['cyan', 'Cyan'], ['pink', 'Pink'], ['orange', 'Orange']].map(([v, l]) => <Toggle key={v || 'off'} on={p.accent === v} onClick={() => setPro({ accent: v })}>{l}</Toggle>)}
+          </div>
+          <span className={help}>Boxed and shadow make captions readable on busy video. 1 word at a time gives the fast, punchy viral look. Accent color switches every other caption to a second color.</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={lbl}>Audio & polish</span>
+          <div className={row}>
+            <Toggle on={p.loud} onClick={() => setPro({ loud: !p.loud })}>Loudness boost</Toggle>
+            <Toggle on={p.fade} onClick={() => setPro({ fade: !p.fade })}>Fade in/out</Toggle>
+          </div>
+          <span className={help}>Loudness boost evens out the volume to the level TikTok and YouTube use. Fade adds a smooth start and ending.</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={lbl}>Watermark</span>
+          <div className={row}>
+            <Toggle on={!p.noWatermark && !p.wmText} onClick={() => setPro({ noWatermark: false, wmText: '' })}>Default</Toggle>
+            <Toggle on={p.noWatermark} onClick={() => setPro({ noWatermark: true })}>None</Toggle>
+            <Toggle on={!p.noWatermark && !!p.wmText} onClick={() => setPro({ noWatermark: false, wmText: p.wmText || '@yourname' })}>My own text</Toggle>
+          </div>
+          {!p.noWatermark && !!p.wmText && <input value={p.wmText} maxLength={30} onChange={e => setPro({ wmText: e.target.value.replace(/[^\w@.\- ]/g, '') })} placeholder="@yourname" className={field} aria-label="Your watermark text" />}
+          <span className={help}>Put your own @handle on the clip so reposts point back to you, or remove the watermark.</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={lbl}>Export</span>
+          <div className={row}><button type="button" onClick={onSrt} className="chip shrink-0">Download captions (.srt)</button></div>
+          <span className={help}>Subtitle file for YouTube, Premiere, CapCut and other editors. Matches your trims and cuts.</span>
+        </div>
+      </div>
+      {!isPro && (
+        <div className="flex flex-col items-start gap-2 rounded-input bg-ink/80 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-soft">Color looks, speed control, caption styles, loudness boost, fades, your own watermark, 0.1s trims and caption files come with Pro.</p>
+          <button type="button" onClick={() => onUpgrade?.()} className="btn-lime h-9 shrink-0 px-4 text-xs">🔒 Upgrade to Pro</button>
+        </div>
+      )}
+    </section>
   );
 }
