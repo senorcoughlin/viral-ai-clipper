@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { getEntitlement, addCredits, setPro } from '../../../lib/billing';
+import { getEntitlement, addCredits, setPro, hasUsedBfTrial, markBfTrial } from '../../../lib/billing';
 import { getSession, setSessionCookie, clearSessionCookie } from '../../../lib/session';
+import { offerPublic, offerActive, BF_PLAN, BF_OFFER } from '../../../lib/bftrial';
 
 // GET               -> entitlement for the signed-in (cookie) session
 // GET ?session_id=  -> verifies a Stripe Checkout session server-side, mints the
@@ -30,7 +31,13 @@ export async function GET(request) {
       } else if (s.mode === 'subscription' && s.subscription) {
         try {
           const sub = await stripe.subscriptions.retrieve(String(s.subscription));
-          if (['active', 'trialing'].includes(sub.status)) await setPro(email, true, s.customer);
+          if (['active', 'trialing'].includes(sub.status)) {
+            await setPro(email, true, s.customer);
+            const md = { ...(sub.metadata || {}), ...(s.metadata || {}) };
+            if (sub.status === 'trialing' || md.plan === BF_PLAN || md.offer === BF_OFFER || md.trial === '1') {
+              await markBfTrial(email, { customerId: s.customer, subscriptionId: sub.id, trialEnd: sub.trial_end ? Number(sub.trial_end) * 1000 : null });
+            }
+          }
         } catch (e) { console.warn('billing: subscription lookup failed', e?.message); }
       }
       const ent = await getEntitlement(email);
@@ -38,9 +45,21 @@ export async function GET(request) {
       return setSessionCookie(res, { email, verified: true });
     }
     const sess = getSession(request);
-    if (!sess) return NextResponse.json({ success: true, signedIn: false, pro: false, credits: 0 });
-    const ent = sess.verified ? await getEntitlement(sess.email) : { pro: false, credits: 0 };
-    return NextResponse.json({ success: true, signedIn: true, verified: sess.verified, email: sess.email, ...ent });
+    const pub = offerPublic();
+    if (!sess) {
+      return NextResponse.json({ success: true, signedIn: false, pro: false, credits: 0, offer: { ...pub, eligible: false, reason: pub.active ? 'signin' : 'ended' } });
+    }
+    const raw = await getEntitlement(sess.email);
+    const ent = sess.verified ? raw : { pro: false, credits: 0, trialEnd: null, proUntil: null, bfTrialUsed: !!raw.bfTrialUsed };
+    // Unverified sign-ins still get offer eligibility (the trial itself verifies via Stripe).
+    const used = !!(raw.bfTrialUsed || (await hasUsedBfTrial(sess.email)));
+    let reason = null, eligible = false;
+    if (!pub.active) reason = 'ended';
+    else if (raw.trialEnd && raw.trialEnd > Date.now()) reason = 'used';
+    else if (sess.verified && raw.pro && !raw.proUntil && !raw.trialEnd) reason = 'already_pro';
+    else if (used) reason = 'used';
+    else eligible = true;
+    return NextResponse.json({ success: true, signedIn: true, verified: sess.verified, email: sess.email, offer: { ...pub, eligible, reason, used }, ...ent });
   } catch (e) {
     console.error('billing lookup failed', e?.message);
     return NextResponse.json({ success: false, message: 'Lookup failed' }, { status: 500 });

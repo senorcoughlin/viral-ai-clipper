@@ -7,6 +7,10 @@
     {
       "path": "/api/raffle/cron",
       "schedule": "10 3 * * *"
+    },
+    {
+      "path": "/api/billing/trial-remind",
+      "schedule": "15 15 * * *"
     }
   ],
   "git": {

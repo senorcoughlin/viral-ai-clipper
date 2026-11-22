@@ -1,5 +1,6 @@
 import './globals.css'
 import SiteBanner from '../components/SiteBanner'
+import BfBanner from '../components/BfBanner'
 import PwaInstall from '../components/PwaInstall'
 import VersionCheck from '../components/VersionCheck'
 import GoogleAds from '../components/GoogleAds'
@@ -41,7 +42,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body><SiteBanner />{children}<PwaInstall /><VersionCheck /><GoogleAds /><ReferralCapture /><PageBeacon /><Analytics /><SpeedInsights /></body>
+      <body><SiteBanner /><BfBanner />{children}<PwaInstall /><VersionCheck /><GoogleAds /><ReferralCapture /><PageBeacon /><Analytics /><SpeedInsights /></body>
     </html>
   )
 }

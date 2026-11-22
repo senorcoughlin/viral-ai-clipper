@@ -17,9 +17,9 @@ export async function syncClips(clips) {
   });
 }
 
-export default function AccountBar({ onChange, inline = false }) {
+export default function AccountBar({ onChange, inline = false, startOpen = false, prompt = '' }) {
   const [session, setSession] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!startOpen);
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,6 +27,8 @@ export default function AccountBar({ onChange, inline = false }) {
   const [busy, setBusy] = useState(false);
 
   const [notice, setNotice] = useState('');
+
+  useEffect(() => { if (startOpen) setOpen(true); }, [startOpen]);
 
   useEffect(() => {
     const local = readSession();
@@ -113,6 +115,7 @@ export default function AccountBar({ onChange, inline = false }) {
       <button type="button" onClick={() => setOpen(v => !v)} className="text-sm font-medium text-soft hover:text-fg">Account</button>
       {open && (
         <form onSubmit={submit} className={inline ? 'mt-2 w-full rounded-card border border-line bg-surface p-3' : 'absolute right-0 top-9 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-line bg-surface p-4 shadow-card'}>
+          {prompt && <p className="mb-2 text-xs font-medium text-lime">{prompt}</p>}
           <div className="mb-3 flex flex-wrap gap-2 text-xs">
             <button type="button" onClick={() => setMode('login')} className={mode === 'login' ? 'text-lime' : 'text-muted'}>Log in</button>
             <button type="button" onClick={() => setMode('register')} className={mode === 'register' ? 'text-lime' : 'text-muted'}>Create account</button>

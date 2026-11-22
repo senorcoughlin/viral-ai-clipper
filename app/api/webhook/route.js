@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { reportError, emailOwner } from '../../../lib/alerts';
 import { markPro } from '../../../lib/pro';
-import { addCredits, setPro, emailForCustomer } from '../../../lib/billing';
+import { addCredits, setPro, emailForCustomer, markBfTrial } from '../../../lib/billing';
+import { BF_PLAN, BF_OFFER, subGrantsPro, subRevokesPro } from '../../../lib/bftrial';
 import { logPaidEntry } from '../../../lib/raffle';
 import { kvEnabled, kvCommand } from '../../../lib/kv';
 
@@ -42,6 +43,76 @@ async function resolveEmail(stripe, customerId) {
   return email ? String(email).toLowerCase() : null;
 }
 
+
+function isBfTrial(obj) {
+  const md = obj?.metadata || {};
+  return md.plan === BF_PLAN || md.offer === BF_OFFER || md.trial === '1';
+}
+
+function trialEndFromSub(sub) {
+  if (!sub) return null;
+  const end = Number(sub.trial_end) || 0;
+  return end > 0 ? end * 1000 : null;
+}
+
+async function grantSubPro(stripe, email, customerId, sub, meta = {}) {
+  if (!email) return;
+  const status = sub?.status;
+  if (status && subRevokesPro(status)) {
+    await setPro(email, false, customerId);
+    return;
+  }
+  if (!status || subGrantsPro(status)) {
+    await setPro(email, true, customerId);
+    if (isBfTrial({ metadata: { ...((sub && sub.metadata) || {}), ...meta } }) || sub?.status === 'trialing' || trialEndFromSub(sub)) {
+      await markBfTrial(email, { customerId, subscriptionId: sub?.id, trialEnd: trialEndFromSub(sub) });
+    }
+  }
+}
+
+export async function handleStripeEvent(event, stripe) {
+    // Raffle entries ($1 / $4). Must run before the Pro/credits branch so a raffle payment never grants Pro.
+    if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && event.data.object?.metadata?.type === 'raffle') {
+      const r = await logPaidEntry(event.data.object, (event.created || 0) * 1000 || Date.now());
+      console.log('Raffle entry:', event.data.object.id, r.added ? `added to ${r.month}` : (r.reason || 'duplicate'));
+      return NextResponse.json({ received: true });
+    }
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      const session = event.data.object;
+      const email = (session.customer_details?.email || session.customer_email || session.metadata?.email || '').toLowerCase();
+      console.log('Checkout completed:', session.id, session.metadata?.type || 'subscription');
+      if (!email) return NextResponse.json({ received: true });
+      if (session.metadata?.type === 'credits') {
+        await addCredits(email, Number(session.metadata.credits) || 0, session.id);
+      } else {
+        let sub = null;
+        if (session.subscription) {
+          try { sub = await stripe.subscriptions.retrieve(String(session.subscription)); } catch (e) { console.warn('webhook: sub lookup failed', e?.message); }
+        }
+        await grantSubPro(stripe, email, session.customer, sub, session.metadata || {});
+        try { await markPro({ email, customerId: session.customer }); } catch (e) { console.error('legacy markPro', e); }
+      }
+      if (event.type === 'checkout.session.completed') await alertPromo(stripe, session, email, (event.created || 0) * 1000 || Date.now());
+    } else if (event.type === 'customer.subscription.deleted') {
+      const sub = event.data.object;
+      const email = await resolveEmail(stripe, sub.customer);
+      if (email) await setPro(email, false, sub.customer);
+      console.log('Subscription ended:', sub.id, email ? 'pro removed' : 'no email');
+    } else if (event.type === 'customer.subscription.created' || event.type === 'customer.subscription.updated') {
+      const sub = event.data.object;
+      const email = (await resolveEmail(stripe, sub.customer)) || String(sub.metadata?.email || '').toLowerCase() || null;
+      if (email) await grantSubPro(stripe, email, sub.customer, sub, sub.metadata || {});
+      console.log('Subscription', event.type === 'customer.subscription.created' ? 'created' : 'updated', ':', sub.id, sub.status, email ? 'applied' : 'no email');
+    } else if (event.type === 'invoice.payment_failed') {
+      const inv = event.data.object;
+      const isSub = inv.subscription || inv.parent?.subscription_details?.subscription || inv.billing_reason?.startsWith('subscription');
+      const email = isSub ? (await resolveEmail(stripe, inv.customer)) || String(inv.customer_email || '').toLowerCase() || null : null;
+      if (email) await setPro(email, false, inv.customer);
+      console.log('Invoice payment failed:', inv.id, email ? 'pro paused' : 'skipped');
+    }
+    return NextResponse.json({ received: true });
+}
+
 export async function POST(request) {
   try {
     const body = await request.text();
@@ -62,45 +133,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
-    // Raffle entries ($1 / $4). Must run before the Pro/credits branch so a raffle payment never grants Pro.
-    if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && event.data.object?.metadata?.type === 'raffle') {
-      const r = await logPaidEntry(event.data.object, (event.created || 0) * 1000 || Date.now());
-      console.log('Raffle entry:', event.data.object.id, r.added ? `added to ${r.month}` : (r.reason || 'duplicate'));
-      return NextResponse.json({ received: true });
-    }
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const email = (session.customer_details?.email || session.customer_email || '').toLowerCase();
-      console.log('Checkout completed:', session.id, session.metadata?.type || 'subscription');
-      if (!email) return NextResponse.json({ received: true });
-      if (session.metadata?.type === 'credits') {
-        await addCredits(email, Number(session.metadata.credits) || 0, session.id);
-      } else {
-        await setPro(email, true, session.customer);
-        try { await markPro({ email, customerId: session.customer }); } catch (e) { console.error('legacy markPro', e); }
-      }
-      await alertPromo(stripe, session, email, (event.created || 0) * 1000 || Date.now());
-    } else if (event.type === 'customer.subscription.deleted') {
-      const sub = event.data.object;
-      const email = await resolveEmail(stripe, sub.customer);
-      if (email) await setPro(email, false, sub.customer);
-      console.log('Subscription ended:', sub.id, email ? 'pro removed' : 'no email');
-    } else if (event.type === 'customer.subscription.updated') {
-      const sub = event.data.object;
-      const email = await resolveEmail(stripe, sub.customer);
-      if (email) {
-        if (['active', 'trialing'].includes(sub.status)) await setPro(email, true, sub.customer);
-        else if (['past_due', 'unpaid', 'canceled', 'incomplete_expired', 'paused'].includes(sub.status)) await setPro(email, false, sub.customer);
-      }
-      console.log('Subscription updated:', sub.id, sub.status, email ? 'applied' : 'no email');
-    } else if (event.type === 'invoice.payment_failed') {
-      const inv = event.data.object;
-      const isSub = inv.subscription || inv.parent?.subscription_details?.subscription || inv.billing_reason?.startsWith('subscription');
-      const email = isSub ? (await resolveEmail(stripe, inv.customer)) || String(inv.customer_email || '').toLowerCase() || null : null;
-      if (email) await setPro(email, false, inv.customer);
-      console.log('Invoice payment failed:', inv.id, email ? 'pro paused' : 'skipped');
-    }
-    return NextResponse.json({ received: true });
+    return handleStripeEvent(event, stripe);
   } catch (e) {
     console.error(e);
     await reportError('webhook', e);

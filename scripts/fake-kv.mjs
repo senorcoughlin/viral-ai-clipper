@@ -26,6 +26,9 @@ globalThis.fetch = async (url, init) => {
       case 'HLEN': return db.get(a[0])?.size || 0;
       case 'HGETALL': return [...(db.get(a[0]) || new Map())].flat();
       case 'SADD': { if (!db.has(a[0])) db.set(a[0], new Set()); const st = db.get(a[0]); const n = st.has(a[1]) ? 0 : 1; st.add(a[1]); return n; }
+      case 'SMEMBERS': { const st = db.get(a[0]); return st instanceof Set ? [...st] : []; }
+      case 'SISMEMBER': { const st = db.get(a[0]); return st instanceof Set && st.has(a[1]) ? 1 : 0; }
+      case 'SREM': { const st = db.get(a[0]); if (!(st instanceof Set) || !st.has(a[1])) return 0; st.delete(a[1]); return 1; }
       case 'LPUSH': { const x = l(a[0]); x.unshift(a[1]); return x.length; }
       case 'LTRIM': { const x = l(a[0]); db.set(a[0], x.slice(Number(a[1]), Number(a[2]) + 1)); return 'OK'; }
       case 'LRANGE': { const x = l(a[0]); const end = Number(a[2]); return x.slice(Number(a[1]), end < 0 ? undefined : end + 1); }

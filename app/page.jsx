@@ -18,6 +18,8 @@ import StudioClip from '../components/StudioClip';
 import { funnel } from '../lib/funnel';
 import RaffleBanner from '../components/RaffleBanner';
 import RedeemCode from '../components/RedeemCode';
+import BfOfferCard from '../components/BfOfferCard';
+import { offerPublic, BF_PLAN } from '../lib/bftrial';
 import { fmtLen, issueFromLinkMeta, isBlockingIssue, FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../lib/pipeline';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
@@ -184,6 +186,10 @@ function HomeInner({ studio = false }) {
   const [notice, setNotice] = useState('');
   const [expected, setExpected] = useState(0);
   const [billingEmail, setBillingEmail] = useState('');
+  const [signedIn, setSignedIn] = useState(false);
+  const [offer, setOffer] = useState(null);
+  const [trialEnd, setTrialEnd] = useState(null);
+  const [needSignIn, setNeedSignIn] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [srcSecs, setSrcSecs] = useState({ url: "", secs: 0 }); // length of an uploaded file, for the short-source warning
   const [wholeVideo, setWholeVideo] = useState(true); // "Whole video" (default): sources up to 2 minutes become one clip; longer ones fall back to highlights
@@ -328,7 +334,11 @@ function HomeInner({ studio = false }) {
     if (!d?.success) return;
     setIsPro(!!d.pro);
     setCredits(Number(d.credits) || 0);
-    setBillingEmail(d.signedIn && d.verified ? d.email : '');
+    setSignedIn(!!d.signedIn);
+    setBillingEmail(d.signedIn && d.verified ? d.email : (d.signedIn ? d.email : ''));
+    setOffer(d.offer && typeof d.offer.active === 'boolean' ? d.offer : offerPublic());
+    setTrialEnd(d.trialEnd || null);
+    if (d.signedIn) setNeedSignIn(false);
     ['viral_pro', 'viral_credits', 'viral_pro_email'].forEach(k => localStorage.removeItem(k));
   }).catch(() => {});
 
@@ -689,14 +699,26 @@ function HomeInner({ studio = false }) {
   handleClippingRef.current = handleClipping;
 
   const handleUpgrade = async (plan) => {
-    trackConversion('begin_checkout', { plan, value: PLAN_VALUES[plan], currency: 'USD' });
+    const useBf = !!(offer?.active && (plan === 'pro_monthly' || plan === BF_PLAN));
+    const planType = useBf ? BF_PLAN : plan;
+    if (useBf && !signedIn) {
+      setShowPricing(true);
+      setNeedSignIn(true);
+      return;
+    }
+    trackConversion('begin_checkout', { plan: planType, value: PLAN_VALUES[planType] ?? PLAN_VALUES[plan], currency: 'USD' });
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planType: plan })
+        body: JSON.stringify({ planType })
       });
       const data = await res.json();
+      if (data.code === 'need_signin') {
+        setShowPricing(true);
+        setNeedSignIn(true);
+        return;
+      }
       if (data.success && data.data?.checkoutUrl) {
         window.open(data.data.checkoutUrl, '_blank');
       } else {
@@ -1072,9 +1094,18 @@ function HomeInner({ studio = false }) {
                 <li className="flex items-center gap-2"><Check />Pro editing: color looks, speed, caption styles</li>
                 <li className="flex items-center gap-2"><Check />Your own watermark + .srt caption files</li>
               </ul>
-              <div className="flex flex-col gap-2.5 sm:flex-row">
+              {offer?.active && !isPro && (
+                <BfOfferCard
+                  offer={offer}
+                  signedIn={signedIn}
+                  isPro={isPro}
+                  onAccountChange={() => refreshBilling()}
+                  onStart={() => handleUpgrade(BF_PLAN)}
+                />
+              )}
+              <div className={`flex flex-col gap-2.5 sm:flex-row ${offer?.active && !isPro ? 'opacity-90' : ''}`}>
                 <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
-                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>
+                {!(offer?.active && !isPro) && <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>}
               </div>
               <div className="border-t border-line pt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · from $9</p>
@@ -1381,10 +1412,20 @@ function HomeInner({ studio = false }) {
                 <span className="font-display text-xl font-extrabold text-lime">Pro</span>
                 <span className="text-sm text-muted">For creators posting daily.</span>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span>
-                <span className="text-sm text-muted">{price.per}</span>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1">
+                {offer?.active && billing === 'monthly' && !isPro ? (
+                  <>
+                    <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">$0</span>
+                    <span className="text-sm text-muted">for 7 days, then $9.99/mo</span>
+                    <span className="w-full text-xs text-muted line-through">normally $19.99/mo</span>
+                  </>
+                ) : (
+                  <><span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></>
+                )}
               </div>
+              {offer?.active && billing === 'monthly' && !isPro && (
+                <p className="text-[13px] leading-relaxed text-soft">{offer.disclosure}</p>
+              )}
               <ul className="flex flex-col gap-2.5 text-sm text-fg">
                 <li className="flex items-center gap-2.5"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2.5"><Check />No watermark</li>
@@ -1393,10 +1434,10 @@ function HomeInner({ studio = false }) {
                 <li className="flex items-center gap-2.5"><Check />Pro editing: color looks, speed control, boxed / 1-word captions, loudness boost, fades</li>
                 <li className="flex items-center gap-2.5"><Check />Your own @handle watermark, 0.1s trims, .srt caption download</li>
               </ul>
-              <button onClick={() => handleUpgrade(price.plan)} className="btn-lime mt-auto h-12">
-                {isPro ? 'You’re on Pro' : 'Upgrade to Pro'}{!isPro && <Arrow />}
+              <button onClick={() => handleUpgrade(offer?.active && billing === 'monthly' && !isPro ? BF_PLAN : price.plan)} className="btn-lime mt-auto h-12">
+                {isPro ? (trialEnd ? 'Trial ends soon' : 'You’re on Pro') : (offer?.active && billing === 'monthly' ? (signedIn ? 'Start 7-day free trial' : 'Sign in for 7 days free') : 'Upgrade to Pro')}{!isPro && <Arrow />}
               </button>
-              <span className="text-center text-xs text-muted">Cancel anytime · Secure checkout via Stripe</span>
+              <span className="text-center text-xs text-muted">{offer?.active && billing === 'monthly' && !isPro ? '7 days free, then $9.99/mo, cancel anytime. Offer ends Dec 7.' : 'Cancel anytime · Secure checkout via Stripe'}</span>
             </article>
           </div>
           <p className="text-center text-xs text-muted">
@@ -1459,7 +1500,7 @@ function HomeInner({ studio = false }) {
             </button>
           ) : (
             <button type="button" onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
-              {'Upgrade to Pro'}
+              {offer?.active ? 'Try Pro free for 7 days' : 'Upgrade to Pro'}
             </button>
           )}
         </div>

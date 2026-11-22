@@ -30,10 +30,12 @@ function SuccessContent() {
       .catch(() => setState({ status: 'error', message: 'Network error. Refresh this page to try again.' }));
   }, [params]);
   const isCredits = state.type === 'credits';
-  const heading = state.status === 'loading' ? 'Confirming your purchase…' : state.status === 'error' ? 'We could not confirm that purchase' : isCredits ? 'Credits added!' : state.pro ? "You're Pro!" : 'Payment received';
+  const isTrial = !isCredits && (state.plan === 'pro_bf_monthly' || !!state.trialEnd);
+  const heading = state.status === 'loading' ? 'Confirming your purchase…' : state.status === 'error' ? 'We could not confirm that purchase' : isCredits ? 'Credits added!' : isTrial && state.pro ? "You're on a free Pro week!" : state.pro ? "You're Pro!" : 'Payment received';
   const body = state.status === 'loading' ? 'One moment while we check with Stripe.'
     : state.status === 'error' ? state.message
     : isCredits ? `${state.purchased} credits added. You have ${state.credits} credits on ${state.email}.`
+    : isTrial && state.pro ? `Pro is unlocked for 7 days on ${state.email}. You won’t be charged until the trial ends${state.trialEnd ? ` (${new Date(state.trialEnd).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric' })} ET)` : ''}. Then it’s $9.99/month unless you cancel.`
     : state.pro ? `200 generations a day, no watermark. Linked to ${state.email}.`
     : 'Your subscription is still activating. Refresh in a minute.';
 
