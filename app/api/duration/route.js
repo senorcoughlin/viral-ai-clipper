@@ -10,6 +10,7 @@ import { toRenderUrl } from '../../../lib/media';
 import { youtubeDuration } from '../../../lib/ytduration';
 import { youtubeIdOf } from '../../../lib/links';
 import { parseStreamUrl } from '../../../lib/stream';
+import { FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../../../lib/pipeline';
 
 // Best-effort source length (seconds) so the generate screen can offer "Use whole video".
 // Returns { secs: 0 } when it can't tell; the generate route re-checks on the server.
@@ -19,7 +20,7 @@ export async function GET(request) {
   // ?limits=1 -> the length caps, so the form can show them before anything is pasted. CDN-cached.
   if (sp.get('limits')) {
     const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
-    return NextResponse.json({ maxSecs: srcMax, ytMaxSecs: Math.min(srcMax, Number(process.env.YT_MAX_MINUTES || 60) * 60) }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+    return NextResponse.json({ maxSecs: Math.max(srcMax, FREE_PROCESS_SEC), ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
   }
   const limited = await routeGuard(request, 'duration', 60, 600);
   if (limited) return limited;
@@ -33,7 +34,7 @@ export async function GET(request) {
   const id = youtubeIdOf(url);
   // Same caps the generate route enforces, so the form can warn before a run is wasted.
   const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
-  const maxSecs = id ? Math.min(srcMax, Number(process.env.YT_MAX_MINUTES || 60) * 60) : srcMax;
+  const maxSecs = id ? FREE_PROCESS_SEC : srcMax;
   try {
     if (id) {
       const page = await youtubeDuration(id);
@@ -43,5 +44,5 @@ export async function GET(request) {
     }
     else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(await toRenderUrl(url, 10 * 60), null, null, 10000);
   } catch {}
-  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs }, { headers: h });
+  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, liveClipable: !!live }, { headers: h });
 }

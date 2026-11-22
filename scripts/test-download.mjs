@@ -265,13 +265,13 @@ test('fetchSlices re-reads saved slices from Blob and only pulls the missing one
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('fetchSlices retries a failed provider job once, then reports it missing', async () => {
+test('fetchSlices retries a failed provider job, then reports it missing', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
   const plan = slices.planSlices(1500, 30, 360);
   const env = fakeSliceEnv({ failK: new Set([1]) });
   const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
   assert.deepEqual(r.missing, [1]);
-  assert.equal(env.calls.start.filter(c => c.startTime === 360).length, 2, 'one fresh job after the provider gave up');
+  assert.equal(env.calls.start.filter(c => c.startTime === 360).length, 3, 'fresh jobs after the provider gave up, then marked missing');
   assert.equal(r.stats.failed, 1);
   await fs.rm(dir, { recursive: true, force: true });
 });

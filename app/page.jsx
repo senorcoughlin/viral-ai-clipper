@@ -18,6 +18,9 @@ import StudioClip from '../components/StudioClip';
 import { funnel } from '../lib/funnel';
 import RaffleBanner from '../components/RaffleBanner';
 import RedeemCode from '../components/RedeemCode';
+import BfOfferCard from '../components/BfOfferCard';
+import { offerPublic, BF_PLAN } from '../lib/bftrial';
+import { fmtLen, issueFromLinkMeta, isBlockingIssue, FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../lib/pipeline';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
@@ -25,26 +28,6 @@ const ACTIVE_JOB_KEY = 'vac_active_job';
 const ft = (e, p) => funnel(e, p);
 
 const FREE_DAILY_LIMIT = 3;
-// 7200 -> "2 hours", 5400 -> "90 minutes", 45 -> "45 seconds"
-const fmtLen = (secs) => {
-  const s = Math.round(Number(secs) || 0);
-  if (s < 120) return `${s} seconds`;
-  const m = Math.round(s / 60);
-  if (m >= 120 && m % 60 === 0) return `${m / 60} hours`;
-  return `${m} minutes`;
-};
-
-// Live / upcoming / over-length problems we can spot from /api/duration before a run is wasted.
-function issueFromLinkMeta(meta, rawUrl) {
-  if (!meta || meta.checking) return null;
-  if (rawUrl && meta.url && meta.url !== rawUrl) return null;
-  if (meta.live) return { code: 'live', message: 'This YouTube video is live right now. Live YouTube streams can\u2019t be clipped yet. Paste it again after the stream ends (the replay works), or paste a Twitch channel link to clip its last few minutes.' };
-  if (meta.secs > 24 * 3600) return { code: 'live', message: 'This looks like a live or 24/7 stream. Live YouTube streams can\u2019t be clipped yet. Paste a finished video or replay instead.' };
-  if (meta.upcoming) return { code: 'upcoming', message: 'This video hasn\u2019t started yet (it\u2019s a scheduled premiere or stream). Paste it again once it\u2019s published.' };
-  if (meta.maxSecs && meta.secs > meta.maxSecs) return { code: 'too_long', message: `This video is ${fmtLen(meta.secs)} long. Links can be up to ${fmtLen(meta.maxSecs)}. Pick a shorter video, or trim it and upload the MP4.` };
-  return null;
-}
-
 const FORMATS = [
   { value: 'shorts_9_16', label: 'Vertical 9:16', short: 'vertical 9:16', hint: 'Tall, full-screen video for TikTok, Reels and YouTube Shorts. The AI keeps the speaker in frame.' },
   { value: 'landscape_16_9', label: 'Wide 16:9', short: 'wide 16:9', hint: 'Regular widescreen for YouTube, X or websites.' },
@@ -185,6 +168,10 @@ function HomeInner({ studio = false }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
+  const [progressPct, setProgressPct] = useState(0);
+  const uploadInputRef = useRef(null);
+  const uploadAndRunRef = useRef(false);
+  const handleClippingRef = useRef(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [stage, setStage] = useState(0);
   const [clips, setClips] = useState([]);
@@ -199,6 +186,10 @@ function HomeInner({ studio = false }) {
   const [notice, setNotice] = useState('');
   const [expected, setExpected] = useState(0);
   const [billingEmail, setBillingEmail] = useState('');
+  const [signedIn, setSignedIn] = useState(false);
+  const [offer, setOffer] = useState(null);
+  const [trialEnd, setTrialEnd] = useState(null);
+  const [needSignIn, setNeedSignIn] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [srcSecs, setSrcSecs] = useState({ url: "", secs: 0 }); // length of an uploaded file, for the short-source warning
   const [wholeVideo, setWholeVideo] = useState(true); // "Whole video" (default): sources up to 2 minutes become one clip; longer ones fall back to highlights
@@ -211,9 +202,9 @@ function HomeInner({ studio = false }) {
     let live = true;
     setLinkSecs({ url: u, secs: 0, checking: true });
     const t = setTimeout(async () => {
-      let secs = 0, isLive = false, upcoming = false, maxSecs = 0;
-      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; } } catch {}
-      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs });
+      let secs = 0, isLive = false, upcoming = false, maxSecs = 0, ytMaxSecs = 0, ytMaxSecsPaid = 0;
+      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; ytMaxSecs = Number(j.ytMaxSecs) || 0; ytMaxSecsPaid = Number(j.ytMaxSecsPaid) || 0; } } catch {}
+      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs, ytMaxSecs, ytMaxSecsPaid });
     }, 600);
     return () => { live = false; clearTimeout(t); };
   }, [videoUrl, srcSecs]);
@@ -224,11 +215,15 @@ function HomeInner({ studio = false }) {
   const [limits, setLimits] = useState(null);
   useEffect(() => { fetch('/api/duration?limits=1').then(r => r.json()).then(j => { if (j?.maxSecs) setLimits(j); }).catch(() => {}); }, []);
   // Problems we can spot before a run is wasted: live/upcoming YouTube streams and over-length videos.
-  const linkIssue = issueFromLinkMeta(linkSecs, videoUrl.trim());
+  const ytCap = (isPro || credits > 0) ? (linkSecs.ytMaxSecsPaid || limits?.ytMaxSecsPaid || PAID_PROCESS_SEC) : (linkSecs.ytMaxSecs || limits?.ytMaxSecs || FREE_PROCESS_SEC);
+  const linkIssue = issueFromLinkMeta({ ...linkSecs, maxSecs: linkSecs.live ? 0 : ytCap }, videoUrl.trim());
+  const blockIssue = isBlockingIssue(linkIssue);
+  const ytLive = !!(linkSecs.url === videoUrl.trim() && linkSecs.live);
+  const showLivePicker = !!liveChannel || ytLive;
   const rejectedRef = useRef(new Map());
   const linkCount = parseLinks(videoUrl).links.length;
   // Whole video needs one finished video: batches and Twitch "last X minutes" use highlights instead.
-  const wholeBlocked = wholeTooLong ? 'long' : linkCount > 1 ? 'batch' : liveChannel ? 'live' : (!(durationKnown && curSecs > 0 && curSecs <= WHOLE_MAX_SEC + 0.5) && !!videoUrl.trim() ? 'unknown' : '');
+  const wholeBlocked = wholeTooLong ? 'long' : linkCount > 1 ? 'batch' : (liveChannel || ytLive) ? 'live' : (!(durationKnown && curSecs > 0 && curSecs <= WHOLE_MAX_SEC + 0.5) && !!videoUrl.trim() ? 'unknown' : '');
   const wholeOn = wholeVideo && !wholeBlocked;
   const planSummary = (() => {
     const shape = (FORMATS.find(f => f.value === clipFormat) || FORMATS[0]).short;
@@ -263,6 +258,14 @@ function HomeInner({ studio = false }) {
       });
       setVideoUrl(blob.url);
       setSrcSecs({ url: blob.url, secs: secs > 0 ? secs : 0 });
+      if (uploadAndRunRef.current) {
+        uploadAndRunRef.current = false;
+        const prev = lastRunRef.current;
+        if (prev) {
+          const run = { ...prev, videoUrl: blob.url, wholeVideo: false, source: 'upload_fallback' };
+          setTimeout(() => handleClippingRef.current?.(null, run), 0);
+        }
+      }
     } catch (e) {
       setError({ message: e?.message || 'Upload failed. Try again.' });
     } finally {
@@ -277,8 +280,21 @@ function HomeInner({ studio = false }) {
     const searchParams = new URLSearchParams(window.location.search);
     const b = searchParams.get('billing');
     if (b === 'monthly' || b === 'yearly') setBilling(b);
-    const preset = searchParams.get('url');
+    const preset = searchParams.get('url') || (searchParams.get('text') || '').match(/https?:\/\/\S+/i)?.[0] || '';
     if (preset) setVideoUrl(preset);
+    if (searchParams.get('sharefile')) {
+      caches.open('vac-share').then(c => c.match('/share/last')).then(async (res) => {
+        if (!res) return;
+        const blob = await res.blob();
+        const name = res.headers.get('x-filename') || 'shared.mp4';
+        const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+        await handleUploadFile(file);
+        caches.open('vac-share').then(c => c.delete('/share/last')).catch(() => {});
+      }).catch(() => {});
+    }
+    if (preset || searchParams.get('sharefile')) {
+      try { window.history.replaceState({}, '', window.location.pathname); } catch {}
+    }
     const saved = localStorage.getItem('viral_clipper_history');
     if (saved) try { setHistory(JSON.parse(saved)); } catch {}
 
@@ -318,7 +334,11 @@ function HomeInner({ studio = false }) {
     if (!d?.success) return;
     setIsPro(!!d.pro);
     setCredits(Number(d.credits) || 0);
-    setBillingEmail(d.signedIn && d.verified ? d.email : '');
+    setSignedIn(!!d.signedIn);
+    setBillingEmail(d.signedIn && d.verified ? d.email : (d.signedIn ? d.email : ''));
+    setOffer(d.offer && typeof d.offer.active === 'boolean' ? d.offer : offerPublic());
+    setTrialEnd(d.trialEnd || null);
+    if (d.signedIn) setNeedSignIn(false);
     ['viral_pro', 'viral_credits', 'viral_pro_email'].forEach(k => localStorage.removeItem(k));
   }).catch(() => {});
 
@@ -367,18 +387,21 @@ function HomeInner({ studio = false }) {
   };
   // Shared handler for generate events, whether they arrive on the live stream or
   // are replayed from the server-side job after a reconnect.
-  const STEP_MAP = { download: [0, 'Downloading video…'], transcript: [1, 'Analyzing audio…'], scoring: [2, 'Scoring moments…'], cutting: [3, 'Cutting clips…'] };
+  const STEP_MAP = { capture: [0, 'Capturing live…'], download: [0, 'Loading video…'], transcript: [1, 'Analyzing audio…'], scoring: [2, 'Scoring moments…'], cutting: [3, 'Cutting clips…'] };
   const makeJobHandler = (st, multiUrl) => (msg) => {
-    if (msg.type === 'start') setProgressStep(msg.cached ? 3 : 0);
-    if (msg.type === 'status' && STEP_MAP[msg.step]) {
-      setProgressStep(STEP_MAP[msg.step][0]);
-      st.setLabel(STEP_MAP[msg.step][1]);
-      setProgressLabel(STEP_MAP[msg.step][1]);
+    if (msg.type === 'start') { setProgressStep(msg.cached ? 3 : 0); setProgressPct(msg.cached ? 90 : 5); if (msg.note) setNotice(msg.note); }
+    if (msg.type === 'status' && (STEP_MAP[msg.step] || msg.label || msg.pct != null)) {
+      if (STEP_MAP[msg.step]) setProgressStep(STEP_MAP[msg.step][0]);
+      const label = msg.label || (STEP_MAP[msg.step] && STEP_MAP[msg.step][1]) || '';
+      if (label) { st.setLabel(label); setProgressLabel(label); }
+      if (msg.pct != null) setProgressPct(Math.max(0, Math.min(100, Number(msg.pct) || 0)));
     }
     if (msg.type === 'error') {
       if (msg.code === 'whole_too_long' || isWholeTooLongMsg(msg.message)) st.wholeTooLong = true;
-      if (msg.index === undefined) st.fatal = msg.message || 'Generation failed on the server.';
-      else st.failed += 1;
+      if (msg.index === undefined) {
+        st.fatal = msg.message || 'Generation failed on the server.';
+        st.upload = !!(msg.upload || msg.code === 'upload_fallback');
+      } else st.failed += 1;
       st.lastReason = msg.message || st.lastReason;
     }
     if (msg.type === 'clip' && msg.clip) {
@@ -389,6 +412,7 @@ function HomeInner({ studio = false }) {
       setClips([...st.all]);
       if (st.all.length === 1) setTimeout(() => document.getElementById('clips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
       setProgressStep(3);
+      setProgressPct(Math.min(98, 80 + Math.round(15 * st.all.length / Math.max(1, msg.total || 1))));
       const l = `${st.all.length} of ${msg.total} ready…`;
       st.setLabel(l);
       setProgressLabel(l);
@@ -396,6 +420,7 @@ function HomeInner({ studio = false }) {
     if (msg.type === 'done') {
       st.gotDone = true;
       setProgressStep(4);
+      setProgressPct(100);
       setProgressLabel('Clips ready');
       if (msg.reason) st.lastReason = msg.reason;
     }
@@ -415,7 +440,8 @@ function HomeInner({ studio = false }) {
         for (const m of j.events || []) onMsg(m);
         next = j.next ?? next;
         if (j.done) return;
-        if (j.lost) throw new Error('The server lost this run. It was not counted against your limit, so just hit Retry.');
+        if (j.resuming) setProgressLabel('Still working — reconnecting to your job…');
+        else if (j.lost) throw new Error('The server lost this run. It was not counted against your limit, so just hit Retry. You can also upload the MP4 instead.');
       } else if (j && j.found === false) {
         throw new Error('This run expired on the server. It was not counted, so just hit Retry.');
       } else if (++misses > 60) {
@@ -461,7 +487,7 @@ function HomeInner({ studio = false }) {
         if (!saved.isPro) refreshBilling();
       } catch (e) {
         setClips([...st.all]);
-        setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
+        setError({ message: e?.message || 'Processing failed. Try again.', retry: true, upload: true });
       } finally {
         clearActiveJob();
         setIsProcessing(false);
@@ -471,6 +497,7 @@ function HomeInner({ studio = false }) {
   }, []);
 
   const handleClipping = async (e, override) => {
+    handleClippingRef.current = handleClipping;
     e?.preventDefault?.();
     const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength: wholeOn ? WHOLE_MAX_SEC : clipLength, clipCount: wholeOn ? 1 : clipCount, pack, liveMinutes, wholeVideo: wholeOn, hlLength: clipLength, hlCount: clipCount };
     // Shadow state so a retry reuses exactly the same URL and settings.
@@ -496,19 +523,25 @@ function HomeInner({ studio = false }) {
           const r = await fetch(`/api/duration?url=${encodeURIComponent(urls[0])}`, { cache: 'no-store' });
           if (r.ok) {
             const j = await r.json();
-            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0 };
+            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0, ytMaxSecs: Number(j.ytMaxSecs) || 0, ytMaxSecsPaid: Number(j.ytMaxSecsPaid) || 0 };
             setLinkSecs(meta);
           }
         } catch {}
       }
-      const issue = issueFromLinkMeta(meta, runUrl.trim());
-      const prev = rejectedRef.current.get(urls[0]);
-      const blocked = issue ? issue.message : (prev && Date.now() - prev.at < 20 * 60 * 1000 ? prev.message : '');
-      if (blocked) {
-        ft('generate_blocked', { reason: issue?.code || 'repeat' });
-        setError({ message: blocked });
+      const cap = (isPro || credits > 0) ? (meta?.ytMaxSecsPaid || PAID_PROCESS_SEC) : (meta?.ytMaxSecs || FREE_PROCESS_SEC);
+      const issue = issueFromLinkMeta({ ...meta, maxSecs: meta?.live ? 0 : cap }, runUrl.trim());
+      if (isBlockingIssue(issue)) {
+        ft('generate_blocked', { reason: issue.code || 'blocked' });
+        setError({ message: issue.message });
         return;
       }
+      const prev = rejectedRef.current.get(urls[0]);
+      if (!issue && prev && Date.now() - prev.at < 20 * 60 * 1000) {
+        ft('generate_blocked', { reason: 'repeat' });
+        setError({ message: prev.message });
+        return;
+      }
+      if (issue?.warning) setNotice(issue.message);
       // Whole video is only safe when we know the source is 2 minutes or less.
       const secs = meta?.secs || 0;
       if (settings.wholeVideo && !(secs > 0 && secs <= WHOLE_MAX_SEC + 0.5)) {
@@ -523,6 +556,9 @@ function HomeInner({ studio = false }) {
     ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
 
     setIsProcessing(true);
+    setProgressPct(4);
+    setProgressStep(0);
+    setProgressLabel('Starting…');
     setClips([]);
     setError(null);
     setNotice('');
@@ -654,22 +690,35 @@ function HomeInner({ studio = false }) {
       }
       setClips([...all]);
       ft('generate_error', { source: settings.source || 'manual', message: String(e?.message || 'unknown').slice(0, 120) });
-      setError({ message: e?.message || 'Processing failed. Try again.', retry: true });
+      setError({ message: e?.message || 'Processing failed. Try again.', retry: true, upload: true });
     } finally {
       setIsProcessing(false);
       setStatusMessage('');
     }
   };
+  handleClippingRef.current = handleClipping;
 
   const handleUpgrade = async (plan) => {
-    trackConversion('begin_checkout', { plan, value: PLAN_VALUES[plan], currency: 'USD' });
+    const useBf = !!(offer?.active && (plan === 'pro_monthly' || plan === BF_PLAN));
+    const planType = useBf ? BF_PLAN : plan;
+    if (useBf && !signedIn) {
+      setShowPricing(true);
+      setNeedSignIn(true);
+      return;
+    }
+    trackConversion('begin_checkout', { plan: planType, value: PLAN_VALUES[planType] ?? PLAN_VALUES[plan], currency: 'USD' });
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planType: plan })
+        body: JSON.stringify({ planType })
       });
       const data = await res.json();
+      if (data.code === 'need_signin') {
+        setShowPricing(true);
+        setNeedSignIn(true);
+        return;
+      }
       if (data.success && data.data?.checkoutUrl) {
         window.open(data.data.checkoutUrl, '_blank');
       } else {
@@ -728,10 +777,10 @@ function HomeInner({ studio = false }) {
                   )}
                   <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title="Upload an MP4 (up to 500 MB, 2 hours)">
                     {uploading ? `Uploading ${uploading}%` : 'Upload MP4'}
-                    <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
+                    <input ref={uploadInputRef} type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
                   </label>
                 </div>
-                <button type="submit" disabled={isProcessing || !!linkIssue} className={`btn-lime h-[52px] whitespace-nowrap px-5 text-[15px] ${studio ? 'hidden sm:inline-flex' : ''}`}>
+                <button type="submit" disabled={isProcessing || !!blockIssue} className={`btn-lime h-[52px] whitespace-nowrap px-5 text-[15px] ${studio ? 'hidden sm:inline-flex' : ''}`}>
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
@@ -742,7 +791,7 @@ function HomeInner({ studio = false }) {
                 <p role="alert" data-testid="link-issue" className="rounded-input border border-[#FFB64D]/50 bg-[#FFB64D]/10 px-3 py-2 text-[13px] leading-snug text-[#FFD9A0]">{linkIssue.message}</p>
               ) : (
                 <p id="source-guide" className="px-1 text-xs leading-relaxed text-muted">
-                  Works with YouTube, Twitch &amp; Kick replays, and MP4 links or uploads{limits ? ` · YouTube up to ${fmtLen(limits.ytMaxSecs)}, other links up to ${fmtLen(limits.maxSecs)}` : ''} · Live YouTube streams aren&apos;t supported yet
+                  Works with YouTube, Twitch &amp; Kick, live streams, and MP4 links or uploads{limits ? ` · YouTube highlights from the first ${fmtLen((isPro || credits > 0) ? (limits.ytMaxSecsPaid || limits.ytMaxSecs) : limits.ytMaxSecs)}` : ''} · You can leave the page while clips generate
                 </p>
               )}
               {!studio && (
@@ -765,16 +814,17 @@ function HomeInner({ studio = false }) {
                   </p>
                 );
               })()}
-              {liveChannel && (
+              {showLivePicker && (
                 <div id="live-picker" role="group" aria-label="Clip the last minutes of the live stream" className="flex flex-wrap items-center gap-2 rounded-input border border-line2 bg-ink px-3 py-2.5 text-sm">
-                  <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${liveInfo?.live ? 'text-[#FF4D6D]' : 'text-muted'}`}>
-                    <i aria-hidden className={`h-2 w-2 rounded-full ${liveInfo?.live ? 'bg-[#FF4D6D] animate-pulse' : 'bg-line2'}`} />
-                    {liveInfo == null ? 'Checking channel…' : liveInfo.exists === false ? 'Channel not found' : liveInfo.live ? `${liveInfo.name || liveChannel} is live` : `${liveInfo.name || liveChannel} is offline`}
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${(liveInfo?.live || ytLive) ? 'text-[#FF4D6D]' : 'text-muted'}`}>
+                    <i aria-hidden className={`h-2 w-2 rounded-full ${(liveInfo?.live || ytLive) ? 'bg-[#FF4D6D] animate-pulse' : 'bg-line2'}`} />
+                    {ytLive ? 'This YouTube stream is live' : liveInfo == null ? 'Checking channel…' : liveInfo.exists === false ? 'Channel not found' : liveInfo.live ? `${liveInfo.name || liveChannel} is live` : `${liveInfo.name || liveChannel} is offline`}
                   </span>
                   <span className="text-xs text-muted">Clip the last</span>
                   {LIVE_MINUTES.map(m => (
                     <button key={m} type="button" aria-pressed={liveMinutes === m} onClick={() => setLiveMinutes(m)} className={`chip shrink-0 ${liveMinutes === m ? 'chip-on' : ''}`}>{m} min</button>
                   ))}
+                  {ytLive && <span className="w-full text-xs text-muted">We’ll capture a window of the live stream, then start clipping while it keeps running. 24/7 streams are capped at {liveMinutes} minutes.</span>}
                   {liveInfo?.live && liveInfo.archive === false && <span className="w-full text-xs text-[#FFB64D]">This channel doesn&apos;t save broadcasts, so recent minutes can&apos;t be grabbed.</span>}
                   {liveInfo && liveInfo.exists !== false && !liveInfo.live && <span className="w-full text-xs text-muted">Paste a VOD link (twitch.tv/videos/…) to clip a past stream.</span>}
                 </div>
@@ -859,7 +909,7 @@ function HomeInner({ studio = false }) {
                 </>
               )}
             </div>
- {error && !error.retry && (
+ {error && !error.retry && !error.upload && (
               <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
                 <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
                 <p className="flex-1 leading-relaxed text-fg">{error.message}</p>
@@ -875,7 +925,7 @@ function HomeInner({ studio = false }) {
                 <svg className="animate-spin" width="40" height="40" viewBox="0 0 40 40" aria-hidden><circle cx="20" cy="20" r="16" fill="none" stroke="#23232E" strokeWidth="5" /><path d="M20 4a16 16 0 0 1 16 16" fill="none" stroke="#C6FF3D" strokeWidth="5" strokeLinecap="round" /></svg>
                 <div className="flex flex-1 flex-col gap-1">
                   <span className="text-sm font-semibold">{statusMessage}</span>
-                  <span className="text-xs text-muted">Step {stage + 1} of 4 · usually under 90 seconds</span>
+                  <span className="text-xs text-muted">Step {stage + 1} of 4 · long or live videos can take a few minutes. You can leave this page.</span>
                 </div>
                 <div className="wave hidden h-7 items-end gap-1 sm:flex" aria-hidden>
                   {Array.from({ length: 5 }, (_, i) => <span key={i} className="h-7" style={{ animationDelay: `${i * 150}ms` }} />)}
@@ -896,25 +946,27 @@ function HomeInner({ studio = false }) {
             </div>
           )}
 
-          {error?.retry && !isProcessing && (
+          {(error?.retry || error?.upload) && !isProcessing && (
             <div role="alert" className="card flex flex-col gap-3 border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-5 animate-fadeup">
               <div className="flex items-start gap-3">
                 <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
                 <div className="flex flex-1 flex-col gap-1">
                   <span className="text-sm font-semibold">Generation stopped</span>
                   <p className="text-sm leading-relaxed text-fg">{error.message}</p>
+                  <p className="text-xs text-muted">Your clip length, format and captions stay the same if you upload the MP4 instead. This run was not counted.</p>
                   {clips.length > 0 && <p className="text-xs text-muted">{clips.length} clip{clips.length === 1 ? '' : 's'} already received {clips.length === 1 ? 'is' : 'are'} kept below.</p>}
                 </div>
                 <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
               </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => { if (lastRunRef.current) { setError(null); setJustFinished(false); handleClipping(null, lastRunRef.current); } }} className="btn-lime h-9 px-4 text-sm">Retry</button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => { uploadAndRunRef.current = true; setError(null); uploadInputRef.current?.click(); }} className="btn-lime h-9 px-4 text-sm">Upload the MP4 instead</button>
+                <button type="button" onClick={() => { if (lastRunRef.current) { setError(null); setJustFinished(false); handleClipping(null, lastRunRef.current); } }} className="btn-ghost h-9 px-4 text-sm">Retry link</button>
                 <button type="button" onClick={() => setError(null)} className="btn-ghost h-9 px-4 text-sm">Dismiss</button>
               </div>
             </div>
           )}
 
-          {!isProcessing && clips.length === 0 && !error?.retry && (
+          {!isProcessing && clips.length === 0 && !error?.retry && !error?.upload && (
             <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 rounded-card border border-dashed border-line2 p-8 text-center">
               <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Empty clip tray" className="animate-floaty">
                 <rect x="28" y="18" width="40" height="70" rx="10" fill="#1E1E29" stroke="#2A2A36" />
@@ -930,7 +982,7 @@ function HomeInner({ studio = false }) {
           )}
 
           {isProcessing && clips.length === 0 && (
-            <ProgressDock label={progressLabel} step={progressStep} />
+            <ProgressDock label={progressLabel} step={progressStep} pct={progressPct} live={ytLive || !!liveChannel} />
           )}
 
           {clips.length > 0 && (
@@ -1042,9 +1094,18 @@ function HomeInner({ studio = false }) {
                 <li className="flex items-center gap-2"><Check />Pro editing: color looks, speed, caption styles</li>
                 <li className="flex items-center gap-2"><Check />Your own watermark + .srt caption files</li>
               </ul>
-              <div className="flex flex-col gap-2.5 sm:flex-row">
+              {offer?.active && !isPro && (
+                <BfOfferCard
+                  offer={offer}
+                  signedIn={signedIn}
+                  isPro={isPro}
+                  onAccountChange={() => refreshBilling()}
+                  onStart={() => handleUpgrade(BF_PLAN)}
+                />
+              )}
+              <div className={`flex flex-col gap-2.5 sm:flex-row ${offer?.active && !isPro ? 'opacity-90' : ''}`}>
                 <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
-                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>
+                {!(offer?.active && !isPro) && <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>}
               </div>
               <div className="border-t border-line pt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · from $9</p>
@@ -1107,7 +1168,7 @@ function HomeInner({ studio = false }) {
       {modalBlock}
       <SpinWheel onWon={() => refreshBilling()} onUpgrade={() => setShowPricing(true)} />
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-ink/95 p-3 backdrop-blur sm:hidden">
-        <button type="submit" form="clip-form" disabled={isProcessing || !!linkIssue} className="btn-lime h-12 w-full text-[15px] font-extrabold">
+        <button type="submit" form="clip-form" disabled={isProcessing || !!blockIssue} className="btn-lime h-12 w-full text-[15px] font-extrabold">
           <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
         </button>
       </div>
@@ -1351,7 +1412,20 @@ function HomeInner({ studio = false }) {
                 <span className="font-display text-xl font-extrabold text-lime">Pro</span>
                 <span className="text-sm text-muted">For creators posting daily.</span>
               </div>
-              <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1"><span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></div>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1">
+                {offer?.active && billing === 'monthly' && !isPro ? (
+                  <>
+                    <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">$0</span>
+                    <span className="text-sm text-muted">for 7 days, then $9.99/mo</span>
+                    <span className="w-full text-xs text-muted line-through">normally $19.99/mo</span>
+                  </>
+                ) : (
+                  <><span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></>
+                )}
+              </div>
+              {offer?.active && billing === 'monthly' && !isPro && (
+                <p className="text-[13px] leading-relaxed text-soft">{offer.disclosure}</p>
+              )}
               <ul className="flex flex-col gap-2.5 text-sm text-fg">
                 <li className="flex items-center gap-2.5"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2.5"><Check />No watermark</li>
@@ -1360,10 +1434,10 @@ function HomeInner({ studio = false }) {
                 <li className="flex items-center gap-2.5"><Check />Pro editing: color looks, speed control, boxed / 1-word captions, loudness boost, fades</li>
                 <li className="flex items-center gap-2.5"><Check />Your own @handle watermark, 0.1s trims, .srt caption download</li>
               </ul>
-              <button onClick={() => handleUpgrade(price.plan)} className="btn-lime mt-auto h-12">
-                {isPro ? 'You’re on Pro' : 'Upgrade to Pro'}{!isPro && <Arrow />}
+              <button onClick={() => handleUpgrade(offer?.active && billing === 'monthly' && !isPro ? BF_PLAN : price.plan)} className="btn-lime mt-auto h-12">
+                {isPro ? (trialEnd ? 'Trial ends soon' : 'You’re on Pro') : (offer?.active && billing === 'monthly' ? (signedIn ? 'Start 7-day free trial' : 'Sign in for 7 days free') : 'Upgrade to Pro')}{!isPro && <Arrow />}
               </button>
-              <span className="text-center text-xs text-muted">Cancel anytime · Secure checkout via Stripe</span>
+              <span className="text-center text-xs text-muted">{offer?.active && billing === 'monthly' && !isPro ? '7 days free, then $9.99/mo, cancel anytime. Offer ends Dec 7.' : 'Cancel anytime · Secure checkout via Stripe'}</span>
             </article>
           </div>
           <p className="text-center text-xs text-muted">
@@ -1426,7 +1500,7 @@ function HomeInner({ studio = false }) {
             </button>
           ) : (
             <button type="button" onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
-              Upgrade to Pro
+              {offer?.active ? 'Try Pro free for 7 days' : 'Upgrade to Pro'}
             </button>
           )}
         </div>
@@ -1445,14 +1519,15 @@ export default function Home({ studio = false }) {
 }
 
 
-function ProgressDock({ label, step }) {
+function ProgressDock({ label, step, pct: pctProp, live }) {
   const [min, setMin] = useState(false);
-  const pct = Math.min(100, (step + 1) * 20);
+  const pct = Math.min(100, Math.max(0, Number(pctProp) || (step + 1) * 20));
+  const steps = [live ? 'Capturing live' : 'Loading video', 'Analyzing audio', 'Scoring moments', 'Cutting clips', 'Ready'];
   if (min) {
     return (
       <button type="button" onClick={() => setMin(false)} aria-label="Show clipping progress"
         className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full border border-line2 bg-surface/90 px-4 py-2.5 text-xs font-semibold text-white shadow-modal backdrop-blur">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-lime" />Clipping… {pct}%
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-lime" />{live ? 'Capturing…' : 'Clipping…'} {pct}%
       </button>
     );
   }
@@ -1460,7 +1535,8 @@ function ProgressDock({ label, step }) {
     <div role="status" aria-live="polite" className="fixed bottom-4 left-4 right-4 z-50 rounded-2xl border border-line2 bg-surface/85 p-5 shadow-modal backdrop-blur animate-fadeup sm:left-auto sm:w-[360px]">
       <div className="mb-3 flex items-center gap-3">
         <div className="h-3 w-3 animate-pulse rounded-full bg-lime" />
-        <span className="text-sm font-semibold text-white">Clipping in progress</span>
+        <span className="text-sm font-semibold text-white">{live ? 'Capturing and clipping' : 'Clipping in progress'}</span>
+        <span className="text-xs font-semibold text-lime">{pct}%</span>
         <button type="button" onClick={() => setMin(true)} aria-label="Minimize" className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-soft hover:bg-ink hover:text-white">–</button>
       </div>
       <p className="mb-3 text-sm text-soft">{label || 'Working…'}</p>
@@ -1468,13 +1544,13 @@ function ProgressDock({ label, step }) {
         <div className="h-full bg-lime transition-all duration-500" style={{ width: `${pct}%` }} />
       </div>
       <ul className="space-y-1.5 text-xs">
-        {['Downloading video', 'Analyzing audio', 'Scoring moments', 'Cutting clips', 'Ready'].map((l, i) => (
+        {steps.map((l, i) => (
           <li key={l} className={`flex items-center gap-2 ${i <= step ? 'text-lime' : 'text-muted'}`}>
             <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${i <= step ? 'bg-lime text-ink' : 'bg-ink text-muted'}`}>{i < step ? '✓' : i + 1}</span>{l}
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-[11px] text-muted">You can switch apps or leave — clipping keeps running on our server for up to an hour. Come back to this page and your clips appear. Batches: keep the page open so the next link can start.</p>
+      <p className="mt-3 text-[11px] text-muted">You can switch apps or leave — clipping keeps running on our server. Come back to this page and your clips appear. Batches: keep the page open so the next link can start.</p>
     </div>
   );
 }

@@ -21,11 +21,10 @@ import { toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
-// Longest source we accept. Long sources make RenderIO's download+cut slower and
-// risk the 300s function limit (seen in production). Override with MAX_SOURCE_MINUTES.
-// YouTube is capped tighter until long-video processing lands (one run must fit in maxDuration).
+// Longest source we accept for a single-file pull. Sliced YouTube runs use processWindowSec
+// (2 hours free / 4 hours paid) and process a bounded prefix instead of failing.
 const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
-const YT_TOO_LONG = `YouTube videos up to ${Math.round(Number(process.env.YT_MAX_MINUTES || 60))} minutes for now; upload the file for longer ones. This run was not counted.`;
+const YT_TOO_LONG = `YouTube videos longer than this can be clipped by highlight slices or by uploading the MP4. This run was not counted.`;
 const SRC_KEY = (id) => `ysrc2:${id}`; // v2: higher-res sources (old keys point at 480p files)
 const LONG_SEC = 40 * 60; // use 360p for long YouTube sources (smaller, faster to pull)
 // Source resolution for YouTube downloads. A 9:16 crop of a 16:9 frame only keeps ~56% of the
@@ -57,11 +56,13 @@ import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnable
 import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
-import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation } from '../../../lib/jobs';
+import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation, readJobMeta, claimStaleResume, kickResume, refundLostJob } from '../../../lib/jobs';
 import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sliceFor, startHqJobs, fetchHqClip, SLICE_MAX_HOPS, HQ_FORMATS } from '../../../lib/slices';
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
+import { resolveYoutubeLive } from '../../../lib/ytlive';
+import { processWindowSec, sliceCapFor, uploadFallbackMessage } from '../../../lib/pipeline';
 
 // Stream sources (Twitch/Kick) are transcribed in chunks so multi-hour VODs fit the
 // 25 MB Whisper limit and the 300s function budget. Chunks run in parallel.
@@ -492,6 +493,24 @@ export async function GET(request) {
   const from = Math.max(0, parseInt(u.searchParams.get('from') || '0', 10) || 0);
   if (!validJobId(id)) return NextResponse.json({ found: false }, { status: 400 });
   const j = await readJob(id, from).catch(() => ({ found: false }));
+  if (j.found && !j.done && j.stale && !j.lost && j.hasPayload) {
+    const meta = await readJobMeta(id).catch(() => null);
+    const origin = new URL(request.url).origin;
+    let ok = false;
+    if (meta?.payload) {
+      try {
+        const headers = {};
+        try { const tok = await getVercelOidcToken(); if (tok) headers['x-vercel-trusted-oidc-idp-token'] = tok; } catch {}
+        // kickResume signs the job id; extra headers are forwarded via a wrapper fetch inside if we pass origin only.
+        ok = await kickResume(id, origin, meta.payload);
+      } catch { ok = false; }
+    }
+    if (ok) {
+      return NextResponse.json({ ...j, stale: false, lost: false, resuming: true }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    await refundLostJob(id, meta || {}).catch(() => {});
+    return NextResponse.json({ ...j, lost: true }, { headers: { 'Cache-Control': 'no-store' } });
+  }
   return NextResponse.json(j, { headers: { 'Cache-Control': 'no-store' } });
 }
 
@@ -526,28 +545,22 @@ export async function POST(request) {
   // from Blob, not streamed through /api/media).
   const rioUrl = await toRenderUrl(videoUrl);
   let ytSecs = 0;
+  let ytLivePending = false;
+  let ytWindowed = null;
   if (ytId) {
     const secs = (await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId));
     ytSecs = secs || 0;
     console.log('yt duration', { ytId, secs });
     if (secs === -1) {
-      return NextResponse.json({ success: false, message: 'That YouTube video is live right now. Live YouTube clipping isn\'t supported yet. Paste it again once the stream ends (the replay works), or use a Twitch channel link for "clip the last X minutes".', live: true }, { status: 400 });
-    }
-    if (secs === -2) {
-      return NextResponse.json({ success: false, message: 'That YouTube stream hasn\'t started yet. Try again after it goes live and ends.' }, { status: 400 });
-    }
-    if (secs === 0) {
+      ytLivePending = true;
+    } else if (secs === -2) {
+      return NextResponse.json({ success: false, message: 'That YouTube stream hasn’t started yet. Try again after it goes live and ends.' }, { status: 400 });
+    } else if (secs === 0) {
       return NextResponse.json({ success: false, message: 'That YouTube video is unavailable (private, removed, or region-locked). Try another link.' }, { status: 400 });
-    }
-    if (secs && secs > YT_MAX_SECONDS) {
-      return NextResponse.json({ success: false, message: YT_TOO_LONG, tooLong: true }, { status: 400 });
-    }
-    if (secs && secs > MAX_SOURCE_SECONDS) {
-      return NextResponse.json({ success: false, message: `That video is ${Math.round(secs / 60)} minutes long. The limit is ${Math.round(MAX_SOURCE_SECONDS / 60)} minutes — trim it or use a shorter upload.` }, { status: 400 });
     }
   }
 
-  // Twitch / Kick: resolve to media playlists and decide which window to transcribe.
+  // Twitch / Kick, and YouTube live: resolve to media playlists and decide which window to transcribe.
   const streamInfo = parseStreamUrl(videoUrl);
   let media = null;
   if (streamInfo) {
@@ -556,6 +569,15 @@ export async function POST(request) {
       await reportError('generate:stream', e, videoUrl);
       return NextResponse.json({ success: false, message: 'We could not read that stream right now. Try again in a minute.' }, { status: 502 });
     }
+  }
+  if (ytLivePending && !media) {
+    try { media = await resolveYoutubeLive(ytId); } catch (e) {
+      if (e?.userFacing) return NextResponse.json({ success: false, message: e.message, code: e.code, upload: true }, { status: 400 });
+      await reportError('generate:ytlive', e, videoUrl);
+      return NextResponse.json({ success: false, message: 'We could not attach to this live YouTube stream right now. Try again in a minute, wait until it ends and paste the replay, or upload a recording.', upload: true }, { status: 502 });
+    }
+  }
+  if (media) {
     const dur = Math.floor(Number(media.duration) || 0);
     if (media.live) {
       const mins = LIVE_MINUTES.includes(Number(body.liveMinutes)) ? Number(body.liveMinutes) : 10;
@@ -564,8 +586,8 @@ export async function POST(request) {
       media.winLen = Math.min(mins * 60, end);
       media.winStart = Math.max(0, end - media.winLen);
       media.liveMinutes = mins;
-      if (media.winLen < Math.max(60, clipLength + 5)) {
-        return NextResponse.json({ success: false, message: 'This stream only just started, so there isn\'t enough footage yet. Try again in a few minutes.' }, { status: 400 });
+      if (media.winLen < Math.max(30, clipLength + 2)) {
+        return NextResponse.json({ success: false, message: 'This stream only just started, so there isn’t enough footage yet. Try again in a few minutes, or upload a recording.' }, { status: 400 });
       }
     } else {
       media.winStart = 0;
@@ -596,7 +618,14 @@ export async function POST(request) {
   // Identity comes only from the signed session cookie, never from the request body.
   const ip = clientIp(request);
   // Signed follow-up of an existing job (see hand-off below): same job, already charged.
-  const cont = await readContinuation(request).catch(() => null);
+  let cont = null;
+  if (request.headers.get('x-resume-job')) {
+    cont = await claimStaleResume(request).catch(() => null);
+    if (!cont) return new NextResponse(null, { status: 204 });
+  } else {
+    cont = await readContinuation(request).catch(() => null);
+    if (request.headers.get('x-continue-job') && !cont) return new NextResponse(null, { status: 204 });
+  }
   const email = cont ? (cont.email || null) : paidEmail(request);
   const ent = email ? await getEntitlement(email).catch(() => null) : null;
   const pro = !!ent?.pro;
@@ -623,6 +652,24 @@ export async function POST(request) {
       }, { status: 400 });
     }
   }
+  const processMax = processWindowSec(tier);
+  const canSliceYt = !!(ytId && !media && rapidEnabled && jobsEnabled && localFfmpegAvailable()
+    && !process.env.YT_DOWNLOAD_FORMAT && process.env.SLICE_DISABLE !== '1');
+  if (ytId && !media && ytSecs > processMax) {
+    if (canSliceYt) {
+      ytWindowed = { sourceSec: ytSecs, processMax };
+      ytSecs = processMax;
+      console.log('yt windowed', ytWindowed);
+    } else if (!cont) {
+      if (creditSpent) await refundCredit(email).catch(() => {});
+      return NextResponse.json({
+        success: false,
+        message: `That YouTube video is ${fmtDur(ytSecs)} long. Upload the MP4 (or a trimmed part) to clip it. This run was not counted.`,
+        tooLong: true,
+        upload: true,
+      }, { status: 400 });
+    }
+  }
   const watermark = tier === 'free' || tier === 'example'; // Pro and credit-paid runs are never watermarked.
   // Test-only bypass (set TEST_BYPASS_SECRET on Preview only): skips daily usage counters.
   const bypass = !!process.env.TEST_BYPASS_SECRET && process.env.VERCEL_ENV !== 'production'
@@ -639,7 +686,7 @@ export async function POST(request) {
   // The run is a server-side job: it keeps going if the browser backgrounds or drops
   // the stream, and the client can resume it via GET /api/generate?job=<id>.
   const jobId = cont ? cont.jobId : jobsEnabled ? newJobId() : null;
-  if (jobId && !cont) await createJob(jobId, { slotKey: limit.key, creditSpent, email: creditSpent ? email : null, tier }).catch(() => {});
+  if (jobId && !cont) await createJob(jobId, { slotKey: limit.key, creditSpent, email: creditSpent ? email : null, tier, payload: body }).catch(() => {});
   const refundUsage = async () => {
     if (refunded) return;
     refunded = true;
@@ -929,8 +976,9 @@ export async function POST(request) {
       // Tell the client right away that work has started; setup happens below.
       const startedAt = Date.now();
       ctx.startedAt = startedAt;
-      send({ type: 'start', total: count, ...(media ? { stream: { live: !!media.live, minutes: media.liveMinutes || null, duration: Math.round(media.winLen), chunks: audioChunks } } : {}) });
-      send({ type: 'status', step: 'transcript' });
+      send({ type: 'start', total: count, ...(media ? { stream: { live: !!media.live, minutes: media.liveMinutes || null, duration: Math.round(media.winLen), chunks: audioChunks } } : {}), ...(ytWindowed ? { windowed: ytWindowed, note: `Clipping the first ${fmtDur(ytWindowed.processMax)} of this ${fmtDur(ytWindowed.sourceSec)} video.` } : {}) });
+      if (media?.live) send({ type: 'status', step: 'capture', pct: 8, label: `Capturing the last ${media.liveMinutes || 10} min of the live stream…` });
+      else send({ type: 'status', step: 'download', pct: 4, label: 'Loading video…' });
       // Clear work dirs left by killed invocations, then size this job's pull budget from the
       // /tmp space that's really free (it's shared with any other job on this instance).
       await sweepStaleTmp().catch(() => {});
@@ -948,9 +996,9 @@ export async function POST(request) {
       // Uploads are already direct files. If the download fails, fall back to per-job yt-dlp.
       const rioKey = process.env.RENDERIO_API_KEY;
       // Long YouTube videos are fetched as parallel time slices (see lib/slices.js).
-      if (rioKey && ctx.dir && ytId && !media && !whole && shouldSlice(ytSecs) && rapidEnabled && !downloaderEnabled && jobsEnabled && localFfmpegAvailable()
+      if (rioKey && ctx.dir && ytId && !media && !whole && shouldSlice(ytSecs) && rapidEnabled && jobsEnabled && localFfmpegAvailable()
         && !process.env.YT_DOWNLOAD_FORMAT && process.env.SLICE_DISABLE !== '1' && !(await rapidDown())) {
-        ctx.slicePlan = planSlices(ytSecs, clipLength);
+        ctx.slicePlan = planSlices(ytSecs, clipLength, undefined, { maxSec: processMax, maxSlices: sliceCapFor(tier) });
         ctx.sliceFmt = sliceFormat(ytSecs);
       }
       if (rioKey && media) {
@@ -1002,17 +1050,18 @@ export async function POST(request) {
                   // default cap. Don't waste a RenderIO slot (YouTube blocks that yt-dlp).
                   if (e?.durationLimit || isDurationLimitError(e)) {
                     if (!ytSecs) ytSecs = ((await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId))) || 0;
-                    if (ytSecs > YT_MAX_SECONDS) { const err = new Error(YT_TOO_LONG); err.tooLong = true; throw err; }
                     if (whole) { const err = new Error(WHOLE_TOO_LONG(ytSecs || 0)); err.code = 'whole_too_long'; throw err; }
+                    if (ytSecs > processMax) { ytWindowed = { sourceSec: ytSecs, processMax }; ytSecs = processMax; }
                     if (shouldSlice(ytSecs) && rapidEnabled && jobsEnabled && localFfmpegAvailable()
                       && !process.env.YT_DOWNLOAD_FORMAT && process.env.SLICE_DISABLE !== '1') {
-                      ctx.slicePlan = planSlices(ytSecs, clipLength);
+                      ctx.slicePlan = planSlices(ytSecs, clipLength, undefined, { maxSec: processMax, maxSlices: sliceCapFor(tier) });
                       ctx.sliceFmt = sliceFormat(ytSecs);
-                      console.warn('full download rejected for duration; switching to slices', { ytSecs });
+                      console.warn('full download rejected for duration; switching to slices', { ytSecs, windowed: !!ytWindowed });
                       return { url: null, direct: true, sliced: true };
                     }
-                    const err = new Error(YT_TOO_LONG);
+                    const err = new Error(uploadFallbackMessage('youtube'));
                     err.tooLong = true;
+                    err.upload = true;
                     throw err;
                   }
                   // Hosted/own downloaders all failed: last resort is RenderIO's yt-dlp (with retries), if time allows.
@@ -1062,24 +1111,16 @@ export async function POST(request) {
             await refundUsage();
             await reportError('generate:download', ctx.capacity ? 'at RenderIO capacity' : 'source download failed: ' + ctx.srcFailed, videoUrl).catch(() => {});
             if (ctx.srcFailed && (ctx.srcFailed.includes('too long') || /exceeds the standard duration|extended duration permission/i.test(ctx.srcFailed))) {
-              send({ type: 'error', message: YT_TOO_LONG, code: 'too_long' });
+              send({ type: 'error', message: uploadFallbackMessage('youtube'), code: 'upload_fallback', upload: true });
               send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
               close();
               return;
             }
             const timedOut = /timeout|too slowly|SOURCE_RATE_LIMITED|429/.test(ctx.srcFailed || '');
-            const why = ytId
-              ? (timedOut
-                ? 'YouTube is sending this video to us too slowly right now, so it couldn’t finish downloading'
-                : 'YouTube downloads are temporarily down on our side (YouTube is blocking our video downloader)')
-              : isFacebookUrl(videoUrl)
-                ? 'We couldn’t download that Facebook video (it may be private, friends-only, or blocked by Facebook)'
-                : 'We couldn’t download that video link right now';
-            const msg = ytId
-              ? `${why}. This isn’t because you left the page. Please upload the video file instead (tap Upload), which works normally. This run was not counted.`
-              : `${why}. Try uploading the video file instead, or try again later. This run was not counted.`;
-            send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : msg });
-            send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: why });
+            const kind = ytId ? (timedOut ? 'slow' : 'youtube') : isFacebookUrl(videoUrl) ? 'facebook' : 'generic';
+            const msg = uploadFallbackMessage(kind);
+            send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : msg, code: ctx.capacity ? 'capacity' : 'upload_fallback', upload: !ctx.capacity });
+            send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: kind });
             close();
             return;
           }
@@ -1094,25 +1135,37 @@ export async function POST(request) {
             // room for transcript + cuts, so it only tops up what's missing.
             // (Measured from the request start, which is what the watchdog and the 300s limit use.)
             const deadline = reqStart + (canHop ? RUN_BUDGET_MS - 30000 : Math.min(RUN_BUDGET_MS - 150000, 120000));
-            send({ type: 'status', step: 'download', parts: plan.slices.length, hop });
+            send({ type: 'status', step: 'download', pct: 8, parts: plan.slices.length, hop, label: 'Loading video…' });
             const start = (o) => startRapidJob(videoUrl, o);
             let got = null;
             try {
               got = await fetchSlices({ videoUrl, ytId, fmt, plan, dir: ctx.dir, deadline, start, poll: pollRapidJob, maxBytes: ctx.tmpCap,
-                blobHeaders: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` } });
+                blobHeaders: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+                onProgress: (s) => {
+                  const pct = s.total ? Math.min(85, Math.round(8 + 72 * s.have / s.total)) : 8;
+                  send({ type: 'status', step: 'download', pct, have: s.have, parts: s.total, hop, label: `Loading video… ${s.have} of ${s.total} parts` });
+                } });
             } catch (e) { console.warn('slices failed', e?.message); }
-            if (got && got.missing.length && canHop) { await handOff(); return; }
-            if (!got || got.missing.length) {
-              console.warn('slices incomplete; giving up', { ytId, hop, missing: got?.missing?.length ?? -1, n: plan.slices.length });
+            const have = got?.files?.size || 0;
+            const minHave = Math.min(2, plan.slices.length);
+            // Prefer finishing every slice while hops remain; the last hop continues with whatever arrived.
+            if (got && got.missing.length && canHop && (have < plan.slices.length)) { await handOff(); return; }
+            if (!got || have < minHave) {
+              console.warn('slices incomplete; giving up', { ytId, hop, missing: got?.missing?.length ?? -1, have, n: plan.slices.length });
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
               await refundUsage();
-              send({ type: 'error', message: 'YouTube is sending this video to us too slowly right now, so it couldn\u2019t finish downloading. Try again in a few minutes (the parts we already got are saved, so it\u2019ll be faster), or upload the file instead. This run was not counted.' });
+              send({ type: 'error', message: uploadFallbackMessage('slow'), code: 'upload_fallback', upload: true });
               send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'download slow' });
               close();
               return;
             }
-            // All parts are in Blob now; a fresh invocation re-reads them in seconds.
-            if (Date.now() - startedAt > HANDOFF_AFTER_MS && canHop) { await handOff(); return; }
+            if (got.missing.length) {
+              console.warn('slices partial; continuing', { ytId, hop, have, missing: got.missing.length, n: plan.slices.length });
+              send({ type: 'status', step: 'download', pct: Math.round(100 * have / plan.slices.length), have, parts: plan.slices.length, partial: true, label: `Loaded ${have} of ${plan.slices.length} parts — clipping what we have…` });
+            }
+            // Parts we have are in Blob; a fresh invocation re-reads them in seconds.
+            if (!got.missing.length && Date.now() - startedAt > HANDOFF_AFTER_MS && canHop) { await handOff(); return; }
+
             const t1 = Date.now();
             if (!cachedTr) ctx.localAudio = await buildSliceAudio(plan, got.files, path.join(ctx.dir, 'audio.mp3')).catch((e) => { console.warn('slice audio failed', e?.message); return null; });
             ctx.sliced = { plan, files: got.files, fmt };
@@ -1160,7 +1213,7 @@ export async function POST(request) {
             if (!ctx.local) {
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
               await refundUsage();
-              send({ type: 'error', message: 'This video took too long to download. Try again in a minute, or upload the file instead. This run was not counted.' });
+              send({ type: 'error', message: uploadFallbackMessage('slow'), code: 'upload_fallback', upload: true });
               send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'download slow' });
               close();
               return;
@@ -1174,14 +1227,6 @@ export async function POST(request) {
               return;
             }
             if (whole && ctx.sourceSec > 0) clipLength = Math.max(1, Math.ceil(ctx.sourceSec));
-            if (ctx.sourceSec && ctx.sourceSec > YT_MAX_SECONDS) {
-              try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
-              await refundUsage();
-              send({ type: 'error', message: YT_TOO_LONG });
-              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
-              close();
-              return;
-            }
           }
         }
       }
@@ -1259,17 +1304,7 @@ export async function POST(request) {
         if (w?.segments?.length) { ctx.transcript = w; ctx.transcriptSource = 'whisper'; }
       }
       if (!cachedTr && ctx.transcript?.segments?.length) setCachedTranscript(videoUrl, ctx.transcript).catch(() => {});
-      // YouTube length cap when the upfront lookup was blocked: the transcript tells us the length.
-      const segsAll = ctx.transcript?.segments || [];
-      const lenSec = segsAll.length ? segsAll[segsAll.length - 1].end : 0;
-      if (ytId && lenSec > YT_MAX_SECONDS) {
-        await refundUsage();
-        send({ type: 'error', message: YT_TOO_LONG });
-        send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
-        close();
-        return;
-      }
-      send({ type: 'status', step: 'scoring', hasTranscript: !!ctx.transcript?.text });
+      send({ type: 'status', step: 'scoring', pct: 80, hasTranscript: !!ctx.transcript?.text, label: 'Scoring moments…' });
       let scored = ctx.resumeHq?.clips?.length ? { clips: ctx.resumeHq.clips } : null;
       if (whole && !scored) {
         // No highlight picking: one clip from 0s for the whole length. One Gemini call only for title/caption.
@@ -1382,14 +1417,14 @@ export async function POST(request) {
         await refundUsage();
         await reportError('generate', ctx.capacity ? 'at RenderIO capacity' : (ctx.downloadError || 'no clips produced'), videoUrl);
         const why = ctx.downloadError || 'Video processing is unavailable right now.';
-        send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `No clips could be made from that video (${String(why).slice(0, 200)}). This run was not counted.` });
+        send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : `No clips could be made from that video (${String(why).slice(0, 200)}). Upload the MP4 instead to keep your settings, or try another link. This run was not counted.`, code: ctx.capacity ? 'capacity' : 'upload_fallback', upload: !ctx.capacity });
         send({ type: 'done', total: 0, real: 0, preview: 0, failed: base.length, refunded: true, reason: why });
         close();
         return;
       }
       send({
         type: 'done',
-        note: real ? 'Cut from your source video.' : (ctx.downloadError || 'Preview clips.'),
+        note: [ytWindowed ? `Clipped from the first ${fmtDur(ytWindowed.processMax)} of this ${fmtDur(ytWindowed.sourceSec)} video.` : '', real ? 'Cut from your source video.' : (ctx.downloadError || 'Preview clips.'), ctx.sliced && ctx.sliced.plan && ctx.sliced.files && ctx.sliced.files.size < ctx.sliced.plan.slices.length ? `Used ${ctx.sliced.files.size} of ${ctx.sliced.plan.slices.length} downloaded parts.` : ''].filter(Boolean).join(' '),
         total: clips.length,
         real,
         preview: clips.length - real,
