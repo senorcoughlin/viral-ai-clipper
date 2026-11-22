@@ -34,6 +34,17 @@ const fmtLen = (secs) => {
   return `${m} minutes`;
 };
 
+// Live / upcoming / over-length problems we can spot from /api/duration before a run is wasted.
+function issueFromLinkMeta(meta, rawUrl) {
+  if (!meta || meta.checking) return null;
+  if (rawUrl && meta.url && meta.url !== rawUrl) return null;
+  if (meta.live) return { code: 'live', message: 'This YouTube video is live right now. Live YouTube streams can\u2019t be clipped yet. Paste it again after the stream ends (the replay works), or paste a Twitch channel link to clip its last few minutes.' };
+  if (meta.secs > 24 * 3600) return { code: 'live', message: 'This looks like a live or 24/7 stream. Live YouTube streams can\u2019t be clipped yet. Paste a finished video or replay instead.' };
+  if (meta.upcoming) return { code: 'upcoming', message: 'This video hasn\u2019t started yet (it\u2019s a scheduled premiere or stream). Paste it again once it\u2019s published.' };
+  if (meta.maxSecs && meta.secs > meta.maxSecs) return { code: 'too_long', message: `This video is ${fmtLen(meta.secs)} long. Links can be up to ${fmtLen(meta.maxSecs)}. Pick a shorter video, or trim it and upload the MP4.` };
+  return null;
+}
+
 const FORMATS = [
   { value: 'shorts_9_16', label: 'Vertical 9:16', short: 'vertical 9:16', hint: 'Tall, full-screen video for TikTok, Reels and YouTube Shorts. The AI keeps the speaker in frame.' },
   { value: 'landscape_16_9', label: 'Wide 16:9', short: 'wide 16:9', hint: 'Regular widescreen for YouTube, X or websites.' },
@@ -207,24 +218,17 @@ function HomeInner({ studio = false }) {
     return () => { live = false; clearTimeout(t); };
   }, [videoUrl, srcSecs]);
   const curSecs = linkSecs.url && linkSecs.url === videoUrl.trim() ? linkSecs.secs : 0;
+  const durationKnown = curSecs > 0 || !!linkSecs.live || !!linkSecs.upcoming;
   const wholeTooLong = curSecs > WHOLE_MAX_SEC + 0.5;
   // Length caps, shown before anything is pasted (CDN-cached on the server).
   const [limits, setLimits] = useState(null);
   useEffect(() => { fetch('/api/duration?limits=1').then(r => r.json()).then(j => { if (j?.maxSecs) setLimits(j); }).catch(() => {}); }, []);
   // Problems we can spot before a run is wasted: live/upcoming YouTube streams and over-length videos.
-  const linkIssue = (() => {
-    if (!linkSecs.url || linkSecs.url !== videoUrl.trim() || linkSecs.checking) return null;
-    if (linkSecs.live) return { code: 'live', message: 'This YouTube video is live right now. Live YouTube streams can\u2019t be clipped yet. Paste it again after the stream ends (the replay works), or paste a Twitch channel link to clip its last few minutes.' };
-    if (linkSecs.secs > 24 * 3600) return { code: 'live', message: 'This looks like a live or 24/7 stream. Live YouTube streams can\u2019t be clipped yet. Paste a finished video or replay instead.' };
-    if (linkSecs.upcoming) return { code: 'upcoming', message: 'This video hasn\u2019t started yet (it\u2019s a scheduled premiere or stream). Paste it again once it\u2019s published.' };
-    if (linkSecs.maxSecs && linkSecs.secs > linkSecs.maxSecs) return { code: 'too_long', message: `This video is ${fmtLen(linkSecs.secs)} long. Links can be up to ${fmtLen(linkSecs.maxSecs)}. Pick a shorter video, or trim it and upload the MP4.` };
-    return null;
-  })();
-  // Links the server already turned away this session (live, too long…), so a repeat paste gets the answer instantly.
+  const linkIssue = issueFromLinkMeta(linkSecs, videoUrl.trim());
   const rejectedRef = useRef(new Map());
   const linkCount = parseLinks(videoUrl).links.length;
   // Whole video needs one finished video: batches and Twitch "last X minutes" use highlights instead.
-  const wholeBlocked = wholeTooLong ? 'long' : linkCount > 1 ? 'batch' : liveChannel ? 'live' : '';
+  const wholeBlocked = wholeTooLong ? 'long' : linkCount > 1 ? 'batch' : liveChannel ? 'live' : (!(durationKnown && curSecs > 0 && curSecs <= WHOLE_MAX_SEC + 0.5) && !!videoUrl.trim() ? 'unknown' : '');
   const wholeOn = wholeVideo && !wholeBlocked;
   const planSummary = (() => {
     const shape = (FORMATS.find(f => f.value === clipFormat) || FORMATS[0]).short;
@@ -470,7 +474,7 @@ function HomeInner({ studio = false }) {
     e?.preventDefault?.();
     const settings = override || { videoUrl, clipFormat, autoSubtitles, aiHook, aiStyle, clipLength: wholeOn ? WHOLE_MAX_SEC : clipLength, clipCount: wholeOn ? 1 : clipCount, pack, liveMinutes, wholeVideo: wholeOn, hlLength: clipLength, hlCount: clipCount };
     // Shadow state so a retry reuses exactly the same URL and settings.
-    const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, clipLength: len, clipCount: count, pack: pk } = settings;
+    const { videoUrl: runUrl, clipFormat: fmt, autoSubtitles: subs, aiHook: hook, aiStyle: style, pack: pk } = settings;
     if (!runUrl.trim()) return;
     const isExample = settings.source === 'example';
     setLastWasExample(isExample);
@@ -486,14 +490,35 @@ function HomeInner({ studio = false }) {
       return;
     }
     if (!isExample && urls.length === 1) {
+      let meta = (linkSecs.url === runUrl.trim() && !linkSecs.checking) ? linkSecs : null;
+      if (!meta) {
+        try {
+          const r = await fetch(`/api/duration?url=${encodeURIComponent(urls[0])}`, { cache: 'no-store' });
+          if (r.ok) {
+            const j = await r.json();
+            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0 };
+            setLinkSecs(meta);
+          }
+        } catch {}
+      }
+      const issue = issueFromLinkMeta(meta, runUrl.trim());
       const prev = rejectedRef.current.get(urls[0]);
-      const blocked = (linkIssue && runUrl.trim() === linkSecs.url) ? linkIssue.message : (prev && Date.now() - prev.at < 20 * 60 * 1000 ? prev.message : '');
+      const blocked = issue ? issue.message : (prev && Date.now() - prev.at < 20 * 60 * 1000 ? prev.message : '');
       if (blocked) {
-        ft('generate_blocked', { reason: linkIssue?.code || 'repeat' });
+        ft('generate_blocked', { reason: issue?.code || 'repeat' });
         setError({ message: blocked });
         return;
       }
+      // Whole video is only safe when we know the source is 2 minutes or less.
+      const secs = meta?.secs || 0;
+      if (settings.wholeVideo && !(secs > 0 && secs <= WHOLE_MAX_SEC + 0.5)) {
+        settings.wholeVideo = false;
+        settings.clipLength = settings.hlLength || clipLength;
+        settings.clipCount = settings.hlCount || clipCount;
+      }
     }
+    const len = settings.clipLength;
+    const count = settings.clipCount;
     lastRunRef.current = settings;
     ft('generate_click', { source: settings.source || (override ? 'retry' : 'manual'), links: urls.length, pro: isPro ? 'yes' : 'no' });
 
@@ -706,7 +731,7 @@ function HomeInner({ studio = false }) {
                     <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
                   </label>
                 </div>
-                <button type="submit" disabled={isProcessing} className={`btn-lime h-[52px] whitespace-nowrap px-5 text-[15px] ${studio ? 'hidden sm:inline-flex' : ''}`}>
+                <button type="submit" disabled={isProcessing || !!linkIssue} className={`btn-lime h-[52px] whitespace-nowrap px-5 text-[15px] ${studio ? 'hidden sm:inline-flex' : ''}`}>
                   <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
                 </button>
               </div>
@@ -778,6 +803,7 @@ function HomeInner({ studio = false }) {
                     <p role="note" data-testid="whole-fallback-note" className="rounded-input border border-lime/40 px-3 py-2 text-xs leading-snug text-soft">
                       {wholeBlocked === 'long' ? <>This video is {fmtClock(curSecs)} long, so we&apos;ll pick the best highlights instead. Whole video works for videos up to 2 minutes.</>
                         : wholeBlocked === 'batch' ? <>You pasted {linkCount} links, so each one gets highlight clips. Whole video works with one link at a time.</>
+                        : wholeBlocked === 'unknown' ? <>We&apos;ll pick the best highlights until we can confirm this video is 2 minutes or less. Whole video stays available for short clips.</>
                         : <>Live channels are clipped as highlights from the last few minutes.</>}
                     </p>
                   ) : (
@@ -1081,7 +1107,7 @@ function HomeInner({ studio = false }) {
       {modalBlock}
       <SpinWheel onWon={() => refreshBilling()} onUpgrade={() => setShowPricing(true)} />
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-ink/95 p-3 backdrop-blur sm:hidden">
-        <button type="submit" form="clip-form" disabled={isProcessing} className="btn-lime h-12 w-full text-[15px] font-extrabold">
+        <button type="submit" form="clip-form" disabled={isProcessing || !!linkIssue} className="btn-lime h-12 w-full text-[15px] font-extrabold">
           <Bolt /> {isProcessing ? 'Generating…' : 'Generate clips'}
         </button>
       </div>

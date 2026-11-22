@@ -53,7 +53,7 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
-import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, downloaderEnabled, downloadViaRapid, startRapidJob, pollRapidJob, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize } from '../../../lib/downloader';
+import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, downloaderEnabled, downloadViaRapid, startRapidJob, pollRapidJob, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize, isDurationLimitError } from '../../../lib/downloader';
 import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
@@ -998,6 +998,23 @@ export async function POST(request) {
                   }
                   return u;
                 })(); } catch (e) {
+                  // Full-file download rejected because the video is longer than the provider's
+                  // default cap. Don't waste a RenderIO slot (YouTube blocks that yt-dlp).
+                  if (e?.durationLimit || isDurationLimitError(e)) {
+                    if (!ytSecs) ytSecs = ((await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId))) || 0;
+                    if (ytSecs > YT_MAX_SECONDS) { const err = new Error(YT_TOO_LONG); err.tooLong = true; throw err; }
+                    if (whole) { const err = new Error(WHOLE_TOO_LONG(ytSecs || 0)); err.code = 'whole_too_long'; throw err; }
+                    if (shouldSlice(ytSecs) && rapidEnabled && jobsEnabled && localFfmpegAvailable()
+                      && !process.env.YT_DOWNLOAD_FORMAT && process.env.SLICE_DISABLE !== '1') {
+                      ctx.slicePlan = planSlices(ytSecs, clipLength);
+                      ctx.sliceFmt = sliceFormat(ytSecs);
+                      console.warn('full download rejected for duration; switching to slices', { ytSecs });
+                      return { url: null, direct: true, sliced: true };
+                    }
+                    const err = new Error(YT_TOO_LONG);
+                    err.tooLong = true;
+                    throw err;
+                  }
                   // Hosted/own downloaders all failed: last resort is RenderIO's yt-dlp (with retries), if time allows.
                   const deadlineAt = startedAt + RUN_BUDGET_MS - 150000;
                   if (e?.capacity || Date.now() > deadlineAt - 45000) throw e;
@@ -1044,13 +1061,22 @@ export async function POST(request) {
             try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
             await refundUsage();
             await reportError('generate:download', ctx.capacity ? 'at RenderIO capacity' : 'source download failed: ' + ctx.srcFailed, videoUrl).catch(() => {});
+            if (ctx.srcFailed && (ctx.srcFailed.includes('too long') || /exceeds the standard duration|extended duration permission/i.test(ctx.srcFailed))) {
+              send({ type: 'error', message: YT_TOO_LONG, code: 'too_long' });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+              close();
+              return;
+            }
+            const timedOut = /timeout|too slowly|SOURCE_RATE_LIMITED|429/.test(ctx.srcFailed || '');
             const why = ytId
-              ? 'YouTube downloads are temporarily down on our side (YouTube is blocking our video downloader)'
+              ? (timedOut
+                ? 'YouTube is sending this video to us too slowly right now, so it couldn’t finish downloading'
+                : 'YouTube downloads are temporarily down on our side (YouTube is blocking our video downloader)')
               : isFacebookUrl(videoUrl)
-                ? 'We couldn\u2019t download that Facebook video (it may be private, friends-only, or blocked by Facebook)'
-                : 'We couldn\u2019t download that video link right now';
+                ? 'We couldn’t download that Facebook video (it may be private, friends-only, or blocked by Facebook)'
+                : 'We couldn’t download that video link right now';
             const msg = ytId
-              ? `${why}. This isn\u2019t because you left the page. Please upload the video file instead (tap Upload), which works normally. This run was not counted.`
+              ? `${why}. This isn’t because you left the page. Please upload the video file instead (tap Upload), which works normally. This run was not counted.`
               : `${why}. Try uploading the video file instead, or try again later. This run was not counted.`;
             send({ type: 'error', message: ctx.capacity ? CAPACITY_MESSAGE : msg });
             send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: why });

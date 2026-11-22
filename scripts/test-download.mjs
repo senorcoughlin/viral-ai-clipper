@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 process.env.YT_DOWNLOAD_API_KEY = process.env.YT_DOWNLOAD_API_KEY || 'test-key-not-real';
 
 const { downloadToFile } = await import('../lib/localprep.js');
-const { isInsufficientBalance, downloadViaApi, downloadApiDown, _resetDownloadApiDownForTests } = await import('../lib/downloader.js');
+const { isInsufficientBalance, isDurationLimitError, downloadViaApi, downloadViaRapid, downloadApiDown, _resetDownloadApiDownForTests } = await import('../lib/downloader.js');
 
 function bytes(n, fill = 7) { return new Uint8Array(n).fill(fill); }
 
@@ -121,6 +121,33 @@ test('isInsufficientBalance matches the production error body', () => {
   assert.equal(isInsufficientBalance({ message: 'ok' }, 400), false);
   assert.equal(isInsufficientBalance(body, 200), false);
 });
+
+test('isDurationLimitError matches the provider\'s extended-duration rejection', () => {
+  const body = { message: 'This video exceeds the standard duration limit for this format. Extended duration permission required.', success: false };
+  assert.equal(isDurationLimitError(body.message, body), true);
+  assert.equal(isDurationLimitError(new Error(body.message), body), true);
+  const e = new Error(body.message); e.durationLimit = true;
+  assert.equal(isDurationLimitError(e), true);
+  assert.equal(isDurationLimitError('download api timeout'), false);
+  assert.equal(isDurationLimitError({ message: 'ok' }, { message: 'ok' }), false);
+});
+
+test('downloadViaRapid tags duration-limit rejections so callers skip RenderIO', async () => {
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    success: false,
+    message: 'This video exceeds the standard duration limit for this format. Extended duration permission required.',
+  }), { status: 400, headers: { 'content-type': 'application/json' } });
+  try {
+    await assert.rejects(
+      () => downloadViaRapid('https://youtu.be/dQw4w9wgGcQ', 5000),
+      (e) => e?.durationLimit === true && /duration limit/i.test(e.message),
+    );
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 
 test('downloadViaApi treats insufficient_balance as a fast skip and remembers it', async () => {
   _resetDownloadApiDownForTests();
