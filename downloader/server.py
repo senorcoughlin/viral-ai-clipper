@@ -47,9 +47,14 @@ def proxy_for(jid):
 
 def ytdlp(args, timeout, proxy=""):
     base = ["yt-dlp", "--no-playlist", "--no-progress", "--retries", "3"]
-    if proxy: base += ["--proxy", proxy]
+    env = os.environ.copy()
+    if proxy:
+        base += ["--proxy", proxy,
+                 "--downloader-args", f"ffmpeg_i:-http_proxy {proxy}",
+                 "--downloader-args", f"ffmpeg:-http_proxy {proxy}"]
+        env["http_proxy"] = env["https_proxy"] = env["HTTP_PROXY"] = env["HTTPS_PROXY"] = proxy
     if COOKIES and os.path.exists(COOKIES): base += ["--cookies", COOKIES]
-    return subprocess.run(base + args, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(base + args, capture_output=True, text=True, timeout=timeout, env=env)
 
 def work():
     while True:

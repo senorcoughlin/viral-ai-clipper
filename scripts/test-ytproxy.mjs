@@ -7,7 +7,7 @@ process.env.YT_PROXY_CYCLE_DAY = process.env.YT_PROXY_CYCLE_DAY || '22';
 
 const {
   redactProxy, isYoutubeBlockError, isProxyBudgetError, rotateProxyUrl, stickyProxyUrl,
-  sectionSpec, formatSelector, buildYtDlpArgs, proxyCycleId, getProxyUsage, proxyAllowed,
+  sectionSpec, formatSelector, buildYtDlpArgs, ffmpegProxyArgs, trimLocally, proxyCycleId, getProxyUsage, proxyAllowed,
   recordProxyAttempt, recordProxySuccess, recordProxyBytes, proxyConfigured, pickLiveVariants, pickLiveFormatsFromYtDlp,
   downloadViaProxyFallback, PROXY_BUDGET_BYTES,
 } = await import('../lib/ytproxy.js');
@@ -46,21 +46,26 @@ test('isYoutubeBlockError catches sign-in, bot, 403 and 429', () => {
   assert.equal(isYoutubeBlockError('private video'), false);
 });
 
-test('formatSelector caps at 1080 and prefers muxed mp4', () => {
+test('formatSelector caps at 1080 and prefers AVC+AAC over itag-18 mp4', () => {
   assert.match(formatSelector(720), /height<=720/);
   assert.match(formatSelector(2160), /height<=1080/);
-  assert.match(formatSelector(720), /^b\[height<=720\]\[ext=mp4\]/);
+  assert.match(formatSelector(720), /^bv\*\[height<=720\]\[vcodec\^=avc1\]\+ba\[ext=m4a\]/);
+  assert.ok(!formatSelector(720).startsWith('b[height<=720][ext=mp4]'), 'must not prefer progressive itag 18 first');
 });
 
-test('sectionSpec and buildYtDlpArgs cap the download and include --proxy', () => {
+test('sectionSpec still formats a window; buildYtDlpArgs does not use --download-sections', () => {
   assert.equal(sectionSpec(0, 120), '*00:00:00-00:02:00');
   assert.equal(sectionSpec(0, 0), null);
-  const args = buildYtDlpArgs({ outFile: '/tmp/x.mp4', videoUrl: 'https://youtu.be/abc', proxyUrl: SAMPLE, height: 720, endSec: 7200, ffmpeg: '/usr/bin/ffmpeg' });
+  const args = buildYtDlpArgs({ outFile: '/tmp/x.mp4', videoUrl: 'https://youtu.be/abc', proxyUrl: SAMPLE, height: 720, ffmpeg: '/usr/bin/ffmpeg' });
   assert.ok(args.includes('--proxy'));
   assert.equal(args[args.indexOf('--proxy') + 1], SAMPLE);
-  assert.ok(args.includes('--download-sections'));
-  assert.equal(args[args.indexOf('--download-sections') + 1], '*00:00:00-02:00:00');
+  assert.equal(args.includes('--download-sections'), false);
+  assert.equal(args.includes('--force-keyframes-at-cuts'), false);
+  const ff = ffmpegProxyArgs(SAMPLE);
+  assert.ok(args.includes('--downloader-args'));
+  assert.ok(ff.some(a => a.includes('ffmpeg_i:-http_proxy') && a.includes(SAMPLE)));
   const joined = args.join(' ');
+  assert.ok(joined.includes('ffmpeg_i:-http_proxy'));
   // A thrown error built from args would include the URL; redact still works.
   assert.equal(redactProxy(joined, SAMPLE).includes('fake-pass'), false);
 });
@@ -116,6 +121,32 @@ test('downloadViaProxyFallback redacts credentials from yt-dlp errors', async ()
     }),
     (e) => !String(e.message).includes('fake-pass') && !String(e.message).includes('proxy.test'),
   );
+  if (prev == null) db.delete(`yt:proxy:${cycle}:bytes`);
+  else db.set(`yt:proxy:${cycle}:bytes`, prev);
+});
+
+test('downloadViaProxyFallback downloads without sections and trims only when needed', async () => {
+  const cycle = proxyCycleId();
+  const prev = db.get(`yt:proxy:${cycle}:bytes`);
+  db.set(`yt:proxy:${cycle}:bytes`, '0');
+  const fs = await import('node:fs/promises');
+  const dir = await fs.mkdtemp('/tmp/ytp-test-');
+  let seen;
+  const got = await downloadViaProxyFallback('https://youtu.be/abc', {
+    dir,
+    endSec: 7200,
+    ensure: async () => '/bin/true',
+    upload: async (file) => 'https://blob.test/' + file.split('/').pop(),
+    run: async (_bin, args) => {
+      seen = args;
+      const out = args[args.indexOf('-o') + 1];
+      await fs.writeFile(out, 'not-a-real-mp4-but-nonempty');
+    },
+  });
+  assert.equal(seen.includes('--download-sections'), false);
+  assert.ok(seen.includes('--downloader-args'));
+  assert.ok(got.bytes > 0);
+  assert.ok(got.url.startsWith('https://blob.test/'));
   if (prev == null) db.delete(`yt:proxy:${cycle}:bytes`);
   else db.set(`yt:proxy:${cycle}:bytes`, prev);
 });

@@ -53,7 +53,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
 import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, downloaderEnabled, downloadViaRapid, startRapidJob, pollRapidJob, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize, isDurationLimitError } from '../../../lib/downloader';
-import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget } from '../../../lib/localprep';
+import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget, audioFormMeta, isValidAudioBuffer, isGroqQuotaError } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
 import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation, readJobMeta, claimStaleResume, kickResume, refundLostJob } from '../../../lib/jobs';
@@ -87,7 +87,7 @@ async function streamChunkTranscript(audioUrl, start, len, timeoutMs, mp4 = fals
   if (!r.ok) throw new Error('audio download ' + r.status);
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf.length > GROQ_MAX_BYTES) throw new Error('audio too large for Whisper');
-  const tr = await transcribeBuffer(buf);
+  const tr = await transcribeWithFallback(buf, len);
   console.log('stream chunk transcript', { start, len, ms: Date.now() - t0, bytes: buf.length, words: tr.segments.length });
   const segments = tr.segments.map(x => ({ start: x.start + start, end: x.end + start, text: x.text }));
   return { text: tr.text, segments };
@@ -253,10 +253,12 @@ async function transcribe(audioPath) {
 
 async function transcribeBuffer(buf) {
   const key = process.env.GROQ_API_KEY;
-  if (!key || !buf?.length) return EMPTY_TRANSCRIPT;
+  if (!key || !buf?.length) return { ...EMPTY_TRANSCRIPT };
+  if (!isValidAudioBuffer(buf)) return { ...EMPTY_TRANSCRIPT, status: 400, detail: 'invalid_media_file' };
   try {
+    const meta = audioFormMeta(buf);
     const form = new FormData();
-    form.append('file', new Blob([buf], { type: 'audio/mpeg' }), 'audio.mp3');
+    form.append('file', new Blob([buf], { type: meta.type }), meta.name);
     form.append('model', 'whisper-large-v3-turbo');
     // Word-level timestamps: this is what makes captions land on the spoken word.
     form.append('response_format', 'verbose_json');
@@ -268,8 +270,9 @@ async function transcribeBuffer(buf) {
       body: form,
     });
     if (!res.ok) {
-      console.warn('groq transcribe failed', res.status, (await res.text().catch(() => '')).slice(0, 200));
-      return EMPTY_TRANSCRIPT;
+      const detail = (await res.text().catch(() => '')).slice(0, 200);
+      console.warn('groq transcribe failed', res.status, detail);
+      return { ...EMPTY_TRANSCRIPT, status: res.status, detail };
     }
     const data = await res.json();
     meterWhisper(data.duration);
@@ -279,8 +282,18 @@ async function transcribeBuffer(buf) {
       : (Array.isArray(data.segments) ? data.segments.map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() })).filter(s => s.text) : []);
     return { text: data.text || segments.map(s => s.text).join(' '), segments, src: words.length ? 'whisper' : 'whisper-seg' };
   } catch {
-    return EMPTY_TRANSCRIPT;
+    return { ...EMPTY_TRANSCRIPT };
   }
+}
+
+async function transcribeWithFallback(buf, lenSec) {
+  const tr = await transcribeBuffer(buf);
+  if (tr.segments.length) return tr;
+  if (isGroqQuotaError(tr) || !tr.segments.length) {
+    const fb = await geminiTranscribe(buf, lenSec).catch(() => ({ ...EMPTY_TRANSCRIPT }));
+    if (fb.segments.length) return fb;
+  }
+  return tr;
 }
 
 
@@ -291,7 +304,7 @@ async function geminiTranscribe(buf, lenSec) {
   try {
     const prompt = 'Transcribe this audio verbatim. Return ONLY JSON {"lines":[{"t":seconds_from_start,"text":"..."}]} with one entry per sentence or short phrase (max ~12 words), t = when it starts, in seconds as a number.';
     const g = await geminiGenerate({
-      contents: [{ parts: [{ inline_data: { mime_type: 'audio/mpeg', data: Buffer.from(buf).toString('base64') } }, { text: prompt }] }],
+      contents: [{ parts: [{ inline_data: { mime_type: audioFormMeta(buf).type, data: Buffer.from(buf).toString('base64') } }, { text: prompt }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 32768, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
     }, { label: 'gemini transcribe', timeoutMs: 90000, primaryMs: 45000, fallbackMs: 60000 });
     if (!g.ok) { console.warn('gemini transcribe failed', g.status || '', g.error); return EMPTY_TRANSCRIPT; }
@@ -322,7 +335,7 @@ async function audioTranscript(url, timeoutMs, direct = false) {
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf.length > GROQ_MAX_BYTES) throw new Error('audio too large for Whisper');
   const t1 = Date.now();
-  const tr = await transcribeBuffer(buf);
+  const tr = await transcribeWithFallback(buf, AUDIO_CAP_SEC);
   console.log('audio transcript', { extractMs: t1 - t0, whisperMs: Date.now() - t1, bytes: buf.length, words: tr.segments.length });
   return tr;
 }
