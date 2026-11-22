@@ -98,6 +98,10 @@ function Stats() {
       <Act label="Reset a daily limit" run={async () => { const r = await act({ action: 'reset_limit', id }); load(); return r; }}>
         <input className={input} placeholder="IP / id from the table below" value={id} onChange={e => setId(e.target.value)} />
       </Act>
+      {d?.proxy && <div className={card}>
+        <h3 className="mb-2 font-semibold text-white">YouTube proxy fallback ({d.proxy.cycle})</h3>
+        <p className="text-sm text-zinc-300">{d.proxy.configured ? 'Configured' : 'Not configured'} · {d.proxy.attempts} attempts · {d.proxy.successes} ok · {d.proxy.mb} / {d.proxy.capMb} MB estimated{d.proxy.exhausted ? ' · paused (monthly budget)' : ''}</p>
+      </div>}
       {d && <div className={card}>
         <h3 className="mb-2 font-semibold text-white">Today's usage ({d.limits.today}) · free {d.limits.freePerDay}/day · Pro {d.limits.proPerDay}/day</h3>
         <div className="overflow-x-auto"><table className="w-full text-left text-sm text-zinc-200"><thead className="text-zinc-500"><tr><th className="pr-3">Id</th><th className="pr-3">Tier</th><th>Used</th></tr></thead>

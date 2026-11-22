@@ -61,7 +61,8 @@ import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sli
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
-import { resolveYoutubeLive } from '../../../lib/ytlive';
+import { resolveYoutubeLive, captureLiveWindow } from '../../../lib/ytlive';
+import { proxyAllowed, downloadViaProxyFallback, redactProxy, isProxyBudgetError } from '../../../lib/ytproxy';
 import { processWindowSec, sliceCapFor, uploadFallbackMessage } from '../../../lib/pipeline';
 
 // Stream sources (Twitch/Kick) are transcribed in chunks so multi-hour VODs fit the
@@ -571,7 +572,7 @@ export async function POST(request) {
     }
   }
   if (ytLivePending && !media) {
-    try { media = await resolveYoutubeLive(ytId); } catch (e) {
+    try { media = await resolveYoutubeLive(ytId, { proxySalt: 'live:' + ytId }); } catch (e) {
       if (e?.userFacing) return NextResponse.json({ success: false, message: e.message, code: e.code, upload: true }, { status: 400 });
       await reportError('generate:ytlive', e, videoUrl);
       return NextResponse.json({ success: false, message: 'We could not attach to this live YouTube stream right now. Try again in a minute, wait until it ends and paste the replay, or upload a recording.', upload: true }, { status: 502 });
@@ -1001,7 +1002,32 @@ export async function POST(request) {
         ctx.slicePlan = planSlices(ytSecs, clipLength, undefined, { maxSec: processMax, maxSlices: sliceCapFor(tier) });
         ctx.sliceFmt = sliceFormat(ytSecs);
       }
-      if (rioKey && media) {
+      if (rioKey && media && media.viaProxy && media.youtube && ctx.dir && localFfmpegAvailable()) {
+        try {
+          const cap = await captureLiveWindow({
+            videoUrl: media.videoUrl, audioUrl: media.audioUrl,
+            start: media.winStart, len: media.winLen, dir: ctx.dir,
+            proxySalt: media.proxySalt, timeoutMs: Math.max(60000, RUN_BUDGET_MS - 150000 - (Date.now() - startedAt)),
+          });
+          media.mp4 = true;
+          media.winStart = 0;
+          media.winLen = cap.duration || media.winLen;
+          media.duration = cap.duration || media.duration;
+          ctx.local = cap.file;
+          ctx.sourceSec = cap.duration || media.winLen;
+          if (cap.url) { media.videoUrl = cap.url; media.audioUrl = cap.url; }
+          ctx.srcP = Promise.resolve({ url: cap.url || media.videoUrl, direct: true, blob: !!cap.url });
+          console.log('yt live window ready', { mb: Math.round((cap.bytes || 0) / 1e6), sec: Math.round(ctx.sourceSec) });
+        } catch (e) {
+          console.warn('yt live capture failed', redactProxy(e?.message));
+          try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+          await refundUsage();
+          send({ type: 'error', message: isProxyBudgetError(e) ? 'YouTube live capture is paused because this month\u2019s proxy budget is used up. Upload a recording of the part you want to clip instead. This run was not counted.' : 'We could not capture this live YouTube stream (the video links YouTube gave us are locked to one connection). Upload a recording of the part you want to clip instead. This run was not counted.', code: 'upload_fallback', upload: true });
+          send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'live capture failed' });
+          close();
+          return;
+        }
+      } else if (rioKey && media) {
         ctx.srcP = Promise.resolve({ url: media.videoUrl, direct: true });
       } else if (rioKey) {
         // A previous invocation of this job (or a recent run) may already have the source in Blob.
@@ -1064,9 +1090,24 @@ export async function POST(request) {
                     err.upload = true;
                     throw err;
                   }
-                  // Hosted/own downloaders all failed: last resort is RenderIO's yt-dlp (with retries), if time allows.
+                  // Hosted/own downloaders all failed. Try a proxied yt-dlp (only if under the
+                  // monthly bandwidth guard) before RenderIO's often-blocked unproxied yt-dlp.
                   const deadlineAt = startedAt + RUN_BUDGET_MS - 150000;
                   if (e?.capacity || Date.now() > deadlineAt - 45000) throw e;
+                  if (await proxyAllowed()) {
+                    try {
+                      const height = Math.min(1080, Number(ytSourceFormat(ytSecs)) || 720);
+                      const endSec = processMax || undefined;
+                      const got = await downloadViaProxyFallback(videoUrl, {
+                        dir: ctx.dir, height, endSec, jobId: jobId || ytId,
+                        timeoutMs: Math.max(30000, deadlineAt - Date.now()),
+                      });
+                      console.log('yt source via proxy', { mb: Math.round((got.bytes || 0) / 1e6), height });
+                      return got.url;
+                    } catch (pe) {
+                      if (!isProxyBudgetError(pe)) console.warn('proxied yt-dlp failed; trying RenderIO', redactProxy(pe?.message));
+                    }
+                  }
                   console.warn('youtube downloader failed; trying RenderIO', e?.message);
                   return renderioRunRetry({ input_urls: { in_video: videoUrl }, format_selector: '720p' }, 'out_video', rioKey, 90000, { deadlineAt });
                 } })()
@@ -1231,7 +1272,7 @@ export async function POST(request) {
         }
       }
       let audioP = null;
-      if (media && !cachedTr && rioKey && process.env.GROQ_API_KEY) {
+      if (media && !cachedTr && rioKey && process.env.GROQ_API_KEY && !ctx.local) {
         // Split the window into <=60 min chunks, transcribe them in parallel, merge in source time.
         const n = Math.max(1, Math.ceil(media.winLen / STREAM_CHUNK_SEC));
         const step = media.winLen / n;

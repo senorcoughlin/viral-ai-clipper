@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 SECRET = os.environ.get("DOWNLOADER_SECRET", "")
 PUBLIC = os.environ.get("PUBLIC_URL", "").rstrip("/")
-PROXY = os.environ.get("YTDLP_PROXY", "")
+PROXY = os.environ.get("YT_PROXY_URL") or os.environ.get("YTDLP_PROXY", "")
 COOKIES = os.environ.get("YTDLP_COOKIES_FILE", "")
 WORKERS = max(1, min(5, int(os.environ.get("CONCURRENCY", "4"))))
 MAX_SEC = int(os.environ.get("MAX_SOURCE_MINUTES", "120")) * 60
@@ -24,9 +24,30 @@ jobs, q, lock = {}, queue.Queue(), threading.Lock()
 
 def sign(i): return hmac.new(SECRET.encode(), i.encode(), hashlib.sha256).hexdigest()[:32]
 
-def ytdlp(args, timeout):
+def is_block(text):
+    m = (text or "").lower()
+    return any(s in m for s in ("sign in to confirm", "not a bot", "http error 403", "429", "too many requests", "login required", "use --cookies"))
+
+def proxy_for(jid):
+    if not PROXY: return ""
+    # Rotate sticky ports 10001-10010 by job id, same host.
+    try:
+        from urllib.parse import urlparse, urlunparse
+        u = urlparse(PROXY)
+        n = 0
+        for ch in str(jid or ""):
+            n = (n * 33 + ord(ch)) & 0xFFFFFFFF
+        host = u.hostname or ""
+        auth = ""
+        if u.username is not None:
+            auth = u.username + (":" + u.password if u.password is not None else "") + "@"
+        return urlunparse((u.scheme, f"{auth}{host}:{10001 + (n % 10)}", "", "", "", ""))
+    except Exception:
+        return PROXY
+
+def ytdlp(args, timeout, proxy=""):
     base = ["yt-dlp", "--no-playlist", "--no-progress", "--retries", "3"]
-    if PROXY: base += ["--proxy", PROXY]
+    if proxy: base += ["--proxy", proxy]
     if COOKIES and os.path.exists(COOKIES): base += ["--cookies", COOKIES]
     return subprocess.run(base + args, capture_output=True, text=True, timeout=timeout)
 
@@ -35,12 +56,17 @@ def work():
         jid, url = q.get()
         j = jobs[jid]; j["status"] = "running"
         try:
-            meta = ytdlp(["-J", url], 60)
+            def run(args, timeout, proxy=""):
+                r = ytdlp(args, timeout, proxy)
+                if r.returncode and not proxy and PROXY and is_block((r.stderr or "") + (r.stdout or "")):
+                    r = ytdlp(args, timeout, proxy_for(jid))
+                return r
+            meta = run(["-J", url], 60)
             if meta.returncode: raise RuntimeError(meta.stderr.strip().splitlines()[-1][:300] if meta.stderr.strip() else "metadata failed")
             dur = json.loads(meta.stdout).get("duration") or 0
             if dur and dur > MAX_SEC: raise RuntimeError(f"video is {dur//60} min; limit is {MAX_SEC//60}")
             out = os.path.join(DIR, jid + ".mp4")
-            r = ytdlp(["-f", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/b",
+            r = run(["-f", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/b",
                        "--merge-output-format", "mp4", "-o", out, url], 900)
             if r.returncode or not os.path.exists(out):
                 raise RuntimeError(r.stderr.strip().splitlines()[-1][:300] if r.stderr.strip() else "download failed")

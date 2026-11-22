@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import ./scripts/register-ext.mjs --test scripts/test-download.mjs scripts/test-pro-edit.mjs scripts/test-raffle.mjs scripts/test-geo.mjs scripts/test-spin.mjs scripts/test-codes.mjs scripts/test-bftrial.mjs scripts/test-pipeline.mjs"
+    "test": "node --import ./scripts/register-ext.mjs --test scripts/test-download.mjs scripts/test-pro-edit.mjs scripts/test-raffle.mjs scripts/test-geo.mjs scripts/test-spin.mjs scripts/test-codes.mjs scripts/test-bftrial.mjs scripts/test-pipeline.mjs scripts/test-ytproxy.mjs"
   },
   "dependencies": {
     "@types/node": "^20.0.0",
@@ -25,6 +25,7 @@
     "stripe": "^16.0.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.0.0",
+    "undici": "^6.29.1",
     "yt-dlp-wrap": "^2.3.12"
   }
 }

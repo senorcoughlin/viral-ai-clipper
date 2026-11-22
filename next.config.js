@@ -11,10 +11,10 @@ const nextConfig = {
   },
   experimental: {
     // Ship the ffmpeg binary with the generate function (used for local prep of downloads).
-    serverComponentsExternalPackages: ['ffmpeg-static'],
+    serverComponentsExternalPackages: ['ffmpeg-static', 'undici', 'yt-dlp-wrap'],
     outputFileTracingIncludes: {
-      '/api/generate': ['./node_modules/ffmpeg-static/ffmpeg'],
-      '/api/generate/route': ['./node_modules/ffmpeg-static/ffmpeg'],
+      '/api/generate': ['./node_modules/ffmpeg-static/ffmpeg', './bin/yt-dlp'],
+      '/api/generate/route': ['./node_modules/ffmpeg-static/ffmpeg', './bin/yt-dlp'],
       '/api/duration': ['./node_modules/ffmpeg-static/ffmpeg'],
       '/api/duration/route': ['./node_modules/ffmpeg-static/ffmpeg'],
     },
