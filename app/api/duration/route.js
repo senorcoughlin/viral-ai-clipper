@@ -10,7 +10,7 @@ import { probeRemoteDuration, localFfmpegAvailable } from '../../../lib/localpre
 import { toRenderUrl } from '../../../lib/media';
 import { youtubeIdOf } from '../../../lib/links';
 import { parseStreamUrl } from '../../../lib/stream';
-import { FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../../../lib/pipeline';
+import { FREE_PROCESS_SEC, ytPaidWindowSec } from '../../../lib/pipeline';
 
 // Best-effort source length (seconds) so the generate screen can offer "Use whole video".
 // Returns { secs: 0 } when it can't tell; the generate route re-checks on the server.
@@ -20,7 +20,7 @@ export async function GET(request) {
   // ?limits=1 -> the length caps, so the form can show them before anything is pasted. CDN-cached.
   if (sp.get('limits')) {
     const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
-    return NextResponse.json({ maxSecs: Math.max(srcMax, FREE_PROCESS_SEC), ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, hardMaxSecs: ytSourceMaxSec(), liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+    return NextResponse.json({ maxSecs: Math.max(srcMax, FREE_PROCESS_SEC), ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: ytPaidWindowSec(ytSourceMaxSec()), hardMaxSecs: ytSourceMaxSec(), liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
   }
   const limited = await routeGuard(request, 'duration', 60, 600);
   if (limited) return limited;
@@ -44,5 +44,5 @@ export async function GET(request) {
     }
     else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(await toRenderUrl(url, 10 * 60), null, null, 10000);
   } catch {}
-  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, hardMaxSecs: id ? ytSourceMaxSec() : 0, liveClipable: !!live }, { headers: h });
+  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: ytPaidWindowSec(ytSourceMaxSec()), hardMaxSecs: id ? ytSourceMaxSec() : 0, liveClipable: !!live }, { headers: h });
 }

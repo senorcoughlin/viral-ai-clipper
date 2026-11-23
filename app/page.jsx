@@ -20,7 +20,7 @@ import RaffleBanner from '../components/RaffleBanner';
 import RedeemCode from '../components/RedeemCode';
 import BfOfferCard from '../components/BfOfferCard';
 import { offerPublic, BF_PLAN } from '../lib/bftrial';
-import { fmtLen, issueFromLinkMeta, isBlockingIssue, classifyGenError, FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../lib/pipeline';
+import { fmtLen, issueFromLinkMeta, isBlockingIssue, classifyGenError, FREE_PROCESS_SEC, ytPaidWindowSec } from '../lib/pipeline';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
@@ -213,7 +213,7 @@ function HomeInner({ studio = false }) {
   const [limits, setLimits] = useState(null);
   useEffect(() => { fetch('/api/duration?limits=1').then(r => r.json()).then(j => { if (j?.maxSecs) setLimits(j); }).catch(() => {}); }, []);
   // Problems we can spot before a run is wasted: live/upcoming YouTube streams and over-length videos.
-  const ytCap = (isPro || credits > 0) ? (linkSecs.ytMaxSecsPaid || limits?.ytMaxSecsPaid || PAID_PROCESS_SEC) : (linkSecs.ytMaxSecs || limits?.ytMaxSecs || FREE_PROCESS_SEC);
+  const ytCap = (isPro || credits > 0) ? (linkSecs.ytMaxSecsPaid || limits?.ytMaxSecsPaid || ytPaidWindowSec(linkSecs.hardMaxSecs || limits?.hardMaxSecs)) : (linkSecs.ytMaxSecs || limits?.ytMaxSecs || FREE_PROCESS_SEC);
   const linkIssue = issueFromLinkMeta({ ...linkSecs, maxSecs: linkSecs.live ? 0 : ytCap }, videoUrl.trim());
   const blockIssue = isBlockingIssue(linkIssue);
   const ytLive = !!(linkSecs.url === videoUrl.trim() && linkSecs.live);
@@ -527,7 +527,7 @@ function HomeInner({ studio = false }) {
           }
         } catch {}
       }
-      const cap = (isPro || credits > 0) ? (meta?.ytMaxSecsPaid || PAID_PROCESS_SEC) : (meta?.ytMaxSecs || FREE_PROCESS_SEC);
+      const cap = (isPro || credits > 0) ? (meta?.ytMaxSecsPaid || ytPaidWindowSec(meta?.hardMaxSecs || limits?.hardMaxSecs)) : (meta?.ytMaxSecs || FREE_PROCESS_SEC);
       const issue = issueFromLinkMeta({ ...meta, maxSecs: meta?.live ? 0 : cap }, runUrl.trim());
       if (isBlockingIssue(issue)) {
         ft('generate_blocked', { reason: issue.code || 'blocked' });

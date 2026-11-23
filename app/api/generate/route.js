@@ -23,7 +23,7 @@ import { parseScoreJson } from '../../../lib/scoreparse';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept for a single-file pull. Sliced YouTube runs use processWindowSec
-// (2 hours free / 4 hours paid) and process a bounded prefix instead of failing.
+// (2 hours free / up to the paid window, capped at the YouTube source limit, paid) and process a bounded prefix instead of failing.
 const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
 const YT_TOO_LONG = `YouTube videos longer than this can be clipped by highlight slices or by uploading the MP4. This run was not counted.`;
 const SRC_KEY = (id) => `ysrc2:${id}`; // v2: higher-res sources (old keys point at 480p files)
@@ -1359,7 +1359,7 @@ export async function POST(request) {
           ? sub
           : localTranscript(ctx.localAudio || ctx.local, ctx.dir, process.env.GROQ_API_KEY ? transcribeBuffer : async () => EMPTY_TRANSCRIPT, {
               maxSec: Number(process.env.GROQ_RUN_MAX_SEC || 2400), reserve: reserveAudioSec, release: releaseAudioSec, fallback: geminiTranscribe,
-            })).catch((e) => { console.warn('local transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
+            })).catch((e) => { if (e?.code === 'no_audio') console.info('local transcript skipped: source has no audio track'); else console.warn('local transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       } else if (!cachedTr && ctx.srcP && process.env.GROQ_API_KEY) {
         audioP = ctx.srcP.then(src => audioTranscript(src.url, 120000, src.direct)).catch((e) => { console.warn('audio transcript failed', e?.message); return EMPTY_TRANSCRIPT; });
       }

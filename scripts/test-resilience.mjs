@@ -164,3 +164,41 @@ test('proxied yt-dlp for other sites is size-capped', () => {
   assert.equal(args[i + 1], '150M');
   assert.equal(buildYtDlpArgs({ outFile: '/tmp/x.mp4', videoUrl: 'https://youtu.be/a' }).includes('--max-filesize'), false);
 });
+
+test('paid YouTube window never promises more than the downloader cap', async () => {
+  const { ytPaidWindowSec, PAID_PROCESS_SEC } = await import('../lib/pipeline.js');
+  assert.equal(ytPaidWindowSec(ytSourceMaxSec()), Math.min(PAID_PROCESS_SEC, 10800));
+  assert.equal(ytPaidWindowSec(10800), 10800, 'default: 3 hours, not 4');
+  assert.equal(ytPaidWindowSec(0), 10800, 'unknown cap falls back to 3 hours');
+  assert.equal(ytPaidWindowSec(360 * 60), PAID_PROCESS_SEC, 'extended cap allows the full paid window');
+});
+
+test('video-only live windows: transcript skips cleanly, segments get a silent audio track', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const exec = promisify(execFile);
+  const { hasAudioStream, extractWholeAudio, segmentArgs } = await import('../lib/localprep.js');
+  const { default: ffmpegStatic } = await import('ffmpeg-static');
+  const ffmpegBin = () => ffmpegStatic;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'noaud-'));
+  const src = path.join(dir, 'window.mp4');
+  await exec(ffmpegBin(), ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-t', '6', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '25', '-pix_fmt', 'yuv420p', src]);
+  assert.equal(await hasAudioStream(src), false);
+  await assert.rejects(() => extractWholeAudio(src, path.join(dir, 'audio-full')), (e) => e.code === 'no_audio');
+  for (const reencode of [false, true]) {
+    const out = path.join(dir, `seg_${reencode}.mp4`);
+    await exec(ffmpegBin(), segmentArgs(src, out, 1, '3.5', { silent: true, reencode }));
+    const probe = await exec(ffmpegBin(), ['-hide_banner', '-i', out]).catch(e => e);
+    assert.match(String(probe.stderr), /Audio: aac/, `silent track added (reencode=${reencode})`);
+    const m = String(probe.stderr).match(/Duration: (\d+):(\d+):([\d.]+)/);
+    const secs = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+    assert.ok(secs > 2.5 && secs < 4.6, `segment length bounded (${secs})`);
+  }
+  // Sources with audio keep the plain stream-copy path.
+  const withAud = path.join(dir, 'aud.mp4');
+  await exec(ffmpegBin(), ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '3', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', withAud]);
+  assert.equal(await hasAudioStream(withAud), true);
+  assert.ok(segmentArgs(withAud, 'o.mp4', 0, '2', {}).includes('0:a:0?'));
+  assert.ok(!segmentArgs(withAud, 'o.mp4', 0, '2', {}).includes('anullsrc=r=48000:cl=stereo'));
+  await fs.rm(dir, { recursive: true, force: true });
+});
