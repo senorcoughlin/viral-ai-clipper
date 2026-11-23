@@ -1173,8 +1173,8 @@ function HomeInner({ studio = false }) {
             <AccountBar onChange={() => refreshBilling()} />
           </nav>
           <div className="flex shrink-0 items-center gap-2">
-            {!isPro && <span className="text-xs text-muted">{freeLeft}/{FREE_DAILY_LIMIT} free</span>}
-            <button onClick={() => { if (offer?.active) ft('bf_nav_click', { surface: 'studio' }); setShowPricing(true); }} className="btn-lime h-9 px-3 text-xs">{isPro ? 'Manage' : (offer?.active ? '50% off Pro' : 'Go Pro')}</button>
+            {!isPro && <span className="hidden text-xs text-muted sm:inline">{freeLeft}/{FREE_DAILY_LIMIT} free</span>}
+            <button onClick={() => { if (offer?.active) ft('bf_nav_click', { surface: 'studio' }); setShowPricing(true); }} className="btn-lime h-9 shrink-0 px-3 text-xs">{isPro ? 'Manage' : (offer?.active ? '50% off' : 'Go Pro')}</button>
           </div>
         </div>
       </header>
