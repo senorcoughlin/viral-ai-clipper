@@ -905,6 +905,15 @@ export async function POST(request) {
       };
       const close = () => { if (!open) return; open = false; try { controller.close(); } catch {} };
       enqueue({ type: 'job', id: jobId });
+      let finished = false;
+      let clipsSent = 0;
+      const send = (obj) => {
+        if (finished) return;
+        if (obj.type === 'done') finished = true;
+        if (obj.type === 'clip') clipsSent += 1;
+        writer?.push(obj);
+        enqueue(obj);
+      };
       let watchdog = null;
       let handedOff = false;
       // Resolved when the watchdog ends the run, so waitUntil stops waiting on stuck RenderIO
@@ -942,15 +951,6 @@ export async function POST(request) {
       };
       const hb = jobId ? setInterval(() => { touchJob(jobId); }, 10000) : null;
       const work = withMeter(meter, async () => {
-      let finished = false;
-      let clipsSent = 0;
-      const send = (obj) => {
-        if (finished) return;
-        if (obj.type === 'done') finished = true;
-        if (obj.type === 'clip') clipsSent += 1;
-        writer?.push(obj);
-        enqueue(obj);
-      };
       // Watchdog: if the run would outlive the function, end it cleanly (refund + clear message)
       // instead of being killed and showing up as a lost run.
       watchdog = setTimeout(async () => {
