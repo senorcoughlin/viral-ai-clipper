@@ -19,6 +19,8 @@ import { funnel } from '../lib/funnel';
 import RaffleBanner from '../components/RaffleBanner';
 import RedeemCode from '../components/RedeemCode';
 import BfOfferCard from '../components/BfOfferCard';
+import BfUpsell from '../components/BfUpsell';
+import BfCountdown from '../components/BfCountdown';
 import { offerPublic, BF_PLAN } from '../lib/bftrial';
 import { WHOLE_MAX_SEC, LIVE_MINUTES, UPLOAD_MAX_BYTES, UPLOAD_MAX_MB, SOURCE_MAX_SEC, FREE_WINDOW_SEC, LIMIT_COPY } from '../lib/limits';
 import { fmtLen, issueFromLinkMeta, isBlockingIssue, classifyGenError, FREE_PROCESS_SEC, ytPaidWindowSec } from '../lib/pipeline';
@@ -326,6 +328,12 @@ function HomeInner({ studio = false }) {
     return () => clearTimeout(id);
   }, [justFinished]);
 
+  useEffect(() => {
+    const open = () => { setShowPricing(true); };
+    window.addEventListener('vac:open-pricing', open);
+    return () => window.removeEventListener('vac:open-pricing', open);
+  }, []);
+
   // Pro and credits come only from the server, keyed by the signed session cookie.
   const refreshBilling = () => fetch('/api/billing', { cache: 'no-store' }).then(r => r.json()).then(d => {
     if (!d?.success) return;
@@ -485,7 +493,7 @@ function HomeInner({ studio = false }) {
         if (!saved.isPro) refreshBilling();
       } catch (e) {
         setClips([...st.all]);
-        setError({ message: e?.message || 'Processing failed. Try again.', retry: true, upload: true });
+        setError({ message: e?.message || 'Processing failed. Try again.', retry: true, upload: true, code: e?.code });
       } finally {
         clearActiveJob();
         setIsProcessing(false);
@@ -796,7 +804,10 @@ function HomeInner({ studio = false }) {
                 <span className="font-semibold text-white">You&apos;ll get: </span>{planSummary}
               </p>
               {linkIssue ? (
-                <p role="alert" data-testid="link-issue" className="rounded-input border border-[#FFB64D]/50 bg-[#FFB64D]/10 px-3 py-2 text-[13px] leading-snug text-[#FFD9A0]">{linkIssue.message}</p>
+                <div className="flex flex-col gap-2">
+                  <p role="alert" data-testid="link-issue" className="rounded-input border border-[#FFB64D]/50 bg-[#FFB64D]/10 px-3 py-2 text-[13px] leading-snug text-[#FFD9A0]">{linkIssue.message}</p>
+                  {linkIssue.warning && <BfUpsell offer={offer} isPro={isPro} context="windowed" onCta={() => { ft('bf_window_upsell'); setShowPricing(true); }} compact />}
+                </div>
               ) : (
                 <p id="source-guide" className="px-1 text-xs leading-relaxed text-muted">
                   Works with YouTube, Twitch &amp; Kick, live streams, and MP4 links or uploads · Videos up to {fmtLen(limits?.hardMaxSecs || SOURCE_MAX_SEC)}{(isPro || credits > 0) ? '' : ` (free runs clip from the first ${fmtLen(limits?.ytMaxSecs || FREE_WINDOW_SEC)})`} · You can leave the page while clips generate
@@ -913,15 +924,18 @@ function HomeInner({ studio = false }) {
                   </span>
                   <span className="text-soft"><b className="text-white">{credits}</b> credit{credits === 1 ? '' : 's'}</span>
                   <span className="text-soft">Total: <b className="text-lime">{freeLeft + credits}</b></span>
-                  <button type="button" onClick={() => setShowPricing(true)} className="ml-auto text-xs font-semibold text-lime">Get more →</button>
+                  <button type="button" onClick={() => { if (offer?.active) ft('bf_remaining_click'); setShowPricing(true); }} className="ml-auto text-xs font-semibold text-lime">{offer?.active ? 'Black Friday: 50% off →' : 'Get more →'}</button>
                 </>
               )}
             </div>
  {error && !error.retry && !error.upload && (
+              <div className="flex flex-col gap-2">
               <div role="alert" className="flex items-start gap-3 rounded-card border border-[#FF4D6D]/60 bg-[#FF4D6D]/10 p-4 text-sm animate-fadeup">
                 <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#FF4D6D] text-xs font-bold text-ink">!</span>
                 <p className="flex-1 leading-relaxed text-fg">{error.message}</p>
                 <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 text-muted hover:text-fg">✕</button>
+              </div>
+              {offer?.active && !isPro && <BfUpsell offer={offer} isPro={isPro} context="limit" onCta={() => setShowPricing(true)} />}
               </div>
             )}
 
@@ -971,6 +985,9 @@ function HomeInner({ studio = false }) {
                 <button type="button" onClick={() => { if (lastRunRef.current) { setError(null); setJustFinished(false); handleClipping(null, lastRunRef.current); } }} className="btn-ghost h-9 px-4 text-sm">Retry link</button>
                 <button type="button" onClick={() => setError(null)} className="btn-ghost h-9 px-4 text-sm">Dismiss</button>
               </div>
+              {offer?.active && !isPro && (error.code === 'daily_limit' || /free generations|upgrade to Pro or buy credits/i.test(error.message || '')) && (
+                <BfUpsell offer={offer} isPro={isPro} context="limit" onCta={() => setShowPricing(true)} />
+              )}
             </div>
           )}
 
@@ -996,6 +1013,7 @@ function HomeInner({ studio = false }) {
           {clips.length > 0 && (
             <>
               {justFinished && !isProcessing && (
+                <div className="flex flex-col gap-3">
                 <div className="relative flex items-center gap-4 overflow-hidden rounded-card border border-lime bg-lime-tint p-4 animate-fadeup">
                   <div aria-hidden className="pointer-events-none absolute inset-0">
                     {['12%', '28%', '44%', '60%', '76%', '90%'].map((l, i) => (
@@ -1007,6 +1025,8 @@ function HomeInner({ studio = false }) {
                     <p className="font-display text-lg font-extrabold text-white">{clips.length} {clips.length === 1 ? 'clip' : 'clips'} ready</p>
                     <p className="text-sm text-soft">Top score <span className="font-mono text-lime">{topScore}</span> — sorted best first.</p>
                   </div>
+                </div>
+                {!lastWasExample && <BfUpsell offer={offer} isPro={isPro} context="after_clips" onCta={() => setShowPricing(true)} />}
                 </div>
               )}
               {lastWasExample && !isProcessing && (
@@ -1154,7 +1174,7 @@ function HomeInner({ studio = false }) {
           </nav>
           <div className="flex shrink-0 items-center gap-2">
             {!isPro && <span className="text-xs text-muted">{freeLeft}/{FREE_DAILY_LIMIT} free</span>}
-            <button onClick={() => setShowPricing(true)} className="btn-lime h-9 px-3 text-xs">{isPro ? 'Manage' : (offer?.active ? 'Black Friday deal' : 'Go Pro')}</button>
+            <button onClick={() => { if (offer?.active) ft('bf_nav_click', { surface: 'studio' }); setShowPricing(true); }} className="btn-lime h-9 px-3 text-xs">{isPro ? 'Manage' : (offer?.active ? '50% off Pro' : 'Go Pro')}</button>
           </div>
         </div>
       </header>
@@ -1165,6 +1185,7 @@ function HomeInner({ studio = false }) {
             <button type="button" onClick={runExample} disabled={isProcessing} className="text-sm font-semibold text-lime disabled:opacity-50">▶ Try an example</button>
           </div>
           {formBlock}
+          {!(justFinished && clips.length > 0) && <BfUpsell offer={offer} isPro={isPro} context="studio" onCta={() => setShowPricing(true)} compact />}
         </aside>
         <section id="clips" className="flex min-w-0 flex-col gap-6">
           <MonetizePanel clips={clips} onRestoreClips={(cs) => { if (!isProcessing) setClips(cs); }} />
@@ -1209,8 +1230,14 @@ function HomeInner({ studio = false }) {
                 <Bolt size={12} fill="#C6FF3D" />PRO
               </span>
             )}
-            <button onClick={() => setShowPricing(true)} className="btn-lime h-10 px-4 text-sm">
-              {isPro ? 'Manage' : (offer?.active ? 'Black Friday deal' : 'Upgrade to Pro')}{!isPro && <Arrow />}
+            {!isPro && offer?.active && (
+              <span className="hidden items-center gap-1.5 sm:inline-flex">
+                <span className="inline-flex h-6 items-center rounded-full bg-lime px-2 text-[10px] font-bold tracking-wide text-ink">50% OFF</span>
+                <BfCountdown compact className="hidden text-[11px] font-semibold text-lime lg:inline" />
+              </span>
+            )}
+            <button onClick={() => { if (offer?.active) ft('bf_nav_click', { surface: 'header' }); setShowPricing(true); }} className="btn-lime h-10 px-3 text-sm sm:px-4">
+              {isPro ? 'Manage' : (offer?.active ? '50% off Pro' : 'Upgrade to Pro')}{!isPro && <Arrow />}
             </button>
           </div>
         </div>
@@ -1221,10 +1248,17 @@ function HomeInner({ studio = false }) {
         {/* HERO */}
         <section className="grid grid-cols-1 items-center gap-8 pb-20 pt-4 sm:pt-8 md:grid-cols-[1.1fr_.9fr]">
           <div className="flex min-w-0 flex-col gap-4">
-            <div className="hidden h-8 items-center gap-2 self-start rounded-full border border-line2 bg-surface pl-1.5 sm:inline-flex pr-3 text-[13px] font-medium text-soft">
-              <span className="inline-flex h-[22px] items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">NEW</span>
-              Batch mode · paste up to 10 links at once
-            </div>
+            {offer?.active && !isPro ? (
+              <button type="button" onClick={() => { ft('bf_hero_click'); setShowPricing(true); }} className="inline-flex max-w-full items-center gap-2 self-start rounded-full border border-lime bg-lime-tint py-1 pl-1.5 pr-3 text-left text-[12px] font-semibold text-white sm:h-8 sm:text-[13px]">
+                <span className="inline-flex h-[22px] shrink-0 items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">50% OFF</span>
+                <span className="min-w-0 truncate">Black Friday: $9.99/mo or $99.99/yr · <BfCountdown compact /></span>
+              </button>
+            ) : (
+              <div className="hidden h-8 items-center gap-2 self-start rounded-full border border-line2 bg-surface pl-1.5 sm:inline-flex pr-3 text-[13px] font-medium text-soft">
+                <span className="inline-flex h-[22px] items-center rounded-full bg-lime px-2 text-[11px] font-bold tracking-wide text-ink">NEW</span>
+                Batch mode · paste up to 10 links at once
+              </div>
+            )}
             <h1 className="font-display text-[26px] font-extrabold leading-[1.08] tracking-tight text-white sm:text-[40px] md:text-[52px]">
               Paste a video link. Get <span className="text-lime">up to 8 viral clips</span>.
             </h1>
@@ -1381,9 +1415,12 @@ function HomeInner({ studio = false }) {
         {/* PRICING */}
         <section id="pricing" className="flex flex-col items-center gap-9 pb-28">
           <div className="flex max-w-[640px] flex-col items-center gap-3 text-center">
-            <span className="eyebrow">{offer?.active ? 'Black Friday deal — ends Jan 1' : 'Pricing'}</span>
-            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} free generations a day. 200 a day on Pro. No per-minute charges.</h2>
-            <p className="text-sm text-soft">1 generation = 1 video link, making up to 8 clips. A batch of 3 links uses 3 generations. Failed runs are not counted.</p>
+            <span className="eyebrow">{offer?.active ? 'Black Friday deal — 50% off' : 'Pricing'}</span>
+            <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{offer?.active && !isPro ? 'Pro is 50% off through Jan 1.' : `${FREE_DAILY_LIMIT} free generations a day. 200 a day on Pro. No per-minute charges.`}</h2>
+            <p className="text-sm text-soft">{offer?.active && !isPro ? 'Yearly Pro is $99.99 (regularly $199.99) — save $100, about $8.33/mo. Or $9.99/mo with a 7-day free trial. 200 generations a day, no watermark.' : '1 generation = 1 video link, making up to 8 clips. A batch of 3 links uses 3 generations. Failed runs are not counted.'}</p>
+            {offer?.active && !isPro && (
+              <p className="text-sm font-semibold text-lime"><BfCountdown /> · real deadline, Jan 1, 2027</p>
+            )}
             <div className="mt-2 inline-flex rounded-full border border-line2 bg-surface p-1">
               <button type="button" onClick={() => setBilling('monthly')} className={`chip h-[34px] border-0 ${billing === 'monthly' ? 'chip-on' : ''}`}>Monthly</button>
               <button type="button" onClick={() => setBilling('yearly')} className={`chip h-[34px] border-0 ${billing === 'yearly' ? 'chip-on' : ''}`}>
@@ -1406,7 +1443,7 @@ function HomeInner({ studio = false }) {
               <a href="#top" className="btn-ghost mt-auto h-12 no-underline">Start free</a>
             </article>
             <article className="card relative flex min-w-0 flex-col gap-5 border-lime p-6 sm:p-8 shadow-pro">
-              <span className="absolute -top-3.5 left-8 inline-flex h-7 items-center gap-1.5 rounded-full bg-lime px-3 text-xs font-bold tracking-wide text-ink"><Bolt size={14} />MOST POPULAR</span>
+              <span className="absolute -top-3.5 left-8 inline-flex h-7 items-center gap-1.5 rounded-full bg-lime px-3 text-xs font-bold tracking-wide text-ink"><Bolt size={14} />{offer?.active ? '50% OFF · BEST VALUE' : 'MOST POPULAR'}</span>
               <div className="flex flex-col gap-1.5">
                 <span className="font-display text-xl font-extrabold text-lime">Pro</span>
                 <span className="text-sm text-muted">For creators posting daily.</span>
@@ -1426,6 +1463,7 @@ function HomeInner({ studio = false }) {
                     <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]" suppressHydrationWarning>{price.amount}</span>
                     <span className="text-sm text-muted" suppressHydrationWarning>{price.per}</span>
                     {offer?.active && price.regular && <span className="w-full text-xs text-muted line-through">normally {price.regular}{billing === 'yearly' ? '/yr' : '/mo'}</span>}
+                    {offer?.active && billing === 'yearly' && <span className="w-full text-sm font-bold text-lime">50% off · save $100/year</span>}
                   </>
                 )}
               </div>
@@ -1509,8 +1547,8 @@ function HomeInner({ studio = false }) {
               <Bolt /> Make clips free
             </button>
           ) : (
-            <button type="button" onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
-              {offer?.active ? 'Black Friday: $9.99/mo or $99.99/yr' : 'Upgrade to Pro'}
+            <button type="button" onClick={() => { if (offer?.active) ft('bf_sticky_click'); setShowPricing(true); }} className="btn-lime h-11 w-full text-sm">
+              {offer?.active ? 'Black Friday: 50% off Pro' : 'Upgrade to Pro'}
             </button>
           )}
         </div>

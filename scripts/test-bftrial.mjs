@@ -13,7 +13,7 @@ process.env.STRIPE_SECRET_KEY = 'sk_test_dummy';
 
 const {
   offerActive, offerPublic, resolveOfferCheckout, trialEndMs, BF_OFFER_END_MS,
-  BF_PLAN, BF_YEARLY_PLAN, BF_TRIAL_DAYS, etDate, subGrantsPro, subRevokesPro, proPriceCopy,
+  BF_PLAN, BF_YEARLY_PLAN, BF_TRIAL_DAYS, etDate, subGrantsPro, subRevokesPro, proPriceCopy, offerCountdown,
 } = await import('../lib/bftrial.js');
 const { getEntitlement, setPro, markBfTrial, hasUsedBfTrial, listDueBfReminders, markBfReminded } = await import('../lib/billing.js');
 const { signSession } = await import('../lib/session.js');
@@ -84,7 +84,24 @@ test('offer is active through the end of Jan 1, 2027 America/New_York and not af
   assert.equal(pub.regularPrice, '$19.99');
   assert.equal(pub.regularYearlyPrice, '$199.99');
   assert.equal(pub.endsLabel, 'Jan 1, 2027');
+  assert.equal(pub.percentOff, 50);
+  assert.equal(pub.yearlySaveAmount, '$100');
   assert.match(pub.headline, /Black Friday deal — ends Jan 1/);
+  const mid = offerCountdown(DURING);
+  assert.equal(mid.ended, false);
+  assert.ok(mid.days >= 39, mid);
+  assert.match(mid.text, /Ends in \d+d \d+h/);
+  const last = offerCountdown(LAST_MINUTE);
+  assert.equal(last.ended, false);
+  assert.equal(last.days, 0);
+  assert.equal(last.hours, 0);
+  assert.equal(last.minutes, 0);
+  assert.match(last.text, /Ends in \d+m \d+s/);
+  const over = offerCountdown(AFTER);
+  assert.equal(over.ended, true);
+  assert.equal(over.totalMs, 0);
+  assert.equal(over.text, 'Deal ended');
+  assert.equal(offerCountdown(BF_OFFER_END_MS).ended, true);
   assert.match(pub.body, /Black Friday deal — ends Jan 1/);
   assert.match(pub.body, /\$9\.99\/mo or \$99\.99\/yr/);
   assert.match(pub.disclosure, /won’t be charged today/i);
