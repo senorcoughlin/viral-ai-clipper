@@ -4,7 +4,7 @@ import { handleUpload } from '@vercel/blob/client';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
 import { routeGuard } from '../../../lib/ratelimit';
 
-const MAX_BYTES = 500 * 1024 * 1024;
+import { UPLOAD_MAX_BYTES as MAX_BYTES } from '../../../lib/limits';
 
 // Issues short-lived client-upload tokens so browsers upload MP4s straight to Vercel Blob.
 export async function POST(request) {

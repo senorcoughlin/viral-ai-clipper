@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { LIMIT_COPY } from '../../lib/limits';
 
 export const metadata = {
   title: 'Tutorial · Viral AI Clipper',
@@ -15,7 +16,7 @@ const JOURNEY = [
 ];
 
 const STEPS = [
-  { n: '01', title: 'Paste a YouTube link', desc: 'Copy any public YouTube URL and paste it in the box on the home page. It works with long videos, Shorts, and interviews.' },
+  { n: '01', title: 'Paste a YouTube link', desc: `Copy any public YouTube URL and paste it in the box on the home page. It works with long videos (up to ${LIMIT_COPY.max}), Shorts, and interviews.` },
   { n: '02', title: 'Pick length and how many clips', desc: 'Choose 15, 30, or 60 seconds. Then pick 1 clip if you want it fast, or up to 8 if you want more options.' },
   { n: '03', title: 'Hit Clip and wait for the first one', desc: 'The AI finds the best moments, cuts them, and burns a caption. The first clip appears as soon as it is ready. You do not have to wait for all of them.' },
   { n: '04', title: 'Download and post', desc: 'Download the clip and post it yourself. For YouTube Shorts, TikTok, Reels or X, download the clip and the button opens the app with your caption copied. Create a free account so your clips stay saved.' },

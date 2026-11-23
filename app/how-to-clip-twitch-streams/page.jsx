@@ -1,5 +1,6 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
 import { proPriceCopy } from '../../lib/bftrial';
+import { LIMIT_COPY } from '../../lib/limits';
 
 export const revalidate = 300;
 const p = proPriceCopy();
@@ -63,6 +64,10 @@ const sections = [
  ]
 ];
 const faqs = [
+ [
+  "How long can the stream be?",
+  `Twitch and Kick replays can be up to ${LIMIT_COPY.freeWindow} on free runs and ${LIMIT_COPY.max} on Pro or credit runs. While a channel is live we clip the last ${LIMIT_COPY.live}. For a longer VOD, download the part you want and upload it (${LIMIT_COPY.upload}).`
+ ],
  [
   "Can I paste a Twitch link directly?",
   "YouTube links are the supported and most reliable path. For Twitch footage, export the VOD to YouTube or download it and upload the MP4."

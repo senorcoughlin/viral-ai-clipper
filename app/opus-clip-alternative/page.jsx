@@ -1,5 +1,6 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
 import { proPriceCopy } from '../../lib/bftrial';
+import { LIMIT_COPY } from '../../lib/limits';
 
 export const revalidate = 300;
 const p = proPriceCopy();
@@ -18,7 +19,7 @@ const sections = [
   "Where Viral AI Clipper is different",
   [
    [
-    "Pricing by generation, not by minutes. Many clipping tools meter usage by minutes of source video. Viral AI Clipper counts generations: one video in, up to 8 clips out, whether the video is 10 minutes or 2 hours.",
+    `Pricing by generation, not by minutes. Many clipping tools meter usage by minutes of source video. Viral AI Clipper counts generations: one video in, up to 8 clips out, whether the video is 10 minutes or ${LIMIT_COPY.max} (the maximum).`,
     "Honest scores. Our goal is a score you can act on. Weak clips get low scores with the reasons shown, instead of every clip landing at 90+.",
     "A real free tier. 3 generations a day free, no card required. Free clips carry a small, faint watermark.",
     `Simple Pro pricing. ${p.deal}, plus optional credit packs from $9 if you only need extra generations now and then.`,

@@ -23,9 +23,7 @@ import { parseScoreJson } from '../../../lib/scoreparse';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept for a single-file pull. Sliced YouTube runs use processWindowSec
-// (2 hours free / up to the paid window, capped at the YouTube source limit, paid) and process a bounded prefix instead of failing.
-const YT_MAX_SECONDS = Number(process.env.YT_MAX_MINUTES || 60) * 60;
-const YT_TOO_LONG = `YouTube videos longer than this can be clipped by highlight slices or by uploading the MP4. This run was not counted.`;
+// (see lib/limits.js: first 2 hours free, full 3 hours paid) and process a bounded prefix instead of failing.
 const SRC_KEY = (id) => `ysrc2:${id}`; // v2: higher-res sources (old keys point at 480p files)
 const LONG_SEC = 40 * 60; // use 360p for long YouTube sources (smaller, faster to pull)
 // Source resolution for YouTube downloads. A 9:16 crop of a 16:9 frame only keeps ~56% of the
@@ -43,9 +41,7 @@ const YT_MAX_SOURCE_BYTES = Number(process.env.YT_MAX_SOURCE_MB || 250) * 1e6; /
 const YT_MAX_FILE_BYTES = Number(process.env.YT_MAX_FILE_MB || 420) * 1e6; // /tmp is 512 MB; leave room for audio + cuts
 const HANDOFF_AFTER_MS = Number(process.env.HANDOFF_AFTER_MS || 110000);
 const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 270000); // stop cleanly before the 300s function limit
-const WHOLE_MAX_SEC = 120;
 const WHOLE_TOO_LONG = (s) => `"Use whole video" works for videos up to 2 minutes, and this one is ${s >= 120 ? Math.round(s / 60) + ' minutes' : Math.round(s) + ' seconds'} long. Turn it off to get AI-picked clips instead. This run was not counted.`;
-const MAX_SOURCE_SECONDS = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
 
 import { youtubeDuration } from '../../../lib/ytduration';
 import { validateVideoUrl } from '../../../lib/validate';
@@ -67,12 +63,11 @@ import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stre
 import { resolveYoutubeLive, captureLiveWindow } from '../../../lib/ytlive';
 import { proxyAllowed, downloadViaProxyFallback, redactProxy, isProxyBudgetError } from '../../../lib/ytproxy';
 import { processWindowSec, sliceCapFor, uploadFallbackMessage, ytTooLongMessage } from '../../../lib/pipeline';
+import { WHOLE_MAX_SEC, STREAM_MAX_SEC, LIVE_MINUTES } from '../../../lib/limits';
 
 // Stream sources (Twitch/Kick) are transcribed in chunks so multi-hour VODs fit the
 // 25 MB Whisper limit and the 300s function budget. Chunks run in parallel.
 const STREAM_CHUNK_SEC = Number(process.env.STREAM_CHUNK_MINUTES || 60) * 60;
-const STREAM_MAX_SEC = { free: Number(process.env.STREAM_MAX_MINUTES_FREE || 120) * 60, paid: Number(process.env.STREAM_MAX_MINUTES_PAID || 240) * 60 };
-const LIVE_MINUTES = [5, 10, 15];
 const fmtDur = (s) => { const h = Math.floor(s / 3600); const m = Math.round((s % 3600) / 60); return h ? `${h}h ${m}m` : `${m} min`; };
 
 // Audio for [start, start+len] of an HLS/MP4 source -> Whisper, with timestamps shifted to source time.

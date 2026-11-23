@@ -11,6 +11,7 @@ import { toRenderUrl } from '../../../lib/media';
 import { youtubeIdOf } from '../../../lib/links';
 import { parseStreamUrl } from '../../../lib/stream';
 import { FREE_PROCESS_SEC, ytPaidWindowSec } from '../../../lib/pipeline';
+import { SOURCE_MAX_SEC } from '../../../lib/limits';
 
 // Best-effort source length (seconds) so the generate screen can offer "Use whole video".
 // Returns { secs: 0 } when it can't tell; the generate route re-checks on the server.
@@ -19,8 +20,7 @@ export async function GET(request) {
   const sp = new URL(request.url).searchParams;
   // ?limits=1 -> the length caps, so the form can show them before anything is pasted. CDN-cached.
   if (sp.get('limits')) {
-    const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
-    return NextResponse.json({ maxSecs: Math.max(srcMax, FREE_PROCESS_SEC), ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: ytPaidWindowSec(ytSourceMaxSec()), hardMaxSecs: ytSourceMaxSec(), liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+    return NextResponse.json({ maxSecs: SOURCE_MAX_SEC, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: ytPaidWindowSec(ytSourceMaxSec()), hardMaxSecs: SOURCE_MAX_SEC, liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
   }
   const limited = await routeGuard(request, 'duration', 60, 600);
   if (limited) return limited;
@@ -33,8 +33,8 @@ export async function GET(request) {
   let upcoming = false;
   const id = youtubeIdOf(url);
   // Same caps the generate route enforces, so the form can warn before a run is wasted.
-  const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
-  const maxSecs = id ? FREE_PROCESS_SEC : srcMax;
+  // YouTube is windowed (free: first 2 hours); every source is capped at 3 hours (lib/limits.js).
+  const maxSecs = id ? FREE_PROCESS_SEC : 0;
   try {
     if (id) {
       const got = await resolveYoutubeSecs(id, url);
@@ -44,5 +44,5 @@ export async function GET(request) {
     }
     else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(await toRenderUrl(url, 10 * 60), null, null, 10000);
   } catch {}
-  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: ytPaidWindowSec(ytSourceMaxSec()), hardMaxSecs: id ? ytSourceMaxSec() : 0, liveClipable: !!live }, { headers: h });
+  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: ytPaidWindowSec(ytSourceMaxSec()), hardMaxSecs: id ? ytSourceMaxSec() : SOURCE_MAX_SEC, yt: !!id, liveClipable: !!live }, { headers: h });
 }

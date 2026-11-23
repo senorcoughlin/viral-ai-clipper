@@ -1,5 +1,6 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
 import { proPriceCopy } from '../../lib/bftrial';
+import { LIMIT_COPY } from '../../lib/limits';
 
 export const revalidate = 300;
 const p = proPriceCopy();
@@ -45,7 +46,7 @@ const sections = [
   "When to upgrade",
   [
    `If you post every day or run a clipping channel, 3 generations a day goes quickly. ${p.sentence} and raises the daily limit, removes the watermark, unlocks every style and lets you batch up to 10 links. If you only clip now and then, credit packs start at $9 for 10 extra generations.`,
-   "There is no per-minute billing. A generation is one video in and a set of clips out, whether the source is 10 minutes or 2 hours."
+   `There is no per-minute billing. A generation is one video in and a set of clips out, whether the source is 10 minutes or ${LIMIT_COPY.max} (the maximum).`
   ]
  ]
 ];

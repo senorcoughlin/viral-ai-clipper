@@ -54,6 +54,7 @@ test('videos over the downloader length cap are blocked up front with a clear me
   assert.ok(isBlockingIssue(issue));
   assert.match(issue.message, /4h 10m long/);
   assert.match(issue.message, /up to 3 hours/);
+  assert.doesNotMatch(issue.message, /YouTube videos/);
   // Under the cap but over the processing window: still just a warning (first 2 hours).
   const warn = issueFromLinkMeta({ url: 'u', secs: 9000, hardMaxSecs: max, maxSecs: 7200 }, 'u');
   assert.equal(warn.code, 'windowed');
@@ -201,4 +202,43 @@ test('video-only live windows: transcript skips cleanly, segments get a silent a
   assert.ok(segmentArgs(withAud, 'o.mp4', 0, '2', {}).includes('0:a:0?'));
   assert.ok(!segmentArgs(withAud, 'o.mp4', 0, '2', {}).includes('anullsrc=r=48000:cl=stereo'));
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('length limits come from one config: 3 hours max, free from the first 2 hours', async () => {
+  const L = await import('../lib/limits.js');
+  const { FREE_PROCESS_SEC, PAID_PROCESS_SEC, issueFromLinkMeta: issue } = await import('../lib/pipeline.js');
+  assert.equal(L.SOURCE_MAX_SEC, 10800);
+  assert.equal(ytSourceMaxSec(), L.SOURCE_MAX_SEC);
+  assert.equal(PAID_PROCESS_SEC, 10800);
+  assert.equal(FREE_PROCESS_SEC, 7200);
+  assert.deepEqual(L.STREAM_MAX_SEC, { free: 7200, paid: 10800 });
+  assert.equal(L.UPLOAD_MAX_MB, 500);
+  assert.equal(L.LIMIT_COPY.max, '3 hours');
+  assert.match(L.LIMIT_COPY.faq, /Up to 3 hours/);
+  assert.match(L.LIMIT_COPY.faq, /first 2 hours/);
+  assert.match(L.LIMIT_COPY.upload, /500 MB and 3 hours/);
+  const w = issue({ url: 'u', secs: 9000, maxSecs: FREE_PROCESS_SEC, hardMaxSecs: 10800 }, 'u');
+  assert.match(w.message, /first 2 hours/);
+  assert.match(w.message, /up to 3 hours/);
+  // A non-YouTube link over 3 hours is blocked with the same wording.
+  assert.equal(issue({ url: 'u', secs: 11000, maxSecs: 0, hardMaxSecs: 10800 }, 'u').code, 'too_long');
+});
+
+test('no stale length promises left in site copy', async () => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const walk = async (d) => (await Promise.all((await readdir(d, { withFileTypes: true })).map(e => {
+    const p = path.join(d, e.name);
+    return e.isDirectory() ? walk(p) : /\.(jsx?|mjs)$/.test(e.name) ? [p] : [];
+  }))).flat();
+  const files = [...await walk(path.join(root, 'app')), ...await walk(path.join(root, 'components'))];
+  const stale = /\b(?:up to|limit is|first|handle up to)\s+(?:2|two|4|four)[ -]hours?\b|\b(?:120|240) minutes\b|4 hours paid|2 hours\)/i;
+  const hits = [];
+  for (const f of files) {
+    (await readFile(f, 'utf8')).split('\n').forEach((line, i) => {
+      if (/^\s*\/\//.test(line)) return;
+      if (stale.test(line)) hits.push(`${path.relative(root, f)}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(hits, []);
 });

@@ -1,5 +1,6 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
 import { proPriceCopy } from '../../lib/bftrial';
+import { LIMIT_COPY } from '../../lib/limits';
 
 export const revalidate = 300;
 const p = proPriceCopy();
@@ -55,7 +56,7 @@ const sections = [
  [
   "Cost",
   [
-   `You can clip a podcast on the free plan with 3 generations a day; free clips have a small watermark. ${p.sentence} with no watermark, every style and batch processing for multiple episodes. There is no per-minute charge, so a two-hour episode costs the same single generation as a ten-minute one.`
+   `You can clip a podcast on the free plan with 3 generations a day; free clips have a small watermark. ${p.sentence} with no watermark, every style and batch processing for multiple episodes. There is no per-minute charge, so a three-hour episode costs the same single generation as a ten-minute one.`
   ]
  ]
 ];
@@ -66,7 +67,7 @@ const faqs = [
  ],
  [
   "How long can the episode be?",
-  "Long episodes work. Very long sources take longer to process, and YouTube links are usually the fastest path."
+  `Up to ${LIMIT_COPY.max}, whether you paste a YouTube link or upload the episode (${LIMIT_COPY.upload}). Free runs clip highlights from the first ${LIMIT_COPY.freeWindow}; Pro and credit runs use the full ${LIMIT_COPY.max}. Longer episodes take a few minutes to process, and YouTube links are usually the fastest path.`
  ],
  [
   "Can I fix wrong words in the captions?",

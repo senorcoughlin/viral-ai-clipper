@@ -1,5 +1,6 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
 import { proPriceCopy } from '../../lib/bftrial';
+import { LIMIT_COPY } from '../../lib/limits';
 
 export const revalidate = 300;
 const p = proPriceCopy();
@@ -55,6 +56,10 @@ const sections = [
  ]
 ];
 const faqs = [
+ [
+  "How long can the YouTube video be?",
+  `Up to ${LIMIT_COPY.max}. Free runs clip highlights from the first ${LIMIT_COPY.freeWindow}; Pro and credit runs use the full ${LIMIT_COPY.max}. For a longer video, trim the part you want and upload it (${LIMIT_COPY.upload}).`
+ ],
  [
   "How long should a YouTube Short be?",
   "Shorts can be up to 60 seconds for this workflow. For most talking content, 30 to 45 seconds is a good starting point."

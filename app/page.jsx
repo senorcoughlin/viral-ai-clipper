@@ -20,6 +20,7 @@ import RaffleBanner from '../components/RaffleBanner';
 import RedeemCode from '../components/RedeemCode';
 import BfOfferCard from '../components/BfOfferCard';
 import { offerPublic, BF_PLAN } from '../lib/bftrial';
+import { WHOLE_MAX_SEC, LIVE_MINUTES, UPLOAD_MAX_BYTES, UPLOAD_MAX_MB, SOURCE_MAX_SEC, FREE_WINDOW_SEC, LIMIT_COPY } from '../lib/limits';
 import { fmtLen, issueFromLinkMeta, isBlockingIssue, classifyGenError, FREE_PROCESS_SEC, ytPaidWindowSec } from '../lib/pipeline';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
@@ -39,7 +40,6 @@ const PACKS = [
   { value: 'podcast', label: 'Podcast', hint: 'Smaller, calm captions that stay out of the way. Good for talking heads and interviews.' },
   { value: 'gameplay', label: 'Gameplay', hint: 'Zooms in slightly and puts big captions mid-screen. Good for gaming and stream clips.' },
 ];
-const WHOLE_MAX_SEC = 120; // "Whole video" mode: sources up to 2 minutes become one clip (server enforces the same cap).
 // 95 -> "1:35"
 const fmtClock = (secs) => { const t = Math.round(Number(secs) || 0); const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60; return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; };
 // A labelled row of choice chips with a one-line explanation of the current choice underneath.
@@ -77,11 +77,10 @@ const STREAM_STEPS = [
   { t: 'Post consistently', d: 'Post to TikTok, YouTube Shorts and Instagram Reels. Many clippers aim for 3\u20135 clips a day. Add your own edits or commentary, since platforms may limit reposted content.', tools: [['TikTok', 'https://www.tiktok.com/upload'], ['YouTube Shorts', 'https://studio.youtube.com'], ['Reels', 'https://www.instagram.com']] },
   { t: 'Track views, submit and scale', d: 'Submit approved posts to your campaign for view payouts. As you grow, you may qualify for YouTube Partner Program Shorts revenue or TikTok Creator Rewards (1-min+ original videos). Check each program\u2019s eligibility. Go Pro for 200 generations a day.', tools: [['YouTube Partner Program', 'https://support.google.com/youtube/answer/72851'], ['TikTok Creator Rewards', 'https://www.tiktok.com/creator-academy/en/article/creator-rewards-program'], ['Go Pro', '#pricing']] },
 ];
-const LIVE_MINUTES = [5, 10, 15];
 const FAQ = [
   ['Is Viral AI Clipper free?', `Yes. You get ${FREE_DAILY_LIMIT} free generations a day with no signup and no card. 1 generation = 1 video link, making up to 8 clips. Free clips carry a small watermark; Pro removes it.`],
-  ['Which links work?', 'Public YouTube videos and Shorts, Twitch and Kick replays (VODs), Twitch channels while live (clip the last few minutes), and direct MP4 links. You can also upload an MP4 from your phone or computer (up to 500 MB).'],
-  ['How long can the video be?', 'Long videos work, but there is a length limit, shown under the link box. Hour-long videos take several minutes to process. Live YouTube streams and premieres can\u2019t be clipped until they have ended.'],
+  ['Which links work?', `Public YouTube videos and Shorts, Twitch and Kick replays (VODs), Twitch channels while live (clip the last few minutes), and direct MP4 links. You can also upload an MP4 from your phone or computer (${LIMIT_COPY.upload}).`],
+  ['How long can the video be?', `${LIMIT_COPY.faq} Scheduled premieres can be clipped once they start.`],
   ['How long does it take?', 'A short video is usually done in about a minute. Longer videos take a few minutes. You can switch apps while it works; your clips appear when you come back.'],
   ['What do I get?', 'A video up to 2 minutes can become one whole clip. Longer videos get up to 8 highlight clips per link, cut to 9:16, 16:9 or 1:1, with captions burned in, an AI hook and a viral score for each clip. Download them and post to TikTok, Reels, Shorts or X.'],
   ['Do I need an account?', 'No. A free account just keeps your clips saved and lets you use your purchases on other devices.'],
@@ -200,9 +199,9 @@ function HomeInner({ studio = false }) {
     let live = true;
     setLinkSecs({ url: u, secs: 0, checking: true });
     const t = setTimeout(async () => {
-      let secs = 0, isLive = false, upcoming = false, maxSecs = 0, ytMaxSecs = 0, ytMaxSecsPaid = 0, hardMaxSecs = 0;
-      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; ytMaxSecs = Number(j.ytMaxSecs) || 0; ytMaxSecsPaid = Number(j.ytMaxSecsPaid) || 0; hardMaxSecs = Number(j.hardMaxSecs) || 0; } } catch {}
-      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs, ytMaxSecs, ytMaxSecsPaid, hardMaxSecs });
+      let secs = 0, isLive = false, upcoming = false, maxSecs = 0, ytMaxSecs = 0, ytMaxSecsPaid = 0, hardMaxSecs = 0, isYt;
+      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; ytMaxSecs = Number(j.ytMaxSecs) || 0; ytMaxSecsPaid = Number(j.ytMaxSecsPaid) || 0; hardMaxSecs = Number(j.hardMaxSecs) || 0; isYt = j.yt; } } catch {}
+      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs, ytMaxSecs, ytMaxSecsPaid, hardMaxSecs, yt: isYt });
     }, 600);
     return () => { live = false; clearTimeout(t); };
   }, [videoUrl, srcSecs]);
@@ -214,7 +213,7 @@ function HomeInner({ studio = false }) {
   useEffect(() => { fetch('/api/duration?limits=1').then(r => r.json()).then(j => { if (j?.maxSecs) setLimits(j); }).catch(() => {}); }, []);
   // Problems we can spot before a run is wasted: live/upcoming YouTube streams and over-length videos.
   const ytCap = (isPro || credits > 0) ? (linkSecs.ytMaxSecsPaid || limits?.ytMaxSecsPaid || ytPaidWindowSec(linkSecs.hardMaxSecs || limits?.hardMaxSecs)) : (linkSecs.ytMaxSecs || limits?.ytMaxSecs || FREE_PROCESS_SEC);
-  const linkIssue = issueFromLinkMeta({ ...linkSecs, maxSecs: linkSecs.live ? 0 : ytCap }, videoUrl.trim());
+  const linkIssue = issueFromLinkMeta({ ...linkSecs, maxSecs: (linkSecs.live || linkSecs.yt === false) ? 0 : ytCap }, videoUrl.trim());
   const blockIssue = isBlockingIssue(linkIssue);
   const ytLive = !!(linkSecs.url === videoUrl.trim() && linkSecs.live);
   const showLivePicker = !!liveChannel || ytLive;
@@ -237,7 +236,7 @@ function HomeInner({ studio = false }) {
   // Upload straight from the browser to Vercel Blob, then use the blob URL as the source.
   const handleUploadFile = async (file) => {
     setError(null);
-    if (file.size > 500 * 1024 * 1024) { setError({ message: 'That file is over 500 MB. Trim it or export at a lower bitrate.' }); return; }
+    if (file.size > UPLOAD_MAX_BYTES) { setError({ message: `That file is over ${UPLOAD_MAX_MB} MB. Trim it or export at a lower bitrate.` }); return; }
     const secs = await new Promise(res => {
       const v = document.createElement('video');
       v.preload = 'metadata';
@@ -245,7 +244,7 @@ function HomeInner({ studio = false }) {
       v.onerror = () => res(0);
       v.src = URL.createObjectURL(file);
     });
-    if (secs > 120 * 60) { setError({ message: `That video is ${Math.round(secs / 60)} minutes long. The limit is 120 minutes.` }); return; }
+    if (secs > SOURCE_MAX_SEC + 1) { setError({ message: `That video is ${fmtLen(secs)} long. Uploads can be up to ${fmtLen(SOURCE_MAX_SEC)}. Trim it to ${fmtLen(SOURCE_MAX_SEC)} or less and upload again.` }); return; }
     try {
       setUploading(1);
       const { upload } = await import('@vercel/blob/client');
@@ -522,13 +521,13 @@ function HomeInner({ studio = false }) {
           const r = await fetch(`/api/duration?url=${encodeURIComponent(urls[0])}`, { cache: 'no-store' });
           if (r.ok) {
             const j = await r.json();
-            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0, ytMaxSecs: Number(j.ytMaxSecs) || 0, ytMaxSecsPaid: Number(j.ytMaxSecsPaid) || 0, hardMaxSecs: Number(j.hardMaxSecs) || 0 };
+            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0, ytMaxSecs: Number(j.ytMaxSecs) || 0, ytMaxSecsPaid: Number(j.ytMaxSecsPaid) || 0, hardMaxSecs: Number(j.hardMaxSecs) || 0, yt: j.yt };
             setLinkSecs(meta);
           }
         } catch {}
       }
       const cap = (isPro || credits > 0) ? (meta?.ytMaxSecsPaid || ytPaidWindowSec(meta?.hardMaxSecs || limits?.hardMaxSecs)) : (meta?.ytMaxSecs || FREE_PROCESS_SEC);
-      const issue = issueFromLinkMeta({ ...meta, maxSecs: meta?.live ? 0 : cap }, runUrl.trim());
+      const issue = issueFromLinkMeta({ ...meta, maxSecs: (meta?.live || meta?.yt === false) ? 0 : cap }, runUrl.trim());
       if (isBlockingIssue(issue)) {
         ft('generate_blocked', { reason: issue.code || 'blocked' });
         setError({ message: issue.message });
@@ -784,7 +783,7 @@ function HomeInner({ studio = false }) {
                   {canPaste && !videoUrl && (
                     <button type="button" id="paste-btn" onClick={pasteClip} className="shrink-0 self-center rounded-full border border-lime px-2.5 py-1 text-xs font-semibold text-lime">Paste</button>
                   )}
-                  <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title="Upload an MP4 (up to 500 MB, 2 hours)">
+                  <label className="shrink-0 cursor-pointer self-center rounded-full border border-line2 px-2.5 py-1 text-xs text-soft hover:border-lime hover:text-lime" title={`Upload an MP4 (${LIMIT_COPY.upload})`}>
                     {uploading ? `Uploading ${uploading}%` : 'Upload MP4'}
                     <input ref={uploadInputRef} type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={!!uploading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleUploadFile(f); }} />
                   </label>
@@ -800,7 +799,7 @@ function HomeInner({ studio = false }) {
                 <p role="alert" data-testid="link-issue" className="rounded-input border border-[#FFB64D]/50 bg-[#FFB64D]/10 px-3 py-2 text-[13px] leading-snug text-[#FFD9A0]">{linkIssue.message}</p>
               ) : (
                 <p id="source-guide" className="px-1 text-xs leading-relaxed text-muted">
-                  Works with YouTube, Twitch &amp; Kick, live streams, and MP4 links or uploads{limits ? ` · YouTube highlights from the first ${fmtLen((isPro || credits > 0) ? (limits.ytMaxSecsPaid || limits.ytMaxSecs) : limits.ytMaxSecs)}` : ''} · You can leave the page while clips generate
+                  Works with YouTube, Twitch &amp; Kick, live streams, and MP4 links or uploads · Videos up to {fmtLen(limits?.hardMaxSecs || SOURCE_MAX_SEC)}{(isPro || credits > 0) ? '' : ` (free runs clip from the first ${fmtLen(limits?.ytMaxSecs || FREE_WINDOW_SEC)})`} · You can leave the page while clips generate
                 </p>
               )}
               {!studio && (
@@ -1099,6 +1098,7 @@ function HomeInner({ studio = false }) {
               <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
                 <li className="flex items-center gap-2"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2"><Check />No watermark</li>
+                <li className="flex items-center gap-2"><Check />{LIMIT_COPY.proFeature}</li>
                 <li className="flex items-center gap-2"><Check />Batch up to 10 links</li>
                 <li className="flex items-center gap-2"><Check />Pro editing: color looks, speed, caption styles</li>
                 <li className="flex items-center gap-2"><Check />Your own watermark + .srt caption files</li>
@@ -1351,7 +1351,7 @@ function HomeInner({ studio = false }) {
           </div>
           <div className="grid gap-5 md:grid-cols-2">
             {[
-              { n: '01', title: 'Paste a YouTube link', desc: 'Copy any public YouTube URL and paste it in the box at the top. It works with long videos, Shorts, and interviews.' },
+              { n: '01', title: 'Paste a YouTube link', desc: `Copy any public YouTube URL and paste it in the box at the top. It works with long videos (up to ${LIMIT_COPY.max}), Shorts, and interviews.` },
               { n: '02', title: 'Pick length and how many clips', desc: 'Choose 15, 30, or 60 seconds. Then pick 1 clip if you want it fast, or up to 8 if you want more options.' },
               { n: '03', title: 'Hit Clip and wait for the first one', desc: 'The AI finds the best moments, cuts them, and burns a caption. The first clip appears as soon as it is ready. You do not have to wait for all of them.' },
               { n: '04', title: 'Download and post', desc: 'Play the clip, hit Download, then use TikTok, Reels, Shorts, or X. The caption is copied for you. Create a free account so your clips stay saved.' },
@@ -1401,6 +1401,7 @@ function HomeInner({ studio = false }) {
               <ul className="flex flex-col gap-2.5 text-sm text-soft">
                 <li className="flex items-center gap-2.5"><Check color="#8A8AA0" />{FREE_DAILY_LIMIT} generations per day</li>
                 <li className="flex items-center gap-2.5"><Check color="#8A8AA0" />Watermarked exports</li>
+                <li className="flex items-center gap-2.5"><Check color="#8A8AA0" />{LIMIT_COPY.freeFeature}</li>
               </ul>
               <a href="#top" className="btn-ghost mt-auto h-12 no-underline">Start free</a>
             </article>
@@ -1434,6 +1435,7 @@ function HomeInner({ studio = false }) {
               <ul className="flex flex-col gap-2.5 text-sm text-fg">
                 <li className="flex items-center gap-2.5"><Check />200 generations a day</li>
                 <li className="flex items-center gap-2.5"><Check />No watermark</li>
+                <li className="flex items-center gap-2.5"><Check />{LIMIT_COPY.proFeature}</li>
                 <li className="flex items-center gap-2.5"><Check />Batch up to 10 links</li>
                 <li className="flex items-center gap-2.5"><Check />CSV export + priority</li>
                 <li className="flex items-center gap-2.5"><Check />Pro editing: color looks, speed control, boxed / 1-word captions, loudness boost, fades</li>

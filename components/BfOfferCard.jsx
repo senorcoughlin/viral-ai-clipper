@@ -1,5 +1,6 @@
 'use client';
 import AccountBar from './AccountBar';
+import { LIMIT_COPY } from '../lib/limits';
 
 const Check = ({ color = '#C6FF3D' }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden><path d="m5 12 5 5L20 7" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -58,6 +59,7 @@ export default function BfOfferCard({
       <ul className="grid gap-1.5 text-sm sm:grid-cols-2">
         <li className="flex items-center gap-2"><Check />7 days free on monthly, card required</li>
         <li className="flex items-center gap-2"><Check />Then $9.99/month or $99.99/year</li>
+        <li className="flex items-center gap-2"><Check />{LIMIT_COPY.proFeature}</li>
         <li className="flex items-center gap-2"><Check />Cancel anytime</li>
         <li className="flex items-center gap-2"><Check />Black Friday deal — ends Jan 1</li>
       </ul>
