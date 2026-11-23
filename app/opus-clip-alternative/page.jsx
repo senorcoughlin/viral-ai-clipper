@@ -1,4 +1,8 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
+import { proPriceCopy } from '../../lib/bftrial';
+
+export const revalidate = 300;
+const p = proPriceCopy();
 
 const path = '/opus-clip-alternative';
 export const metadata = guideMetadata({ path, title: "Opus Clip Alternative: Honest Comparison with Viral AI Clipper", description: "Looking for an Opus Clip alternative? An honest look at how Viral AI Clipper compares on pricing, scoring, captions and workflow, including what it does not do." });
@@ -17,7 +21,7 @@ const sections = [
     "Pricing by generation, not by minutes. Many clipping tools meter usage by minutes of source video. Viral AI Clipper counts generations: one video in, up to 8 clips out, whether the video is 10 minutes or 2 hours.",
     "Honest scores. Our goal is a score you can act on. Weak clips get low scores with the reasons shown, instead of every clip landing at 90+.",
     "A real free tier. 3 generations a day free, no card required. Free clips carry a small, faint watermark.",
-    "Simple Pro pricing. $19.99 a month or $199.99 a year, plus optional credit packs from $9 if you only need extra generations now and then.",
+    `Simple Pro pricing. ${p.deal}, plus optional credit packs from $9 if you only need extra generations now and then.`,
     "Small and fast-moving. It is built by one person who reads every piece of feedback, so requests can ship quickly."
    ]
   ]
@@ -60,7 +64,7 @@ const sections = [
 const faqs = [
  [
   "Is Viral AI Clipper cheaper than Opus Clip?",
-  "It depends on how much you clip. Viral AI Clipper charges per generation rather than per minute, with a free tier and Pro at $19.99/month. Compare against Opus Clip’s current pricing for your usage."
+  `It depends on how much you clip. Viral AI Clipper charges per generation rather than per minute, with a free tier and Pro at ${p.short}. Compare against Opus Clip’s current pricing for your usage.`
  ],
  [
   "Does Viral AI Clipper have a watermark?",

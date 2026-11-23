@@ -1,4 +1,8 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
+import { proPriceCopy } from '../../lib/bftrial';
+
+export const revalidate = 300;
+const p = proPriceCopy();
 
 const path = '/free-ai-clip-maker';
 export const metadata = guideMetadata({ path, title: "Free AI Clip Maker: Turn Long Videos into Short Clips", description: "Make short vertical clips from long videos for free. Paste a YouTube link or upload an MP4 and get captioned, scored clips for Shorts, TikTok and Reels." });
@@ -40,7 +44,7 @@ const sections = [
  [
   "When to upgrade",
   [
-   "If you post every day or run a clipping channel, 3 generations a day goes quickly. Pro is $19.99 a month or $199.99 a year and raises the daily limit, removes the watermark, unlocks every style and lets you batch up to 10 links. If you only clip now and then, credit packs start at $9 for 10 extra generations.",
+   `If you post every day or run a clipping channel, 3 generations a day goes quickly. ${p.sentence} and raises the daily limit, removes the watermark, unlocks every style and lets you batch up to 10 links. If you only clip now and then, credit packs start at $9 for 10 extra generations.`,
    "There is no per-minute billing. A generation is one video in and a set of clips out, whether the source is 10 minutes or 2 hours."
   ]
  ]

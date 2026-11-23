@@ -1,4 +1,8 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
+import { proPriceCopy } from '../../lib/bftrial';
+
+export const revalidate = 300;
+const p = proPriceCopy();
 
 const path = '/how-to-clip-twitch-streams';
 export const metadata = guideMetadata({ path, title: "How to Clip Twitch Streams into Shorts and TikToks", description: "A practical guide to turning Twitch streams and VODs into vertical clips for TikTok, Shorts and Reels, including facecam layouts, gameplay zoom and captions." });
@@ -54,7 +58,7 @@ const sections = [
  [
   "How often to post",
   [
-   "Consistency beats volume spikes. One to three clips a day from your latest streams is a pace most streamers can keep up with. The free plan covers 3 generations a day; Pro ($19.99/month) removes the watermark and lets you batch up to 10 links at once."
+   `Consistency beats volume spikes. One to three clips a day from your latest streams is a pace most streamers can keep up with. The free plan covers 3 generations a day; Pro (${p.monthly}) removes the watermark and lets you batch up to 10 links at once.`
   ]
  ]
 ];

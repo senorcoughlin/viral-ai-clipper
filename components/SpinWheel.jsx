@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { funnel } from '../lib/funnel';
+import { offerPublic } from '../lib/bftrial';
 
 // Visual slices only; the prize is chosen server-side (/api/spin) and the wheel animates to a matching slice.
 const STYLE = {
@@ -282,7 +283,7 @@ export default function SpinWheel({ onWon, onUpgrade }) {
               {(result || (st?.verified && !st.available)) && (
                 <>
                   <p className="mb-3 text-xs text-muted">Next spin in <b className="text-white">{left}</b></p>
-                  {!st?.pro && <button type="button" onClick={() => { setOpen(false); onUpgrade?.(); }} className="btn-ghost mb-2 h-10 w-full text-sm">Go Pro for 200 generations a day</button>}
+                  {!st?.pro && <button type="button" onClick={() => { setOpen(false); onUpgrade?.(); }} className="btn-ghost mb-2 h-10 w-full text-sm">{offerPublic().active ? "Black Friday: Pro $9.99/mo or $99.99/yr" : "Go Pro for 200 generations a day"}</button>}
                   {st?.pro && result?.id !== 'pro' && <p className="mb-2 text-xs text-soft">You're Pro, so bonus clips are banked as credits for later.</p>}
                 </>
               )}

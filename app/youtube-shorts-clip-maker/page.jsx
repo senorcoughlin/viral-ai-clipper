@@ -1,4 +1,8 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
+import { proPriceCopy } from '../../lib/bftrial';
+
+export const revalidate = 300;
+const p = proPriceCopy();
 
 const path = '/youtube-shorts-clip-maker';
 export const metadata = guideMetadata({ path, title: "YouTube Shorts Clip Maker: Long Videos to Shorts with AI", description: "Turn long YouTube videos into vertical Shorts with captions and a viral score. Paste a link, pick a length, and download 9:16 clips ready to upload." });
@@ -46,7 +50,7 @@ const sections = [
  [
   "Free vs Pro",
   [
-   "You can make Shorts free with 3 generations a day; free clips carry a small, faint watermark. Pro ($19.99/month) removes the watermark, raises the daily limit and adds batch processing for up to 10 links at once, which helps when you are clipping a whole back catalog."
+   `You can make Shorts free with 3 generations a day; free clips carry a small, faint watermark. Pro (${p.monthly}) removes the watermark, raises the daily limit and adds batch processing for up to 10 links at once, which helps when you are clipping a whole back catalog.`
   ]
  ]
 ];

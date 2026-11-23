@@ -1,4 +1,5 @@
 'use client';
+import { offerPublic } from '../lib/bftrial';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ViralScoreMeter from './ViralScoreMeter';
@@ -446,7 +447,7 @@ function ProTools({ isPro, onUpgrade, p, setPro, Toggle, field, onSrt }) {
       {!isPro && (
         <div className="flex flex-col items-start gap-2 rounded-input bg-ink/80 p-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-soft">Color looks, speed control, caption styles, loudness boost, fades, your own watermark, 0.1s trims and caption files come with Pro.</p>
-          <button type="button" onClick={() => onUpgrade?.()} className="btn-lime h-9 shrink-0 px-4 text-xs">🔒 Upgrade to Pro</button>
+          <button type="button" onClick={() => onUpgrade?.()} className="btn-lime h-9 shrink-0 px-4 text-xs">🔒 {offerPublic().active ? "Black Friday: $9.99/mo" : "Upgrade to Pro"}</button>
         </div>
       )}
     </section>

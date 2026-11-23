@@ -20,7 +20,7 @@ import RaffleBanner from '../components/RaffleBanner';
 import RedeemCode from '../components/RedeemCode';
 import BfOfferCard from '../components/BfOfferCard';
 import { offerPublic, BF_PLAN } from '../lib/bftrial';
-import { fmtLen, issueFromLinkMeta, isBlockingIssue, FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../lib/pipeline';
+import { fmtLen, issueFromLinkMeta, isBlockingIssue, classifyGenError, FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../lib/pipeline';
 
 const SAMPLE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 const GUIDE_KEY = 'vac_gen_count';
@@ -119,7 +119,9 @@ const JSON_LD = JSON.stringify([
 // twitch.tv/<channel> (not a VOD or clip link): eligible for "clip the last X minutes".
 const TWITCH_CHANNEL_RE = /^https?:\/\/(?:www\.|m\.)?twitch\.tv\/([a-zA-Z0-9_]{2,25})\/?(?:\?.*)?$/;
 const twitchChannelOf = (u) => { const m = String(u || '').trim().match(TWITCH_CHANNEL_RE); return m && !['videos', 'directory', 'downloads', 'settings', 'search', 'p'].includes(m[1].toLowerCase()) ? m[1] : null; };
-const PRICE = { monthly: { amount: '$19.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly' } };
+const REGULAR_PRICE = { monthly: { amount: '$19.99', per: '/mo', plan: 'pro_monthly' }, yearly: { amount: '$199.99', per: '/yr · about $16.67/mo', plan: 'pro_yearly', savings: 'save 17%', toggle: '−17%' } };
+const DEAL_PRICE = { monthly: { amount: '$9.99', per: '/mo', plan: BF_PLAN, regular: '$19.99' }, yearly: { amount: '$99.99', per: '/yr · about $8.33/mo', plan: 'pro_yearly', regular: '$199.99', savings: 'save 50%', toggle: '−50%' } };
+const pricesFor = (offer) => (offer?.active ? DEAL_PRICE : REGULAR_PRICE);
 
 /* ---------- small icons (inline SVG, no deps) ---------- */
 const Bolt = ({ className = '', fill = '#0A0A0F', size = 18 }) => (
@@ -143,10 +145,6 @@ const Download = () => (
 
 function HomeInner({ studio = false }) {
   const [videoUrl, setVideoUrl] = useState('');
-  const [promoHidden, setPromoHidden] = useState(true);
-  useEffect(() => {
-    try { setPromoHidden(Date.now() > 1793595540000 || localStorage.getItem('vac_promo_launch50') === '1'); } catch { setPromoHidden(false); }
-  }, []);
   const [clipFormat, setClipFormat] = useState('shorts_9_16');
   const [aiStyle, setAiStyle] = useState('clean_viral');
   const [pack, setPack] = useState('');
@@ -187,7 +185,7 @@ function HomeInner({ studio = false }) {
   const [expected, setExpected] = useState(0);
   const [billingEmail, setBillingEmail] = useState('');
   const [signedIn, setSignedIn] = useState(false);
-  const [offer, setOffer] = useState(null);
+  const [offer, setOffer] = useState(() => offerPublic());
   const [trialEnd, setTrialEnd] = useState(null);
   const [needSignIn, setNeedSignIn] = useState(false);
   const [uploading, setUploading] = useState(0);
@@ -202,9 +200,9 @@ function HomeInner({ studio = false }) {
     let live = true;
     setLinkSecs({ url: u, secs: 0, checking: true });
     const t = setTimeout(async () => {
-      let secs = 0, isLive = false, upcoming = false, maxSecs = 0, ytMaxSecs = 0, ytMaxSecsPaid = 0;
-      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; ytMaxSecs = Number(j.ytMaxSecs) || 0; ytMaxSecsPaid = Number(j.ytMaxSecsPaid) || 0; } } catch {}
-      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs, ytMaxSecs, ytMaxSecsPaid });
+      let secs = 0, isLive = false, upcoming = false, maxSecs = 0, ytMaxSecs = 0, ytMaxSecsPaid = 0, hardMaxSecs = 0;
+      try { const r = await fetch(`/api/duration?url=${encodeURIComponent(u)}`, { cache: 'no-store' }); if (r.ok) { const j = await r.json(); secs = Number(j.secs) || 0; isLive = !!j.live; upcoming = !!j.upcoming; maxSecs = Number(j.maxSecs) || 0; ytMaxSecs = Number(j.ytMaxSecs) || 0; ytMaxSecsPaid = Number(j.ytMaxSecsPaid) || 0; hardMaxSecs = Number(j.hardMaxSecs) || 0; } } catch {}
+      if (live) setLinkSecs({ url: u, secs, checking: false, live: isLive, upcoming, maxSecs, ytMaxSecs, ytMaxSecsPaid, hardMaxSecs });
     }, 600);
     return () => { live = false; clearTimeout(t); };
   }, [videoUrl, srcSecs]);
@@ -400,6 +398,7 @@ function HomeInner({ studio = false }) {
       if (msg.code === 'whole_too_long' || isWholeTooLongMsg(msg.message)) st.wholeTooLong = true;
       if (msg.index === undefined) {
         st.fatal = msg.message || 'Generation failed on the server.';
+        st.fatalCode = msg.code || '';
         st.upload = !!(msg.upload || msg.code === 'upload_fallback');
       } else st.failed += 1;
       st.lastReason = msg.message || st.lastReason;
@@ -523,7 +522,7 @@ function HomeInner({ studio = false }) {
           const r = await fetch(`/api/duration?url=${encodeURIComponent(urls[0])}`, { cache: 'no-store' });
           if (r.ok) {
             const j = await r.json();
-            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0, ytMaxSecs: Number(j.ytMaxSecs) || 0, ytMaxSecsPaid: Number(j.ytMaxSecsPaid) || 0 };
+            meta = { url: runUrl.trim(), secs: Number(j.secs) || 0, checking: false, live: !!j.live, upcoming: !!j.upcoming, maxSecs: Number(j.maxSecs) || 0, ytMaxSecs: Number(j.ytMaxSecs) || 0, ytMaxSecsPaid: Number(j.ytMaxSecsPaid) || 0, hardMaxSecs: Number(j.hardMaxSecs) || 0 };
             setLinkSecs(meta);
           }
         } catch {}
@@ -602,7 +601,10 @@ function HomeInner({ studio = false }) {
           if (err.limitReached) setShowPricing(true);
           else if (err.code === 'whole_too_long' || isWholeTooLongMsg(err.message)) { const e2 = new Error(err.message); e2.wholeFallback = true; throw e2; }
           else if (res.status === 400 && err.message) rejectedRef.current.set(url, { message: err.message, at: Date.now() });
-          throw new Error(err.message || `Generate failed (${res.status})`);
+          const e3 = new Error(err.message || err.error || `Generate failed (${res.status})`);
+          e3.code = err.code || (err.limitReached ? 'daily_limit' : err.capacity ? 'capacity' : res.status === 429 ? 'rate_limited' : res.status === 400 ? '' : res.status === 503 ? 'service_unavailable' : `http_${res.status}`);
+          e3.status = res.status;
+          throw e3;
         }
         const st = { all, failed, lastReason, fatal: '', gotDone: false, badLines: 0, setLabel: (l) => { label = l; } };
         const onMsg = makeJobHandler(st, urls.length > 1 ? url : null);
@@ -651,7 +653,7 @@ function HomeInner({ studio = false }) {
         all = st.all; failed = st.failed; lastReason = st.lastReason;
         const { fatal, gotDone, badLines } = st;
         if (st.wholeTooLong && settings.wholeVideo && !st.all.length) { const e2 = new Error(fatal || st.lastReason); e2.wholeFallback = true; throw e2; }
-        if (fatal) throw new Error(fatal);
+        if (fatal) { const e4 = new Error(fatal); e4.code = st.fatalCode || ''; throw e4; }
         if (!gotDone) {
           throw new Error(badLines ? 'The server sent a garbled response and the stream ended early.' : 'The connection ended before generation finished.');
         }
@@ -689,7 +691,11 @@ function HomeInner({ studio = false }) {
         return;
       }
       setClips([...all]);
-      ft('generate_error', { source: settings.source || 'manual', message: String(e?.message || 'unknown').slice(0, 120) });
+      // User-side limits (daily cap, too long, bad/private link, live) are not failures:
+      // they are tracked as generate_blocked so generate_error only counts real problems.
+      const why = classifyGenError(e);
+      if (why.user) ft('generate_blocked', { reason: why.reason, source: settings.source || 'manual' });
+      else ft('generate_error', { source: settings.source || 'manual', reason: why.reason, message: String(e?.message || 'unknown').slice(0, 120) });
       setError({ message: e?.message || 'Processing failed. Try again.', retry: true, upload: true });
     } finally {
       setIsProcessing(false);
@@ -706,7 +712,10 @@ function HomeInner({ studio = false }) {
       setNeedSignIn(true);
       return;
     }
-    trackConversion('begin_checkout', { plan: planType, value: PLAN_VALUES[planType] ?? PLAN_VALUES[plan], currency: 'USD' });
+    const checkoutValue = (offer?.active && (planType === 'pro_yearly' || planType === 'pro_bf_yearly'))
+      ? (PLAN_VALUES.pro_bf_yearly ?? 99.99)
+      : (PLAN_VALUES[planType] ?? PLAN_VALUES[plan]);
+    trackConversion('begin_checkout', { plan: planType, value: checkoutValue, currency: 'USD' });
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
@@ -733,7 +742,7 @@ function HomeInner({ studio = false }) {
   const freeLeft = Math.max(0, FREE_DAILY_LIMIT - dailyCount);
   const myAssets = history.flatMap(h => (h.clips || []).map(c => ({ ...c, sourceUrl: h.url, createdAt: h.id })));
   const topScore = clips.length ? Math.max(...clips.map(c => c.viralScore || 0)) : 0;
-  const price = PRICE[billing];
+  const price = pricesFor(offer)[billing];
 
   const downloadAll = async () => {
     const list = clips.filter(c => c.videoUrl && (!selectedIds.length || selectedIds.includes(c.id)));
@@ -1084,7 +1093,7 @@ function HomeInner({ studio = false }) {
                 </button>
               </div>
               <h3 id="up-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[38px]">
-                Keep the clips coming.<br /><span className="text-lime">Go Pro.</span>
+                Keep the clips coming.<br /><span className="text-lime">{offer?.active && !isPro ? 'Black Friday deal.' : 'Go Pro.'}</span>
               </h3>
               <p className="text-[15px] leading-relaxed text-soft">Pro gives you 200 generations a day, removes the watermark, unlocks Pro editing in the Studio, and saves your history so you never lose a banger.</p>
               <ul className="grid gap-2.5 text-sm sm:grid-cols-2">
@@ -1101,12 +1110,15 @@ function HomeInner({ studio = false }) {
                   isPro={isPro}
                   onAccountChange={() => refreshBilling()}
                   onStart={() => handleUpgrade(BF_PLAN)}
+                  onStartYearly={() => handleUpgrade('pro_yearly')}
                 />
               )}
-              <div className={`flex flex-col gap-2.5 sm:flex-row ${offer?.active && !isPro ? 'opacity-90' : ''}`}>
+              {!(offer?.active && !isPro) && (
+              <div className="flex flex-col gap-2.5 sm:flex-row">
                 <button onClick={() => handleUpgrade('pro_yearly')} className="btn-lime h-[50px] flex-1 text-[15px]">$199.99 / year <span className="rounded-full bg-ink/15 px-1.5 text-[11px]">save 17%</span></button>
-                {!(offer?.active && !isPro) && <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>}
+                <button onClick={() => handleUpgrade('pro_monthly')} className="btn-ghost h-[50px] flex-1 text-[15px]">$19.99 / month</button>
               </div>
+              )}
               <div className="border-t border-line pt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[.08em] text-muted">Or buy credits · from $9</p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1142,15 +1154,9 @@ function HomeInner({ studio = false }) {
           </nav>
           <div className="flex shrink-0 items-center gap-2">
             {!isPro && <span className="text-xs text-muted">{freeLeft}/{FREE_DAILY_LIMIT} free</span>}
-            <button onClick={() => setShowPricing(true)} className="btn-lime h-9 px-3 text-xs">{isPro ? 'Manage' : 'Go Pro'}</button>
+            <button onClick={() => setShowPricing(true)} className="btn-lime h-9 px-3 text-xs">{isPro ? 'Manage' : (offer?.active ? 'Black Friday deal' : 'Go Pro')}</button>
           </div>
         </div>
-        {!isPro && !promoHidden && (
-          <div className="flex items-center justify-center gap-2 border-t border-line/60 px-4 py-1 text-[12px] font-semibold text-lime">
-            <span className="truncate">50% off Pro with <b>LAUNCH50</b> · ends Nov 1</span>
-            <button aria-label="Dismiss" onClick={() => { setPromoHidden(true); try { localStorage.setItem('vac_promo_launch50', '1'); } catch {} }} className="text-lime/70">✕</button>
-          </div>
-        )}
       </header>
       <main id="top" className="mx-auto grid max-w-[1600px] grid-cols-1 gap-6 px-4 pb-32 pt-4 lg:grid-cols-[420px_1fr] lg:pb-10">
         <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
@@ -1204,21 +1210,13 @@ function HomeInner({ studio = false }) {
               </span>
             )}
             <button onClick={() => setShowPricing(true)} className="btn-lime h-10 px-4 text-sm">
-              {isPro ? 'Manage' : 'Upgrade to Pro'}{!isPro && <Arrow />}
+              {isPro ? 'Manage' : (offer?.active ? 'Black Friday deal' : 'Upgrade to Pro')}{!isPro && <Arrow />}
             </button>
           </div>
         </div>
       </header>
 
       <RaffleBanner />
-      {!isPro && !promoHidden && (
-        <div className="relative mx-auto mt-3 flex max-w-6xl items-center justify-center gap-3 px-5">
-          <div className="flex items-center gap-3 rounded-full border border-lime bg-lime-tint px-4 py-1.5 text-[13px] font-semibold text-lime">
-            <span>Launch week: 50% off Pro with code <b>LAUNCH50</b>, ends Nov 1</span>
-            <button aria-label="Dismiss" onClick={() => { setPromoHidden(true); try { localStorage.setItem('vac_promo_launch50', '1'); } catch {} }} className="text-lime/70 hover:text-lime">✕</button>
-          </div>
-        </div>
-      )}
       <main id="top" className="relative mx-auto max-w-6xl px-5">
         {/* HERO */}
         <section className="grid grid-cols-1 items-center gap-8 pb-20 pt-4 sm:pt-8 md:grid-cols-[1.1fr_.9fr]">
@@ -1383,13 +1381,13 @@ function HomeInner({ studio = false }) {
         {/* PRICING */}
         <section id="pricing" className="flex flex-col items-center gap-9 pb-28">
           <div className="flex max-w-[640px] flex-col items-center gap-3 text-center">
-            <span className="eyebrow">Pricing</span>
+            <span className="eyebrow">{offer?.active ? 'Black Friday deal — ends Jan 1' : 'Pricing'}</span>
             <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">{FREE_DAILY_LIMIT} free generations a day. 200 a day on Pro. No per-minute charges.</h2>
             <p className="text-sm text-soft">1 generation = 1 video link, making up to 8 clips. A batch of 3 links uses 3 generations. Failed runs are not counted.</p>
             <div className="mt-2 inline-flex rounded-full border border-line2 bg-surface p-1">
               <button type="button" onClick={() => setBilling('monthly')} className={`chip h-[34px] border-0 ${billing === 'monthly' ? 'chip-on' : ''}`}>Monthly</button>
               <button type="button" onClick={() => setBilling('yearly')} className={`chip h-[34px] border-0 ${billing === 'yearly' ? 'chip-on' : ''}`}>
-                Yearly <span className="ml-1 inline-flex h-5 items-center rounded-full bg-lime px-1.5 text-[11px] font-bold text-ink">−17%</span>
+                Yearly <span className="ml-1 inline-flex h-5 items-center rounded-full bg-lime px-1.5 text-[11px] font-bold text-ink">{pricesFor(offer).yearly.toggle}</span>
               </button>
             </div>
           </div>
@@ -1412,19 +1410,26 @@ function HomeInner({ studio = false }) {
                 <span className="font-display text-xl font-extrabold text-lime">Pro</span>
                 <span className="text-sm text-muted">For creators posting daily.</span>
               </div>
+              {offer?.active && !isPro && (
+                <span className="inline-flex w-fit items-center rounded-full bg-lime px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-ink">BLACK FRIDAY — ends Jan 1</span>
+              )}
               <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1">
                 {offer?.active && billing === 'monthly' && !isPro ? (
                   <>
-                    <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">$0</span>
+                    <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]" suppressHydrationWarning>$0</span>
                     <span className="text-sm text-muted">for 7 days, then $9.99/mo</span>
                     <span className="w-full text-xs text-muted line-through">normally $19.99/mo</span>
                   </>
                 ) : (
-                  <><span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]">{price.amount}</span><span className="text-sm text-muted">{price.per}</span></>
+                  <>
+                    <span className="font-display text-[40px] font-extrabold leading-none text-white sm:text-[52px]" suppressHydrationWarning>{price.amount}</span>
+                    <span className="text-sm text-muted" suppressHydrationWarning>{price.per}</span>
+                    {offer?.active && price.regular && <span className="w-full text-xs text-muted line-through">normally {price.regular}{billing === 'yearly' ? '/yr' : '/mo'}</span>}
+                  </>
                 )}
               </div>
-              {offer?.active && billing === 'monthly' && !isPro && (
-                <p className="text-[13px] leading-relaxed text-soft">{offer.disclosure}</p>
+              {offer?.active && !isPro && (
+                <p className="text-[13px] leading-relaxed text-soft">{billing === 'yearly' ? (offer.yearlyDisclosure || 'Billed $99.99 today for a year of Pro (regularly $199.99). Offer ends Jan 1, 2027.') : offer.disclosure}</p>
               )}
               <ul className="flex flex-col gap-2.5 text-sm text-fg">
                 <li className="flex items-center gap-2.5"><Check />200 generations a day</li>
@@ -1435,9 +1440,9 @@ function HomeInner({ studio = false }) {
                 <li className="flex items-center gap-2.5"><Check />Your own @handle watermark, 0.1s trims, .srt caption download</li>
               </ul>
               <button onClick={() => handleUpgrade(offer?.active && billing === 'monthly' && !isPro ? BF_PLAN : price.plan)} className="btn-lime mt-auto h-12">
-                {isPro ? (trialEnd ? 'Trial ends soon' : 'You’re on Pro') : (offer?.active && billing === 'monthly' ? (signedIn ? 'Start 7-day free trial' : 'Sign in for 7 days free') : 'Upgrade to Pro')}{!isPro && <Arrow />}
+                {isPro ? (trialEnd ? 'Trial ends soon' : 'You’re on Pro') : (offer?.active && billing === 'monthly' ? (signedIn ? 'Start 7-day free trial' : 'Sign in for 7 days free') : (offer?.active && billing === 'yearly' ? 'Get Pro $99.99/yr' : 'Upgrade to Pro'))}{!isPro && <Arrow />}
               </button>
-              <span className="text-center text-xs text-muted">{offer?.active && billing === 'monthly' && !isPro ? '7 days free, then $9.99/mo, cancel anytime. Offer ends Dec 7.' : 'Cancel anytime · Secure checkout via Stripe'}</span>
+              <span className="text-center text-xs text-muted">{offer?.active && !isPro ? (billing === 'yearly' ? 'Black Friday deal — ends Jan 1. $99.99/yr (regularly $199.99), cancel anytime.' : 'Black Friday deal — ends Jan 1. 7 days free, then $9.99/mo, cancel anytime.') : 'Cancel anytime · Secure checkout via Stripe'}</span>
             </article>
           </div>
           <p className="text-center text-xs text-muted">
@@ -1455,7 +1460,10 @@ function HomeInner({ studio = false }) {
             <h2 id="faq-title" className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white md:text-[44px]">Questions, answered.</h2>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            {FAQ.map(([q, a]) => (
+            {(offer?.active
+              ? [['What’s the Black Friday deal?', 'Pro is $9.99 a month or $99.99 a year through January 1, 2027 (regularly $19.99/mo or $199.99/yr). Monthly includes a 7-day free trial (card required). After January 1, new sign-ups go back to regular pricing. Existing subscribers keep the plan they bought.'], ...FAQ]
+              : FAQ
+            ).map(([q, a]) => (
               <details key={q} className="card group p-5 [&_summary::-webkit-details-marker]:hidden">
                 <summary className="flex cursor-pointer list-none items-start justify-between gap-4 text-base font-bold text-white">
                   {q}<span aria-hidden className="mt-0.5 text-lime transition-transform group-open:rotate-45">+</span>
@@ -1500,7 +1508,7 @@ function HomeInner({ studio = false }) {
             </button>
           ) : (
             <button type="button" onClick={() => setShowPricing(true)} className="btn-lime h-11 w-full text-sm">
-              {offer?.active ? 'Try Pro free for 7 days' : 'Upgrade to Pro'}
+              {offer?.active ? 'Black Friday: $9.99/mo or $99.99/yr' : 'Upgrade to Pro'}
             </button>
           )}
         </div>

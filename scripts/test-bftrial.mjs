@@ -8,11 +8,12 @@ process.env.CRON_SECRET = 'test-cron-secret';
 process.env.STRIPE_PRICE_MONTHLY = 'price_monthly_regular';
 process.env.STRIPE_PRICE_YEARLY = 'price_yearly_regular';
 process.env.STRIPE_PRICE_BF_MONTHLY = 'price_bf_999';
+process.env.STRIPE_PRICE_BF_YEARLY = 'price_bf_yearly_9999';
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy';
 
 const {
   offerActive, offerPublic, resolveOfferCheckout, trialEndMs, BF_OFFER_END_MS,
-  BF_PLAN, BF_TRIAL_DAYS, etDate, subGrantsPro, subRevokesPro,
+  BF_PLAN, BF_YEARLY_PLAN, BF_TRIAL_DAYS, etDate, subGrantsPro, subRevokesPro, proPriceCopy,
 } = await import('../lib/bftrial.js');
 const { getEntitlement, setPro, markBfTrial, hasUsedBfTrial, listDueBfReminders, markBfReminded } = await import('../lib/billing.js');
 const { signSession } = await import('../lib/session.js');
@@ -26,11 +27,12 @@ const prices = {
   STRIPE_PRICE_MONTHLY: 'price_monthly_regular',
   STRIPE_PRICE_YEARLY: 'price_yearly_regular',
   STRIPE_PRICE_BF_MONTHLY: 'price_bf_999',
+  STRIPE_PRICE_BF_YEARLY: 'price_bf_yearly_9999',
 };
 
 const DURING = Date.parse('2026-11-22T15:00:00-05:00');
-const AFTER = Date.parse('2026-12-08T00:00:00-05:00');
-const LAST_MINUTE = Date.parse('2026-12-07T23:59:59-05:00');
+const AFTER = Date.parse('2027-01-02T00:00:00-05:00');
+const LAST_MINUTE = Date.parse('2027-01-01T23:59:59-05:00');
 
 function fakeStripe({ customers = [], subs = [], sessionSub = null } = {}) {
   const created = [];
@@ -67,20 +69,33 @@ function checkoutReq(planType, email, { verified = true, ip = '8.8.8.8' } = {}) 
   });
 }
 
-test('offer is active through the end of Dec 7, 2026 America/New_York and not after', () => {
+test('offer is active through the end of Jan 1, 2027 America/New_York and not after', () => {
   assert.equal(offerActive(DURING), true);
   assert.equal(offerActive(LAST_MINUTE), true);
   assert.equal(offerActive(BF_OFFER_END_MS - 1), true);
   assert.equal(offerActive(BF_OFFER_END_MS), false);
   assert.equal(offerActive(AFTER), false);
   const et = new Date(BF_OFFER_END_MS).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false });
-  assert.match(et, /^12\/8\/2026, 00:00/);
+  assert.match(et, /^1\/2\/2027, 00:00/);
   const pub = offerPublic(DURING);
   assert.equal(pub.active, true);
   assert.equal(pub.price, '$9.99');
-  assert.match(pub.body, /7 days free, then \$9\.99\/mo, cancel anytime\. Offer ends Dec 7/);
+  assert.equal(pub.yearlyPrice, '$99.99');
+  assert.equal(pub.regularPrice, '$19.99');
+  assert.equal(pub.regularYearlyPrice, '$199.99');
+  assert.equal(pub.endsLabel, 'Jan 1, 2027');
+  assert.match(pub.headline, /Black Friday deal — ends Jan 1/);
+  assert.match(pub.body, /Black Friday deal — ends Jan 1/);
+  assert.match(pub.body, /\$9\.99\/mo or \$99\.99\/yr/);
   assert.match(pub.disclosure, /won’t be charged today/i);
   assert.match(pub.disclosure, /\$9\.99\/month/);
+  const ended = offerPublic(AFTER);
+  assert.equal(ended.active, false);
+  assert.equal(ended.price, '$19.99');
+  assert.equal(ended.yearlyPrice, '$199.99');
+  const copy = proPriceCopy(DURING);
+  assert.match(copy.short, /\$9\.99\/month or \$99\.99\/year/);
+  assert.equal(proPriceCopy(AFTER).short, '$19.99/month or $199.99/year');
 });
 
 test('resolveOfferCheckout: trial during the window, regular price after, sign-in required for the trial', () => {
@@ -106,12 +121,23 @@ test('resolveOfferCheckout: trial during the window, regular price after, sign-i
   assert.equal(after.plan, 'pro_monthly');
 
   const yearly = resolveOfferCheckout({ planType: 'pro_yearly', signedInEmail: null, now: DURING, prices });
-  assert.equal(yearly.kind, 'regular');
-  assert.equal(yearly.priceId, 'price_yearly_regular');
+  assert.equal(yearly.kind, 'sale');
+  assert.equal(yearly.plan, BF_YEARLY_PLAN);
+  assert.equal(yearly.useTrial, false);
+  assert.equal(yearly.priceId, 'price_bf_yearly_9999');
+
+  const yearlyAfter = resolveOfferCheckout({ planType: 'pro_yearly', signedInEmail: null, now: AFTER, prices });
+  assert.equal(yearlyAfter.kind, 'regular');
+  assert.equal(yearlyAfter.plan, 'pro_yearly');
+  assert.equal(yearlyAfter.priceId, 'price_yearly_regular');
 
   const missing = resolveOfferCheckout({ planType: 'pro_monthly', signedInEmail: 'a@example.com', now: DURING, prices: { ...prices, STRIPE_PRICE_BF_MONTHLY: '' } });
   assert.equal(missing.kind, 'regular');
   assert.equal(missing.priceId, 'price_monthly_regular');
+
+  const missingYearly = resolveOfferCheckout({ planType: 'pro_yearly', signedInEmail: null, now: DURING, prices: { ...prices, STRIPE_PRICE_BF_YEARLY: '' } });
+  assert.equal(missingYearly.kind, 'regular');
+  assert.equal(missingYearly.priceId, 'price_yearly_regular');
 });
 
 test('checkout creates a subscription session with a 7-day trial and always collects a card', async () => {
@@ -227,7 +253,8 @@ test('billing GET advertises the offer and requires sign-in while it is running'
   assert.equal(b.pro, false);
   if (b.offer.active) {
     assert.equal(b.offer.eligible, true);
-    assert.match(b.offer.body, /7 days free, then \$9\.99\/mo/);
+    assert.match(b.offer.body, /Black Friday deal — ends Jan 1/);
+    assert.match(b.offer.body, /\$9\.99\/mo or \$99\.99\/yr/);
   }
 });
 
@@ -278,9 +305,9 @@ test('trialEndMs is 7 days later', () => {
   assert.match(etDate(from), /November 22, 2026/);
 });
 
-test('checkout falls back to regular $19.99 monthly pricing after the Dec 7 cutoff', async () => {
+test('checkout falls back to regular $19.99 / $199.99 pricing after the Jan 1, 2027 cutoff', async () => {
   const stripe = fakeStripe();
-  const after = Date.parse('2026-12-08T00:00:00-05:00');
+  const after = Date.parse('2027-01-02T00:00:00-05:00');
   const res = await runCheckout(checkoutReq('pro_monthly', 'late@example.com'), stripe, after);
   const d = await res.json();
   assert.equal(res.status, 200, JSON.stringify(d));
@@ -296,4 +323,23 @@ test('checkout falls back to regular $19.99 monthly pricing after the Dec 7 cuto
   assert.equal(res2.status, 200, JSON.stringify(d2));
   assert.equal(d2.trial, false);
   assert.equal(stripe2.created[0].line_items[0].price, 'price_monthly_regular');
+
+  const stripe3 = fakeStripe();
+  const res3 = await runCheckout(checkoutReq('pro_yearly', 'late@example.com'), stripe3, after);
+  const d3 = await res3.json();
+  assert.equal(res3.status, 200, JSON.stringify(d3));
+  assert.equal(d3.plan, 'pro_yearly');
+  assert.equal(stripe3.created[0].line_items[0].price, 'price_yearly_regular');
+});
+
+test('checkout uses the $99.99 yearly sale price during the offer and does not start a trial', async () => {
+  const stripe = fakeStripe();
+  const res = await runCheckout(checkoutReq('pro_yearly', 'year@example.com'), stripe, DURING);
+  const d = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(d));
+  assert.equal(d.trial, false);
+  assert.equal(d.plan, BF_YEARLY_PLAN);
+  assert.equal(stripe.created[0].line_items[0].price, 'price_bf_yearly_9999');
+  assert.ok(!stripe.created[0].subscription_data.trial_period_days);
+  assert.notEqual(stripe.created[0].payment_method_collection, 'always');
 });

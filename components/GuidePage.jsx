@@ -1,4 +1,5 @@
 import SimpleHeader from './SimpleHeader';
+import { offerPublic, proPriceCopy } from '../lib/bftrial';
 
 export const GUIDES = [
   ['/free-ai-clip-maker', 'Free AI clip maker'],
@@ -22,13 +23,15 @@ export function guideMetadata({ path, title, description }) {
 
 // Static long-form guide with FAQ + SoftwareApplication JSON-LD and a CTA.
 export default function GuidePage({ path, h1, intro, sections, faqs }) {
+  const deal = offerPublic();
   const ld = [
     {
       '@context': 'https://schema.org', '@type': 'SoftwareApplication', name: 'Viral AI Clipper', url: SITE,
       applicationCategory: 'MultimediaApplication', operatingSystem: 'Web',
       offers: [
         { '@type': 'Offer', price: '0', priceCurrency: 'USD', name: 'Free' },
-        { '@type': 'Offer', price: '19.99', priceCurrency: 'USD', name: 'Pro (monthly)' },
+        { '@type': 'Offer', price: deal.active ? '9.99' : '19.99', priceCurrency: 'USD', name: deal.active ? 'Pro (monthly, Black Friday deal)' : 'Pro (monthly)' },
+        { '@type': 'Offer', price: deal.active ? '99.99' : '199.99', priceCurrency: 'USD', name: deal.active ? 'Pro (yearly, Black Friday deal)' : 'Pro (yearly)' },
       ],
     },
     {
@@ -79,7 +82,8 @@ function Cta() {
   return (
     <div className="mt-8 rounded-2xl border border-line2 bg-surface p-5">
       <div className="font-display text-lg font-extrabold text-white">Try it on your next video</div>
-      <p className="mt-1 text-sm text-soft">Paste a YouTube link or upload an MP4. 3 free generations a day, no card needed.</p>
+      <p className="mt-1 text-sm text-soft">Paste a YouTube link or upload an MP4. 3 free generations a day, no card needed.{offerPublic().active ? ` ${proPriceCopy().deal}.` : ''}</p>
+      <a href="/#pricing" className="mt-2 inline-block text-sm font-semibold text-lime no-underline">{offerPublic().active ? 'See the Black Friday deal' : 'See pricing'}</a>
       <a href="/#top" className="btn-lime mt-4 inline-flex h-11 items-center px-5 no-underline">Make clips free</a>
     </div>
   );

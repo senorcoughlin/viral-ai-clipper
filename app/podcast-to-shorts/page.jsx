@@ -1,4 +1,8 @@
 import GuidePage, { guideMetadata } from '../../components/GuidePage';
+import { proPriceCopy } from '../../lib/bftrial';
+
+export const revalidate = 300;
+const p = proPriceCopy();
 
 const path = '/podcast-to-shorts';
 export const metadata = guideMetadata({ path, title: "Podcast to Shorts: Turn Episodes into Viral Clips with AI", description: "Turn a podcast episode into short vertical clips with word-timed captions. Find the best moments automatically and post them to Shorts, TikTok and Reels." });
@@ -51,7 +55,7 @@ const sections = [
  [
   "Cost",
   [
-   "You can clip a podcast on the free plan with 3 generations a day; free clips have a small watermark. Pro is $19.99 a month with no watermark, every style and batch processing for multiple episodes. There is no per-minute charge, so a two-hour episode costs the same single generation as a ten-minute one."
+   `You can clip a podcast on the free plan with 3 generations a day; free clips have a small watermark. ${p.sentence} with no watermark, every style and batch processing for multiple episodes. There is no per-minute charge, so a two-hour episode costs the same single generation as a ten-minute one.`
   ]
  ]
 ];
