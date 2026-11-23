@@ -19,6 +19,7 @@ import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, s
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
+import { parseScoreJson } from '../../../lib/scoreparse';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
 
 // Longest source we accept for a single-file pull. Sliced YouTube runs use processWindowSec
@@ -52,18 +53,20 @@ import { parseLinks, youtubeIdOf } from '../../../lib/links';
 import { kvEnabled, kvGetJson, kvSetJson } from '../../../lib/kv';
 import { routeGuard } from '../../../lib/ratelimit';
 import { waitUntil } from '@vercel/functions';
+import { ytSourceMaxSec } from '../../../lib/downloader';
+import { resolveYoutubeSecs } from '../../../lib/ytinfo';
 import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnabled, downloaderEnabled, downloadViaRapid, startRapidJob, pollRapidJob, rapidDown, isFacebookUrl, resolveFacebookUrl, downloadFacebookViaApi, remoteSize, isDurationLimitError } from '../../../lib/downloader';
 import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget, audioFormMeta, isValidAudioBuffer, isGroqQuotaError } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
-import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation, readJobMeta, claimStaleResume, kickResume, refundLostJob } from '../../../lib/jobs';
+import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation, readJobMeta, claimStaleResume, kickResume, refundLostJob, claimKick, kickContinue } from '../../../lib/jobs';
 import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sliceFor, startHqJobs, fetchHqClip, SLICE_MAX_HOPS, HQ_FORMATS } from '../../../lib/slices';
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
 import { parseStreamUrl, resolveStream, windowPlaylist } from '../../../lib/stream';
 import { resolveYoutubeLive, captureLiveWindow } from '../../../lib/ytlive';
 import { proxyAllowed, downloadViaProxyFallback, redactProxy, isProxyBudgetError } from '../../../lib/ytproxy';
-import { processWindowSec, sliceCapFor, uploadFallbackMessage } from '../../../lib/pipeline';
+import { processWindowSec, sliceCapFor, uploadFallbackMessage, ytTooLongMessage } from '../../../lib/pipeline';
 
 // Stream sources (Twitch/Kick) are transcribed in chunks so multi-hour VODs fit the
 // 25 MB Whisper limit and the 300s function budget. Chunks run in parallel.
@@ -230,11 +233,7 @@ ${timed ? timestampedTranscript(transcript) : String(transcript?.text || transcr
     const data = g.data;
     meterGemini('score', data?.usageMetadata);
     const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought && p.text).map(p => p.text).join('');
-    let parsed = null;
-    try { parsed = JSON.parse(text); } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : null;
-    }
+    const parsed = parseScoreJson(text);
     if (!Array.isArray(parsed?.clips)) { console.warn('gemini no clips', data?.candidates?.[0]?.finishReason, text.slice(0, 200)); return null; }
     parsed.clips = parsed.clips
       .filter(c => c && typeof c === 'object')
@@ -507,6 +506,16 @@ export async function GET(request) {
   const from = Math.max(0, parseInt(u.searchParams.get('from') || '0', 10) || 0);
   if (!validJobId(id)) return NextResponse.json({ found: false }, { status: 400 });
   const j = await readJob(id, from).catch(() => ({ found: false }));
+  // A hand-off the server couldn't start itself (508 loop protection): start it from this
+  // browser-originated request, which begins a fresh request chain.
+  if (j.found && !j.done && j.kick && !j.lost && j.hasPayload) {
+    const meta = await readJobMeta(id).catch(() => null);
+    if (meta?.payload && await claimKick(id)) {
+      const ok = await kickContinue(id, new URL(request.url).origin, meta.payload);
+      console.log('job kick', { ok, hops: meta.hops || 0 });
+      if (ok) return NextResponse.json({ ...j, kick: false, resuming: true }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+  }
   if (j.found && !j.done && j.stale && !j.lost && j.hasPayload) {
     const meta = await readJobMeta(id).catch(() => null);
     const origin = new URL(request.url).origin;
@@ -552,7 +561,7 @@ export async function POST(request) {
   if (parsed.found > 1) console.warn('generate: multiple links in one request; using first', { found: parsed.found });
   const videoUrl = validateVideoUrl(parsed.links[0] || rawUrl);
   if (!videoUrl) {
-    return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.' }, { status: 400 });
+    return NextResponse.json({ success: false, message: 'That doesn\'t look like a public video link. Paste a YouTube (or other public video) URL.', code: 'bad_link' }, { status: 400 });
   }
   const ytId = youtubeId(videoUrl);
   // Private uploads are handed to RenderIO as a short-lived presigned Blob URL (read straight
@@ -562,15 +571,19 @@ export async function POST(request) {
   let ytLivePending = false;
   let ytWindowed = null;
   if (ytId) {
-    const secs = (await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId));
+    // Continuations reuse the length the first invocation found (KV-cached) instead of re-probing.
+    const secs = await resolveYoutubeSecs(ytId, videoUrl);
     ytSecs = secs || 0;
     console.log('yt duration', { ytId, secs });
     if (secs === -1) {
       ytLivePending = true;
     } else if (secs === -2) {
-      return NextResponse.json({ success: false, message: 'That YouTube stream hasn’t started yet. Try again after it goes live and ends.' }, { status: 400 });
+      return NextResponse.json({ success: false, message: 'That YouTube stream hasn’t started yet. Try again after it goes live and ends.', code: 'not_started' }, { status: 400 });
     } else if (secs === 0) {
-      return NextResponse.json({ success: false, message: 'That YouTube video is unavailable (private, removed, or region-locked). Try another link.' }, { status: 400 });
+      return NextResponse.json({ success: false, message: 'That YouTube video is unavailable (private, removed, or region-locked). Try another link.', code: 'unavailable_video' }, { status: 400 });
+    } else if (secs > ytSourceMaxSec() + 1) {
+      // The downloader refuses these for length (even trimmed slices); say so before charging.
+      return NextResponse.json({ success: false, message: ytTooLongMessage(secs, ytSourceMaxSec()), code: 'too_long', tooLong: true, upload: true, secs: Math.round(secs) }, { status: 400 });
     }
   }
 
@@ -601,7 +614,7 @@ export async function POST(request) {
       media.winStart = Math.max(0, end - media.winLen);
       media.liveMinutes = mins;
       if (media.winLen < Math.max(30, clipLength + 2)) {
-        return NextResponse.json({ success: false, message: 'This stream only just started, so there isn’t enough footage yet. Try again in a few minutes, or upload a recording.' }, { status: 400 });
+        return NextResponse.json({ success: false, message: 'This stream only just started, so there isn’t enough footage yet. Try again in a few minutes, or upload a recording.', code: 'not_started' }, { status: 400 });
       }
     } else {
       media.winStart = 0;
@@ -617,7 +630,7 @@ export async function POST(request) {
     if (media) wholeSec = media.live ? 0 : media.winLen;
     else if (ytId) wholeSec = ytSecs > 0 ? ytSecs : 0;
     else if (localFfmpegAvailable()) wholeSec = await probeRemoteDuration(rioUrl, null, null, 12000).catch(() => 0);
-    if (media?.live) return NextResponse.json({ success: false, message: '"Use whole video" needs a finished video, not a live stream. Turn it off to clip the last few minutes.' }, { status: 400 });
+    if (media?.live) return NextResponse.json({ success: false, message: '"Use whole video" needs a finished video, not a live stream. Turn it off to clip the last few minutes.', code: 'live' }, { status: 400 });
     if (wholeSec > WHOLE_MAX_SEC + 0.5) return NextResponse.json({ success: false, message: WHOLE_TOO_LONG(wholeSec), tooLong: true, whole: true, code: 'whole_too_long', secs: Math.round(wholeSec) }, { status: 400 });
     if (wholeSec > 0) clipLength = Math.max(1, Math.ceil(wholeSec));
     console.log('whole video', { wholeSec, clipLength });
@@ -663,6 +676,7 @@ export async function POST(request) {
           ? `That VOD is ${fmtDur(media.winLen)} long. Free runs handle streams up to ${fmtDur(max)}; Pro and credit runs handle up to ${paidMax}. Upgrade, or paste a Twitch clip or a shorter VOD.`
           : `That VOD is ${fmtDur(media.winLen)} long. The current limit is ${paidMax} per run. Paste a shorter VOD or a Twitch clip.`,
         tooLong: true,
+        code: 'too_long',
       }, { status: 400 });
     }
   }
@@ -680,6 +694,7 @@ export async function POST(request) {
         success: false,
         message: `That YouTube video is ${fmtDur(ytSecs)} long. Upload the MP4 (or a trimmed part) to clip it. This run was not counted.`,
         tooLong: true,
+        code: 'too_long',
         upload: true,
       }, { status: 400 });
     }
@@ -693,7 +708,7 @@ export async function POST(request) {
     : bypass ? { ok: true, refund: async () => {}, key: null } : await checkLimit(ip, tier);
   if (!limit.ok) {
     if (creditSpent) await refundCredit(email).catch(() => {});
-    return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached }, { status: limit.status });
+    return NextResponse.json({ success: false, message: limit.message, limitReached: !!limit.limitReached, code: limit.limitReached ? 'daily_limit' : limit.status === 429 ? 'rate_limited' : undefined }, { status: limit.status });
   }
   // Give the usage slot (and credit) back when the run produces no real clips.
   let refunded = false;
@@ -942,10 +957,13 @@ export async function POST(request) {
           res.body?.cancel().catch(() => {});
         } catch (e) { console.warn('handoff failed', e?.message); }
         if (!ok) {
-          handedOff = false;
-          await refundUsage();
-          send({ type: 'error', message: 'This video took too long to process. Try again, or upload the file instead. This run was not counted.' });
-          send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'handoff failed' });
+          // Vercel's loop protection answers 508 once a function has called itself a few times in
+          // a row. Keep the job armed instead of failing it: the browser's next poll (a fresh
+          // request chain) starts the next hop (see GET ?job=). A dead job is resumed or refunded
+          // by the stale-job path as before.
+          await touchJob(jobId, { kick: Date.now() }).catch(() => {});
+          send({ type: 'status', label: 'Still working — continuing on a fresh server…' });
+          if (writer) await writer.flush();
         }
         close();
       };
@@ -1088,7 +1106,14 @@ export async function POST(request) {
                   // Full-file download rejected because the video is longer than the provider's
                   // default cap. Don't waste a RenderIO slot (YouTube blocks that yt-dlp).
                   if (e?.durationLimit || isDurationLimitError(e)) {
-                    if (!ytSecs) ytSecs = ((await youtubeInfoDuration(videoUrl)) ?? (await youtubeDuration(ytId))) || 0;
+                    if (!(ytSecs > 0)) ytSecs = Math.max(0, (await resolveYoutubeSecs(ytId, videoUrl, { cache: false })) || 0);
+                    // The provider only refuses a full file for length when the video is over its
+                    // standard length, which slices can't get around either: tell the user plainly.
+                    if (!(ytSecs > 0) || ytSecs > ytSourceMaxSec()) {
+                      const err = new Error(ytTooLongMessage(ytSecs, ytSourceMaxSec()));
+                      err.tooLong = true; err.upload = true;
+                      throw err;
+                    }
                     if (whole) { const err = new Error(WHOLE_TOO_LONG(ytSecs || 0)); err.code = 'whole_too_long'; throw err; }
                     if (ytSecs > processMax) { ytWindowed = { sourceSec: ytSecs, processMax }; ytSecs = processMax; }
                     if (shouldSlice(ytSecs) && rapidEnabled && jobsEnabled && localFfmpegAvailable()
@@ -1143,14 +1168,29 @@ export async function POST(request) {
                       // Some sites (e.g. Facebook reels/shares) have no format matching '720p': retry with yt-dlp's default pick.
                       .catch((e) => { if (e?.capacity || isTransientRenderioError(e)) throw e; console.warn('720p download failed, retrying default format', e?.message); return renderioRun({ input_urls: { in_video: dl } }, 'out_video', rioKey, 120000); });
                   } catch (e) {
-                    // RenderIO failed: try the hosted download API (if configured and not already tried) before giving up.
-                    if (e?.capacity || isFacebookUrl(videoUrl) || !(downloadApiEnabled || rapidEnabled) || Date.now() > deadlineAt) throw e;
-                    console.warn('renderio download failed; trying download api', e?.message);
-                    return await downloadFacebookViaApi(dl, Math.min(90000, Math.max(30000, deadlineAt + 60000 - Date.now())));
+                    if (e?.capacity) throw e;
+                    let lastErr = e;
+                    // RenderIO failed: try the hosted download API (if configured and not already tried).
+                    if (!isFacebookUrl(videoUrl) && (downloadApiEnabled || rapidEnabled) && Date.now() < deadlineAt) {
+                      console.warn('renderio download failed; trying download api', e?.message);
+                      try { return await downloadFacebookViaApi(dl, Math.min(90000, Math.max(30000, deadlineAt + 60000 - Date.now()))); }
+                      catch (e2) { lastErr = e2; console.warn('download api failed too', e2?.message); }
+                    }
+                    // Last resort for TikTok / Instagram / Facebook / other sites: yt-dlp through the
+                    // residential proxy (size-capped so one long video can't eat the monthly budget).
+                    if (Date.now() < deadlineAt + 15000 && await proxyAllowed().catch(() => false)) {
+                      try {
+                        const got = await downloadViaProxyFallback(dl, { dir: ctx.dir, height: 720, jobId: jobId || 'src', maxFilesizeMb: Number(process.env.PROXY_GENERIC_MAX_MB || 150),
+                          timeoutMs: Math.min(90000, Math.max(30000, deadlineAt + 60000 - Date.now())) });
+                        console.log('source via proxy yt-dlp', { mb: Math.round((got.bytes || 0) / 1e6) });
+                        return got.url;
+                      } catch (pe) { console.warn('proxied yt-dlp failed', redactProxy(pe?.message)); }
+                    }
+                    throw lastErr;
                   }
                 })())
               .then(u => ({ url: u, direct: true }))
-              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; }));
+              .catch((e) => { console.warn('source download failed', e?.message); if (e?.capacity) ctx.capacity = true; if (e?.tooLong || e?.code === 'whole_too_long') ctx.srcTooLong = { message: e.message, code: e.code === 'whole_too_long' ? 'whole_too_long' : 'too_long' }; ctx.srcFailed = e?.message || 'download failed'; return { url: rioUrl, direct: false }; }));
         })();
       }
       const cachedTr = await cachedTrP;
@@ -1164,9 +1204,10 @@ export async function POST(request) {
             try { if (ctx.dir) await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
             await refundUsage();
             await reportError('generate:download', ctx.capacity ? 'at RenderIO capacity' : 'source download failed: ' + ctx.srcFailed, videoUrl).catch(() => {});
-            if (ctx.srcFailed && (ctx.srcFailed.includes('too long') || /exceeds the standard duration|extended duration permission/i.test(ctx.srcFailed))) {
-              send({ type: 'error', message: uploadFallbackMessage('youtube'), code: 'upload_fallback', upload: true });
-              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long' });
+            if (ctx.srcTooLong || /exceeds the standard duration|extended duration permission/i.test(ctx.srcFailed)) {
+              const tl = ctx.srcTooLong || { message: ytTooLongMessage(ytSecs, ytSourceMaxSec()), code: 'too_long' };
+              send({ type: 'error', message: tl.message, code: tl.code, upload: true });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long', code: tl.code });
               close();
               return;
             }
@@ -1202,13 +1243,28 @@ export async function POST(request) {
             } catch (e) { console.warn('slices failed', e?.message); }
             const have = got?.files?.size || 0;
             const minHave = Math.min(2, plan.slices.length);
-            // Prefer finishing every slice while hops remain; the last hop continues with whatever arrived.
-            if (got && got.missing.length && canHop && (have < plan.slices.length)) { await handOff(); return; }
-            if (!got || have < minHave) {
-              console.warn('slices incomplete; giving up', { ytId, hop, missing: got?.missing?.length ?? -1, have, n: plan.slices.length });
+            if (got?.stats?.durationLimit && have < minHave) {
+              // Over the downloader's standard length: no hop or retry can fix it.
               try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
               await refundUsage();
-              send({ type: 'error', message: uploadFallbackMessage('slow'), code: 'upload_fallback', upload: true });
+              const msg = ytTooLongMessage(ytWindowed?.sourceSec || ytSecs, ytSourceMaxSec());
+              send({ type: 'error', message: msg, code: 'too_long', upload: true });
+              send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'too long', code: 'too_long' });
+              close();
+              return;
+            }
+            // Prefer finishing every slice while hops remain; the last hop continues with whatever arrived.
+            // Only hop when provider jobs are still preparing (pending) — if every missing slice failed
+            // outright, a fresh invocation fails the same way (this used to chain hops every ~2s
+            // until Vercel's loop protection answered 508).
+            const inFlight = (got?.stats?.pending || 0) + (got?.stats?.deferred || 0);
+            if (got && got.missing.length && canHop && (have < plan.slices.length) && (inFlight > 0 || have === 0 && !got.stats?.failed)) { await handOff(); return; }
+            if (!got || have < minHave) {
+              console.warn('slices incomplete; giving up', { ytId, hop, missing: got?.missing?.length ?? -1, have, n: plan.slices.length, failed: got?.stats?.failed || 0, pending: got?.stats?.pending || 0 });
+              try { await fs.rm(ctx.dir, { recursive: true, force: true }); } catch {}
+              await refundUsage();
+              const outright = !!(got?.stats?.failed && !got?.stats?.pending);
+              send({ type: 'error', message: uploadFallbackMessage(outright ? 'youtube' : 'slow'), code: 'upload_fallback', reason: outright ? 'download_blocked' : 'download_slow', upload: true });
               send({ type: 'done', total: 0, real: 0, preview: 0, failed: count, refunded: true, reason: 'download slow' });
               close();
               return;

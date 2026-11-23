@@ -4,10 +4,10 @@ export const maxDuration = 30;
 import { NextResponse } from 'next/server';
 import { routeGuard } from '../../../lib/ratelimit';
 import { validateVideoUrl } from '../../../lib/validate';
-import { youtubeInfoDuration } from '../../../lib/downloader';
+import { ytSourceMaxSec } from '../../../lib/downloader';
+import { resolveYoutubeSecs } from '../../../lib/ytinfo';
 import { probeRemoteDuration, localFfmpegAvailable } from '../../../lib/localprep';
 import { toRenderUrl } from '../../../lib/media';
-import { youtubeDuration } from '../../../lib/ytduration';
 import { youtubeIdOf } from '../../../lib/links';
 import { parseStreamUrl } from '../../../lib/stream';
 import { FREE_PROCESS_SEC, PAID_PROCESS_SEC } from '../../../lib/pipeline';
@@ -20,7 +20,7 @@ export async function GET(request) {
   // ?limits=1 -> the length caps, so the form can show them before anything is pasted. CDN-cached.
   if (sp.get('limits')) {
     const srcMax = Number(process.env.MAX_SOURCE_MINUTES || 120) * 60;
-    return NextResponse.json({ maxSecs: Math.max(srcMax, FREE_PROCESS_SEC), ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+    return NextResponse.json({ maxSecs: Math.max(srcMax, FREE_PROCESS_SEC), ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, hardMaxSecs: ytSourceMaxSec(), liveClipable: true }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
   }
   const limited = await routeGuard(request, 'duration', 60, 600);
   if (limited) return limited;
@@ -37,12 +37,12 @@ export async function GET(request) {
   const maxSecs = id ? FREE_PROCESS_SEC : srcMax;
   try {
     if (id) {
-      const page = await youtubeDuration(id);
-      if (page === -1) live = true;
-      else if (page === -2) upcoming = true;
-      else secs = page > 0 ? page : (Number(await youtubeInfoDuration(url, 7000)) || 0);
+      const got = await resolveYoutubeSecs(id, url);
+      if (got === -1) live = true;
+      else if (got === -2) upcoming = true;
+      else secs = got > 0 ? got : 0;
     }
     else if (!parseStreamUrl(url) && localFfmpegAvailable()) secs = await probeRemoteDuration(await toRenderUrl(url, 10 * 60), null, null, 10000);
   } catch {}
-  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, liveClipable: !!live }, { headers: h });
+  return NextResponse.json({ secs: secs > 0 ? Math.round(secs * 10) / 10 : 0, live, upcoming, maxSecs, ytMaxSecs: FREE_PROCESS_SEC, ytMaxSecsPaid: PAID_PROCESS_SEC, hardMaxSecs: id ? ytSourceMaxSec() : 0, liveClipable: !!live }, { headers: h });
 }
