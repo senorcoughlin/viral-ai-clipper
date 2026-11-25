@@ -3,17 +3,24 @@ process.env.KV_REST_API_URL = 'https://fake-kv.test';
 process.env.KV_REST_API_TOKEN = 'fake';
 export const db = new Map();
 export const sent = [];
+export const cmdLog = [];
+process.on('exit', () => { if (process.env.KV_COUNT) { const c = {}; for (const x of cmdLog) c[x] = (c[x] || 0) + 1; console.error('KV commands', cmdLog.length, JSON.stringify(c)); } });
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   if (String(url).startsWith('https://api.resend.com')) { sent.push(JSON.parse(init.body)); return new Response('{"id":"x"}', { status: 200 }); }
   if (!String(url).startsWith('https://fake-kv.test')) return realFetch(url, init);
   const body = JSON.parse(init.body);
   const run = ([cmd, ...a]) => {
+    cmdLog.push(cmd.toUpperCase() + ' ' + String(a[0]).replace(/[0-9a-f]{8,}/g, '#').replace(/:\d+/g, ':N').slice(0, 30));
     const h = (k) => { if (!db.has(k)) db.set(k, new Map()); return db.get(k); };
     const l = (k) => { if (!db.has(k)) db.set(k, []); return db.get(k); };
     switch (cmd.toUpperCase()) {
       case 'GET': return db.has(a[0]) ? db.get(a[0]) : null;
       case 'SET': { if (a.includes('NX') && db.has(a[0])) return null; db.set(a[0], a[1]); return 'OK'; }
+      case 'MGET': return a.map(k => (db.has(k) ? db.get(k) : null));
+      case 'PFADD': { if (!db.has(a[0])) db.set(a[0], new Set()); const st = db.get(a[0]); const n = st.has(a[1]) ? 0 : 1; st.add(a[1]); return n; }
+      case 'PFCOUNT': return db.get(a[0]) instanceof Set ? db.get(a[0]).size : 0;
+      case 'HINCRBY': { const m = h(a[0]); m.set(a[1], String(Number(m.get(a[1]) || 0) + Number(a[2]))); return Number(m.get(a[1])); }
       case 'DEL': return db.delete(a[0]) ? 1 : 0;
       case 'EXPIRE': return 1;
       case 'INCR': case 'INCRBY': db.set(a[0], String(Number(db.get(a[0]) || 0) + Number(a[1] ?? 1))); return Number(db.get(a[0]));
@@ -38,6 +45,8 @@ globalThis.fetch = async (url, init) => {
     }
   };
   // Pipelined calls (array of arrays) return [{result}], single calls return {result}.
-  if (Array.isArray(body[0])) return new Response(JSON.stringify(body.map(c => ({ result: run(c) }))), { status: 200 });
-  return new Response(JSON.stringify({ result: run(body) }), { status: 200 });
+  try {
+    if (Array.isArray(body[0])) return new Response(JSON.stringify(body.map(c => ({ result: run(c) }))), { status: 200 });
+    return new Response(JSON.stringify({ result: run(body) }), { status: 200 });
+  } catch (e) { return new Response(JSON.stringify({ error: String(e.message) }), { status: 400 }); }
 };

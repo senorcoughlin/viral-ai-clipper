@@ -435,6 +435,7 @@ function HomeInner({ studio = false }) {
   const followJob = async (id, from, onMsg) => {
     let next = from;
     let misses = 0;
+    const t0 = Date.now();
     while (true) {
       let j = null;
       try {
@@ -454,7 +455,9 @@ function HomeInner({ studio = false }) {
         throw new Error('Could not reach the server. Check your connection and retry.');
       }
       await new Promise(res => {
-        const t = setTimeout(done, document.hidden ? 5000 : 2000);
+        // Poll gently as a run ages (each poll costs the server Redis commands): 2s, then 3s after 30s, then 4s after 2 min; 8s in a hidden tab.
+        const age = Date.now() - t0;
+        const t = setTimeout(done, document.hidden ? 8000 : age < 30000 ? 2000 : age < 120000 ? 3000 : 4000);
         function done() { clearTimeout(t); document.removeEventListener('visibilitychange', onVis); res(); }
         function onVis() { if (!document.hidden) done(); }
         document.addEventListener('visibilitychange', onVis);

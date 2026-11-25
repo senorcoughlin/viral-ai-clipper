@@ -55,7 +55,7 @@ import { youtubeDownloader, youtubeInfoDuration, rapidEnabled, downloadApiEnable
 import { downloadToFile, probeRemoteDuration, probeDuration, localTranscript, segmentToBlob, clipAudio, localFfmpegAvailable, sweepStaleTmp, tmpBudget, audioFormMeta, isValidAudioBuffer, isGroqQuotaError } from '../../../lib/localprep';
 import { fetchYoutubeSubtitles, subtitlesEnabled } from '../../../lib/subtitles';
 import { reserveAudioSec, releaseAudioSec } from '../../../lib/groqbudget';
-import { jobsEnabled, newJobId, createJob, jobWriter, touchJob, readJob, validJobId, readContinuation, continueSig, armContinuation, readJobMeta, claimStaleResume, kickResume, refundLostJob, claimKick, kickContinue } from '../../../lib/jobs';
+import { jobsEnabled, jobsAvailable, newJobId, createJob, jobWriter, touchJob, beatJob, readJob, validJobId, readContinuation, continueSig, armContinuation, readJobMeta, claimStaleResume, kickResume, refundLostJob, claimKick, kickContinue } from '../../../lib/jobs';
 import { shouldSlice, sliceFormat, planSlices, fetchSlices, buildSliceAudio, sliceFor, startHqJobs, fetchHqClip, SLICE_MAX_HOPS, HQ_FORMATS } from '../../../lib/slices';
 import { refundSlot } from '../../../lib/ratelimit';
 import { getVercelOidcToken } from '@vercel/functions/oidc';
@@ -710,7 +710,7 @@ export async function POST(request) {
   let refunded = false;
   // The run is a server-side job: it keeps going if the browser backgrounds or drops
   // the stream, and the client can resume it via GET /api/generate?job=<id>.
-  const jobId = cont ? cont.jobId : jobsEnabled ? newJobId() : null;
+  const jobId = cont ? cont.jobId : (jobsEnabled && jobsAvailable()) ? newJobId() : null;
   if (jobId && !cont) await createJob(jobId, { slotKey: limit.key, creditSpent, email: creditSpent ? email : null, tier, payload: body }).catch(() => {});
   const refundUsage = async () => {
     if (refunded) return;
@@ -998,7 +998,7 @@ export async function POST(request) {
         }
         close();
       };
-      const hb = jobId ? setInterval(() => { touchJob(jobId); }, 10000) : null;
+      const hb = jobId ? setInterval(() => { beatJob(jobId); }, 20000) : null; // 1 Redis command per beat; stale after 90s
       const work = withMeter(meter, async () => {
       // Watchdog: if the run would outlive the function, end it cleanly (refund + clear message)
       // instead of being killed and showing up as a lost run.

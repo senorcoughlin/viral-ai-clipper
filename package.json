@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import ./scripts/register-ext.mjs --test scripts/test-download.mjs scripts/test-pro-edit.mjs scripts/test-raffle.mjs scripts/test-geo.mjs scripts/test-spin.mjs scripts/test-codes.mjs scripts/test-bftrial.mjs scripts/test-pipeline.mjs scripts/test-ytproxy.mjs scripts/test-localprep.mjs scripts/test-resilience.mjs scripts/test-capacity.mjs"
+    "test": "node --import ./scripts/register-ext.mjs --test scripts/test-download.mjs scripts/test-pro-edit.mjs scripts/test-raffle.mjs scripts/test-geo.mjs scripts/test-spin.mjs scripts/test-codes.mjs scripts/test-bftrial.mjs scripts/test-pipeline.mjs scripts/test-ytproxy.mjs scripts/test-localprep.mjs scripts/test-resilience.mjs scripts/test-capacity.mjs scripts/test-kvquota.mjs"
   },
   "dependencies": {
     "@types/node": "^20.0.0",
