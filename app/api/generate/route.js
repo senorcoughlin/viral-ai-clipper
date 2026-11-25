@@ -845,16 +845,17 @@ export async function POST(request) {
           crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
           cutOpts.crop = crop || safeClientCrop;
         }
+        let rendered = null;
         if (!rioDown) {
           try {
-            playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, cutOpts);
+            rendered = await renderioCut(win.url, win.offset, len, rio, label, vertical, cutOpts);
           } catch (e) {
             if (isRenderioUnavailable(e)) await markRenderioDown(e.message);
-            else if (!seg?.file && !ctx.local) throw e;
+            else if (!seg?.file && !ctx.local && !win?.url) throw e;
             else console.warn('renderio failed; trying local ffmpeg', String(e.message).slice(0, 160));
           }
         }
-        if (!playUrl) {
+        if (!rendered) {
           let srcFile = seg?.file || null;
           if (!srcFile && ctx.local) srcFile = (await clipSource(start, len, i)).file;
           if (!srcFile && win?.url && localFfmpegAvailable()) {
@@ -866,9 +867,11 @@ export async function POST(request) {
           await localCutToFile({ src: srcFile, out, start: win.offset || 0, length: len, caption: label, vertical, opts: { ...cutOpts, hls: false } });
           if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error('clip storage is not configured');
           const blob = await put(`clips/${Date.now()}_${i}.mp4`, await fs.readFile(out), { access: 'public', contentType: 'video/mp4' });
-          playUrl = blob.url;
+          rendered = blob.url;
           await fs.rm(out, { force: true }).catch(() => {});
         }
+        if (!rendered) throw new Error(ctx.downloadError || 'clip encode failed');
+        playUrl = rendered;
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
