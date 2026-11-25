@@ -16,21 +16,21 @@ test('billing cycle starts on the 24th in America/New_York', () => {
   assert.equal(cycleId(new Date('2027-01-10T12:00:00-05:00')), '2026-12-24');
 });
 
-test('overage math hits $35 at 700 extra commands on the $0.05 default rate', () => {
+test('overage math hits the $35 budget at 614 extra commands on the $0.057 default rate', () => {
   assert.equal(RENDERIO_PLAN_COMMANDS, 5000);
-  assert.equal(RENDERIO_OVERAGE_USD_PER_CMD, 0.05);
+  assert.equal(RENDERIO_OVERAGE_USD_PER_CMD, 0.057);
   assert.equal(RENDERIO_OVERAGE_BUDGET_USD, 35);
-  assert.equal(renderioBudgetCommands(), 5700);
+  assert.equal(renderioBudgetCommands(), 5614);
   assert.equal(overageCommands(0), 0);
   assert.equal(overageCommands(5000), 0);
   assert.equal(overageCommands(5001), 1);
-  assert.equal(overageCommands(5700), 700);
+  assert.equal(overageCommands(5614), 614);
   assert.equal(estimatedOverageUsd(5000), 0);
-  assert.equal(estimatedOverageUsd(5001), 0.05);
-  assert.equal(estimatedOverageUsd(5700), 35);
-  assert.equal(isOverBudget(5699), false);
+  assert.equal(estimatedOverageUsd(5001), 0.06); // $0.057 rounded to cents
+  assert.equal(estimatedOverageUsd(5614), 35);
+  assert.equal(isOverBudget(5613), false);
+  assert.equal(isOverBudget(5614), true);
   assert.equal(isOverBudget(5700), true);
-  assert.equal(isOverBudget(5800), true);
 });
 
 test('budget errors fall back instead of being retried or treated as a paused subscription', () => {
