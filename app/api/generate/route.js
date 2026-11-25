@@ -17,7 +17,7 @@ import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billin
 import { paidEmail } from '../../../lib/session';
 import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, localCutToFile, isRenderioUnavailable, renderioIsDown, markRenderioDown, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
-import { toRenderUrl, isBlobUrl } from '../../../lib/media';
+import { toRenderUrl, isBlobUrl, toFetchable } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
 import { parseScoreJson } from '../../../lib/scoreparse';
 import { newMeter, withMeter, meterGemini, meterWhisper, saveRun } from '../../../lib/metrics';
@@ -866,8 +866,8 @@ export async function POST(request) {
           const out = path.join(ctx.dir, `clip_${i}.mp4`);
           await localCutToFile({ src: srcFile, out, start: win.offset || 0, length: len, caption: label, vertical, opts: { ...cutOpts, hls: false } });
           if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error('clip storage is not configured');
-          const blob = await put(`clips/${Date.now()}_${i}.mp4`, await fs.readFile(out), { access: 'public', contentType: 'video/mp4' });
-          rendered = blob.url;
+          const blob = await put(`clips/${Date.now()}_${i}.mp4`, await fs.readFile(out), { access: 'private', contentType: 'video/mp4', addRandomSuffix: true });
+          rendered = toFetchable(blob.url, 365 * 24 * 3600);
           await fs.rm(out, { force: true }).catch(() => {});
         }
         if (!rendered) throw new Error(ctx.downloadError || 'clip encode failed');
@@ -895,10 +895,11 @@ export async function POST(request) {
         try {
           const buf = await fs.readFile(fileToUpload);
           const blob = await put(`clips/${Date.now()}_${i}.mp4`, buf, {
-            access: 'public',
+            access: 'private',
             contentType: 'video/mp4',
+            addRandomSuffix: true,
           });
-          playUrl = blob.url;
+          playUrl = toFetchable(blob.url, 365 * 24 * 3600);
           real = true;
         } catch (e) {
           console.error('blob upload failed', e?.message);
