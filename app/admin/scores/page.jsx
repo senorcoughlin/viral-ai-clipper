@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { verifySession, SESSION_COOKIE } from '../../../lib/session';
 import { loadRuns } from '../../../lib/metrics';
-import { renderioUsed, RENDERIO_CAP, cycleId } from '../../../lib/capacity';
+import { renderioUsage } from '../../../lib/capacity';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Score dashboard', robots: { index: false, follow: false } };
@@ -22,7 +22,7 @@ export default async function ScoreDashboard({ searchParams }) {
     return <main className="mx-auto max-w-xl p-10 text-soft">Not authorized. Sign in with an admin email (or use the admin key).</main>;
   }
   const runs = await loadRuns();
-  const rioUsed = await renderioUsed();
+  const rio = await renderioUsage();
   const live = runs.filter(r => !r.cached);
   const clips = runs.flatMap(r => r.clips || []);
   const scored = clips.filter(c => c.scored && c.score > 0).map(c => c.score);
@@ -57,9 +57,9 @@ export default async function ScoreDashboard({ searchParams }) {
       <p className="text-sm text-muted">{runs.length} runs logged ({live.length} live, {runs.length - live.length} from cache) · {clips.length} clips · {scored.length} scored · {clips.length - scored.length} not scored</p>
 
       <section className="card flex flex-col gap-2 p-5">
-        <h2 className="font-semibold">RenderIO capacity</h2>
-        <p className="text-sm text-soft"><span className="font-mono text-fg">{rioUsed}</span> of <span className="font-mono">{RENDERIO_CAP}</span> commands used this cycle (started {cycleId()}, America/New_York). New runs are refused when fewer than clip count + 2 remain.</p>
-        <div className="h-2 overflow-hidden rounded-full bg-[#1E1E29]"><i className="block h-full rounded-full bg-lime" style={{ width: `${Math.min(100, (rioUsed / Math.max(1, RENDERIO_CAP)) * 100)}%` }} /></div>
+        <h2 className="font-semibold">RenderIO usage and overage</h2>
+        <p className="text-sm text-soft"><span className="font-mono text-fg">{rio.used}</span> commands this cycle (started {rio.cycle}, America/New_York). The Pro plan includes <span className="font-mono">{rio.plan}</span>; overage is <span className="font-mono">{rio.overage}</span> commands, about <span className="font-mono">${fmt(rio.overageUsd, 2)}</span> at ${fmt(rio.rate, 2)}/command. Local ffmpeg takes over at about ${fmt(rio.budgetUsd, 2)} of estimated overage ({rio.budgetCmds} commands).{rio.seconds ? ` RenderIO processing time this cycle: ${fmt(rio.seconds / 60)} minutes.` : ''}{rio.overBudget ? ' Overage budget reached — new clips use the free local fallback until the cycle resets.' : ''}</p>
+        <div className="h-2 overflow-hidden rounded-full bg-[#1E1E29]"><i className="block h-full rounded-full bg-lime" style={{ width: `${Math.min(100, (rio.used / Math.max(1, rio.budgetCmds)) * 100)}%` }} /></div>
       </section>
 
       <section className="card flex flex-col gap-3 p-5">

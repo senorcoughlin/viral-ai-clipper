@@ -2,7 +2,7 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { head, put } from '@vercel/blob';
-import { renderioCut, localCutToFile, isRenderioUnavailable, renderioIsDown, markRenderioDown, sanitizeBrand, sanitizePro } from '../../../lib/render';
+import { renderioCut, localCutToFile, isRenderioUnavailable, shouldUseRenderio, markRenderioDown, sanitizeBrand, sanitizePro } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
 import { toFetchable, toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
@@ -105,7 +105,7 @@ export async function POST(request) {
     };
     let url = null;
     let localOut = null;
-    if (!(await renderioIsDown())) {
+    if (await shouldUseRenderio()) {
       try { url = await renderioCut(await toRenderUrl(renderSrc), start, outLen, rio, caption, vertical, cutOpts); }
       catch (e) {
         if (isRenderioUnavailable(e)) await markRenderioDown(e.message);

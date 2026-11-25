@@ -15,7 +15,7 @@ import { flagOn } from '../../../lib/siteconfig';
 import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
-import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, localCutToFile, isRenderioUnavailable, renderioIsDown, markRenderioDown, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
+import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, localCutToFile, isRenderioUnavailable, shouldUseRenderio, markRenderioDown, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { toRenderUrl, isBlobUrl, toFetchable } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
@@ -632,8 +632,9 @@ export async function POST(request) {
   }
 
   // Capacity pre-check (before charging usage): a run needs ~1 cut per clip plus audio and face jobs.
+  // If local ffmpeg is available we still accept the run and fall back instead of refusing.
   const audioChunks = media ? Math.max(1, Math.ceil(media.winLen / STREAM_CHUNK_SEC)) : 1;
-  if (process.env.RENDERIO_API_KEY && (await renderioLeft()) < count + 2 + audioChunks) {
+  if (process.env.RENDERIO_API_KEY && (await renderioLeft()) < count + 2 + audioChunks && !localFfmpegAvailable()) {
     return NextResponse.json({ success: false, message: CAPACITY_MESSAGE, capacity: true }, { status: 503 });
   }
 
@@ -840,13 +841,13 @@ export async function POST(request) {
         }
         const long = len > 90;
         const cutOpts = { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls, long, ...(long ? { timeoutMs: Math.max(60000, 262000 - (Date.now() - (ctx.startedAt || Date.now()))) } : {}) };
-        const rioDown = await renderioIsDown();
-        if (!long && !rioDown && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) {
+        const rioOk = await shouldUseRenderio();
+        if (!long && rioOk && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) {
           crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
           cutOpts.crop = crop || safeClientCrop;
         }
         let rendered = null;
-        if (!rioDown) {
+        if (rioOk) {
           try {
             rendered = await renderioCut(win.url, win.offset, len, rio, label, vertical, cutOpts);
           } catch (e) {
