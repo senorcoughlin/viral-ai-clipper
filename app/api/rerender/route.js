@@ -2,7 +2,7 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { head, put } from '@vercel/blob';
-import { renderioCut, sanitizeBrand, sanitizePro } from '../../../lib/render';
+import { renderioCut, localCutToFile, isRenderioUnavailable, renderioIsDown, markRenderioDown, sanitizeBrand, sanitizePro } from '../../../lib/render';
 import { validateVideoUrl } from '../../../lib/validate';
 import { toFetchable, toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { allowAttempt, clientIp } from '../../../lib/ratelimit';
@@ -11,6 +11,11 @@ import { paidEmail } from '../../../lib/session';
 import { getEntitlement } from '../../../lib/billing';
 import { kvGetJson } from '../../../lib/kv';
 import { youtubeIdOf } from '../../../lib/links';
+import { downloadToFile, localFfmpegAvailable } from '../../../lib/localprep';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+
 
 const SAFE_CROP = /^scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280:x=\(iw-720\)\*[01]\.\d{3}:y=\(ih-1280\)(\/5|\*[01]\.\d{3})$/;
 
@@ -94,9 +99,31 @@ export async function POST(request) {
     }
   }
   try {
-    const url = await renderioCut(await toRenderUrl(renderSrc), start, outLen, rio, words.length ? '' : String(body.caption || '').slice(0, 80), vertical, { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
+    const caption = words.length ? '' : String(body.caption || '').slice(0, 80);
+    const cutOpts = { long: len > 90, ...(len > 90 ? { timeoutMs: 250000 } : {}),
       wordCaptions: true, timedWords: words, userCrop, keep, broll: false, style: body.style, crop, brand, logoUrl: brand?.logoUrl ? await toRenderUrl(brand.logoUrl) : null, hook, credit: String(body.credit || '').slice(0, 40), progress: !!body.progress, zoom: ['punch', 'tight'].includes(body.zoom) ? body.zoom : '', bg: ['blur', 'black'].includes(body.bg) ? body.bg : '', overlayUrl, direct: (isBlobUrl(source) || stored) && !overlayUrl, timeoutMs: len > 90 ? 240000 : 150000, watermark, pro,
-    });
+    };
+    let url = null;
+    let localOut = null;
+    if (!(await renderioIsDown())) {
+      try { url = await renderioCut(await toRenderUrl(renderSrc), start, outLen, rio, caption, vertical, cutOpts); }
+      catch (e) {
+        if (isRenderioUnavailable(e)) await markRenderioDown(e.message);
+        else throw e;
+      }
+    }
+    if (!url) {
+      if (!localFfmpegAvailable()) throw new Error('renderio unavailable and local ffmpeg missing');
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rerender-'));
+      try {
+        const srcFile = path.join(dir, 'src.mp4');
+        await downloadToFile(await toRenderUrl(renderSrc), srcFile, 120000);
+        localOut = path.join(dir, 'clip.mp4');
+        await localCutToFile({ src: srcFile, out: localOut, start, length: outLen, caption, vertical, opts: { ...cutOpts, hls: false, overlayUrl: undefined } });
+        const videoUrl = toFetchable((await put(`clips/edit_${Date.now()}.mp4`, await fs.readFile(localOut), { access: 'private', contentType: 'video/mp4', addRandomSuffix: true })).url, 365 * 24 * 3600);
+        return NextResponse.json({ success: true, videoUrl });
+      } finally { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+    }
     // RenderIO output links are temporary: keep a permanent copy for the library and Download.
     let videoUrl = url;
     if (process.env.BLOB_READ_WRITE_TOKEN) {

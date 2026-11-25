@@ -242,3 +242,40 @@ test('no stale length promises left in site copy', async () => {
   }
   assert.deepEqual(hits, []);
 });
+
+test('RenderIO payment / subscription failures are recognized as unavailable', async () => {
+  const { isRenderioUnavailable, applyFontfile, splitFfmpegArgs } = await import('../lib/render.js');
+  assert.equal(isRenderioUnavailable('renderio submit 403 {"detail":"Active subscription required. Please subscribe to a plan."}'), true);
+  assert.equal(isRenderioUnavailable('renderio submit 401'), true);
+  assert.equal(isRenderioUnavailable('renderio timeout'), false);
+  assert.equal(isRenderioUnavailable('renderio submit 429'), false);
+  const vf = applyFontfile("drawtext=text='HI':fontsize=44", '/tmp/Noto:Sans.ttf');
+  assert.match(vf, /drawtext=fontfile='\/tmp\/Noto\\:Sans.ttf':text='HI'/);
+  assert.deepEqual(splitFfmpegArgs('-ss 1.5 -i {{in_video}} -vf "scale=720:1280,drawtext=text=\'HI\'" -map 0:v:0 {{out_clip}}'),
+    ['-ss', '1.5', '-i', '{{in_video}}', '-vf', "scale=720:1280,drawtext=text='HI'", '-map', '0:v:0', '{{out_clip}}']);
+});
+
+test('local ffmpeg encodes a vertical clip when RenderIO is down (drawtext is optional)', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const exec = promisify(execFile);
+  const { default: ffmpegStatic } = await import('ffmpeg-static');
+  const { localCutToFile, defaultFontFile } = await import('../lib/render.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'locut-'));
+  const src = path.join(dir, 'src.mp4');
+  const out = path.join(dir, 'clip.mp4');
+  await exec(ffmpegStatic, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=1280x720:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '4', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', src]);
+  assert.ok((await fs.stat(defaultFontFile())).size > 1000, 'bundled font is in the repo');
+  await localCutToFile({ src, out, start: 0.5, length: 2.5, caption: 'Test hook', vertical: true, opts: { wordCaptions: false, watermark: true } });
+  const st = await fs.stat(out);
+  assert.ok(st.size > 20_000, `clip too small (${st.size})`);
+  const probe = await exec(ffmpegStatic, ['-hide_banner', '-i', out]).catch(e => e);
+  const err = String(probe.stderr);
+  assert.match(err, /Video: h264/);
+  assert.match(err, /Audio: aac/);
+  assert.match(err, /720x1280/);
+  const m = err.match(/Duration: (\d+):(\d+):([\d.]+)/);
+  const secs = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  assert.ok(secs > 1.5 && secs < 3.5, `length ${secs}`);
+  await fs.rm(dir, { recursive: true, force: true });
+});

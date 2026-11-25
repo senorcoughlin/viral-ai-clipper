@@ -15,7 +15,7 @@ import { flagOn } from '../../../lib/siteconfig';
 import { checkLimit, clientIp, freeUsed, FREE_DAILY_LIMIT } from '../../../lib/ratelimit';
 import { getEntitlement, consumeCredit, refundCredit } from '../../../lib/billing';
 import { paidEmail } from '../../../lib/session';
-import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
+import { renderioRun, renderioRunRetry, isTransientRenderioError, renderioCut, localCutToFile, isRenderioUnavailable, renderioIsDown, markRenderioDown, sanitizeBrand, HLS_FLAGS } from '../../../lib/render';
 import { renderioLeft, CAPACITY_MESSAGE } from '../../../lib/capacity';
 import { toRenderUrl, isBlobUrl } from '../../../lib/media';
 import { geminiGenerate } from '../../../lib/gemini';
@@ -797,6 +797,7 @@ export async function POST(request) {
     let real = false;
 
     const rio = process.env.RENDERIO_API_KEY;
+    let seg = null;
     if (rio) {
       try {
         const label = autoSubtitles !== false && c.scored !== false ? (c.hook || c.title || '') : '';
@@ -813,7 +814,7 @@ export async function POST(request) {
           // Lossless stream-copy segment; `offset` is where the clip really starts inside it
           // (the cut snaps back to a keyframe), so RenderIO seeks there frame-accurately.
           const lf = await clipSource(start, len, i);
-          const seg = await segmentToBlob(lf.file, ctx.dir, lf.rel, len, `${i}`);
+          seg = await segmentToBlob(lf.file, ctx.dir, lf.rel, len, `${i}`);
           win = { url: seg.url, offset: seg.offset };
           src = { ...src, direct: true };
           // YouTube captions only carry phrase (or approximate) timings. Re-time this clip's
@@ -838,14 +839,44 @@ export async function POST(request) {
           if (sec > 0) { ctx.sourceSec = sec; len = Math.min(len, Math.max(1, Math.ceil(sec))); }
         }
         const long = len > 90;
-        if (!long && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
-        playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls, long, ...(long ? { timeoutMs: Math.max(60000, 262000 - (Date.now() - (ctx.startedAt || Date.now()))) } : {}) });
+        const cutOpts = { wordCaptions: true, timedWords, style: pack || aiStyle, pack, crop: crop || safeClientCrop, brand, direct: src.direct, watermark, hls, long, ...(long ? { timeoutMs: Math.max(60000, 262000 - (Date.now() - (ctx.startedAt || Date.now()))) } : {}) };
+        const rioDown = await renderioIsDown();
+        if (!long && !rioDown && vertical && Date.now() - (ctx.startedAt || Date.now()) < 170000 && (await renderioLeft()) > count + 10) {
+          crop = await faceCropFor(win.url, win.offset, len, src.direct ? 30000 : 45000, src.direct, hls);
+          cutOpts.crop = crop || safeClientCrop;
+        }
+        if (!rioDown) {
+          try {
+            playUrl = await renderioCut(win.url, win.offset, len, rio, label, vertical, cutOpts);
+          } catch (e) {
+            if (isRenderioUnavailable(e)) await markRenderioDown(e.message);
+            else if (!seg?.file && !ctx.local) throw e;
+            else console.warn('renderio failed; trying local ffmpeg', String(e.message).slice(0, 160));
+          }
+        }
+        if (!playUrl) {
+          let srcFile = seg?.file || null;
+          if (!srcFile && ctx.local) srcFile = (await clipSource(start, len, i)).file;
+          if (!srcFile && win?.url && localFfmpegAvailable()) {
+            srcFile = path.join(ctx.dir, `rsrc_${i}.mp4`);
+            await downloadToFile(win.url, srcFile, 90000);
+          }
+          if (!srcFile || !localFfmpegAvailable()) throw new Error(ctx.downloadError || 'renderio unavailable and no local source');
+          const out = path.join(ctx.dir, `clip_${i}.mp4`);
+          await localCutToFile({ src: srcFile, out, start: win.offset || 0, length: len, caption: label, vertical, opts: { ...cutOpts, hls: false } });
+          if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error('clip storage is not configured');
+          const blob = await put(`clips/${Date.now()}_${i}.mp4`, await fs.readFile(out), { access: 'public', contentType: 'video/mp4' });
+          playUrl = blob.url;
+          await fs.rm(out, { force: true }).catch(() => {});
+        }
         c._crop = crop || safeClientCrop || null;
         c._words = timedWords;
         real = true;
       } catch (e) {
         ctx.downloadError = e?.message || String(e);
         if (e?.capacity) ctx.capacity = true;
+      } finally {
+        if (seg?.file) await fs.rm(seg.file, { force: true }).catch(() => {});
       }
     } else if (ctx.source) {
       const out = path.join(ctx.dir, `clip_${i}.mp4`);
