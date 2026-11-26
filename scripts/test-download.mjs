@@ -472,6 +472,30 @@ test('downloadViaRapid sends start_time/end_time for cut downloads', async () =>
   } finally { globalThis.fetch = orig; }
 });
 
+test('a RapidAPI 5xx blip pauses it for 30s (not 15 min); not-subscribed and monthly quota keep the long pause', async () => {
+  process.env.YT_RAPIDAPI_KEY = process.env.YT_RAPIDAPI_KEY || 'test-rapid-key';
+  const mod = await import('../lib/downloader.js?rapidcd=' + Date.now());
+  assert.equal(mod.rapidCooldownSec(504, ''), 30);
+  assert.equal(mod.rapidCooldownSec(502, 'x'), 30);
+  assert.equal(mod.rapidCooldownSec(429, 'Too many requests'), 90);
+  assert.equal(mod.rapidCooldownSec(429, 'You have exceeded the MONTHLY quota for Requests'), 15 * 60);
+  assert.equal(mod.rapidCooldownSec(403, 'You are not subscribed to this API.'), 15 * 60);
+  assert.equal(mod.rapidCooldownSec(401, ''), 15 * 60);
+});
+
+test('startRapidJob retries once after a 504 and succeeds without marking RapidAPI down', async () => {
+  process.env.YT_RAPIDAPI_KEY = process.env.YT_RAPIDAPI_KEY || 'test-rapid-key';
+  const mod = await import('../lib/downloader.js?rapidretry=' + Date.now());
+  const orig = globalThis.fetch; let n = 0;
+  globalThis.fetch = async () => (++n === 1 ? jsonResponse(504, { message: 'Gateway timeout' }) : jsonResponse(200, { success: true, progress_url: 'https://p.example/progress?id=9' }));
+  try {
+    const p = await mod.startRapidJob('https://www.youtube.com/watch?v=abc', { format: '240' });
+    assert.equal(p, 'https://p.example/progress?id=9');
+    assert.equal(n, 2);
+    assert.equal(await mod.rapidDown(), false);
+  } finally { globalThis.fetch = orig; }
+});
+
 // ---- Fast Origin Transfer / disk fixes ----
 test('saved slices are not read from Blob while provider slices are still missing (no wasted re-reads before a hand-off)', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
