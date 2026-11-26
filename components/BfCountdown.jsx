@@ -2,8 +2,14 @@
 import { useEffect, useState } from 'react';
 import { offerCountdown, offerActive } from '../lib/bftrial';
 
-export function useOfferCountdown(now) {
-  const [cd, setCd] = useState(() => offerCountdown(now));
+// The page HTML is prerendered at deploy time and served from the CDN for hours or days, so a
+// time-based first render never matches what the browser computes (React errors #425/#422 on every
+// visit, which forces a full client re-render). Server and first client render both use this fixed
+// text; the live countdown replaces it right after mount.
+const STATIC_CD = { ended: false, totalMs: 1, days: 0, hours: 0, minutes: 0, seconds: 0, compact: 'until Jan 1', text: 'Ends Jan 1', label: 'until Jan 1' };
+
+export function useOfferCountdown() {
+  const [cd, setCd] = useState(STATIC_CD);
   useEffect(() => {
     setCd(offerCountdown());
     if (!offerActive()) return undefined;

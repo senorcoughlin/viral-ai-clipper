@@ -1265,7 +1265,9 @@ export async function POST(request) {
             const start = (o) => startRapidJob(videoUrl, o);
             let got = null;
             try {
-              got = await fetchSlices({ videoUrl, ytId, fmt, plan, dir: ctx.dir, deadline, start, poll: pollRapidJob, maxBytes: ctx.tmpCap,
+              // On the last hop, read the slices already saved in Blob even if one is still missing, so the run
+              // continues with a partial set instead of giving up with every slice deferred.
+              got = await fetchSlices({ videoUrl, ytId, fmt, plan, dir: ctx.dir, deadline, start, poll: pollRapidJob, maxBytes: ctx.tmpCap, deferBlob: canHop,
                 blobHeaders: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
                 onProgress: (s) => {
                   const pct = s.total ? Math.min(85, Math.round(8 + 72 * s.have / s.total)) : 8;

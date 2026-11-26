@@ -296,6 +296,47 @@ test('a slice still preparing at the deadline keeps its provider job for the nex
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test('a provider slice job stuck for longer than the stale limit is restarted, not polled forever', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const env = fakeSliceEnv();
+  const stuck = 'https://p.example/progress?k=2&stuck=1&f=240&s=720&e=1140';
+  env.kv.set(slices.slicePendingKey('abc', '240', plan, 2), { p: stuck, at: Date.now() - 20 * 60 * 1000 });
+  const basePoll = env.poll;
+  env.poll = async (p, t) => { if (p.includes('stuck=1')) { const e = new Error('download api timeout'); e.timeout = true; throw e; } return basePoll(p, t); };
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.stats.restarted, 1);
+  assert.equal(env.calls.start.length, plan.slices.length, 'one start per slice: 4 fresh + the restarted one is not double-counted');
+  assert.ok(!env.calls.poll.includes(stuck), 'the stuck job is not polled');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('a recent pending job is still resumed (not restarted)', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const env = fakeSliceEnv();
+  const recent = 'https://p.example/progress?k=2&f=240&s=720&e=1140';
+  env.kv.set(slices.slicePendingKey('abc', '240', plan, 2), { p: recent, at: Date.now() - 60 * 1000 });
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, ...env });
+  assert.deepEqual(r.missing, []);
+  assert.ok(!r.stats.restarted);
+  assert.ok(env.calls.poll.includes(recent));
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('last hop (deferBlob off): slices saved in Blob are read even when one slice is still missing', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
+  const plan = slices.planSlices(1500, 30, 360);
+  const saved = {};
+  plan.slices.forEach(sl => { if (sl.k !== 2) saved[slices.sliceKey('abc', '240', plan, sl.k)] = { blob: `https://blob.example/${sl.k}.mp4` }; });
+  const env = fakeSliceEnv({ saved, slowK: new Set([2]) });
+  const r = await slices.fetchSlices({ videoUrl: 'u', ytId: 'abc', fmt: '240', plan, dir, deadline: Date.now() + 60000, minPullMs: 0, deferBlob: false, ...env });
+  assert.deepEqual(r.missing, [2]);
+  assert.equal(r.files.size, plan.slices.length - 1, 'partial set is available to continue with');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test('with too little time left, jobs are started (for the next invocation) but not awaited', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vac-sl-'));
   const plan = slices.planSlices(1500, 30, 360);
