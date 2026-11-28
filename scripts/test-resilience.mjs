@@ -64,8 +64,11 @@ test('videos over the downloader length cap are blocked up front with a clear me
 test('provider length refusals are recognized in every wording', () => {
   assert.ok(isDurationLimitError('This video exceeds the standard duration limit for this format. Use allow_extended_duration=1 parameter.'));
   assert.ok(isDurationLimitError('This video exceeds the standard duration limit for this format. Extended duration permission required.'));
+  assert.ok(isDurationLimitError('Downloads are only allowed for videos up to 3 hours'));
   assert.ok(isLengthRefusal(new Error('This video exceeds the standard duration limit for this format. Use allow_extended_duration=1 parameter.')));
+  assert.ok(isLengthRefusal(new Error('Downloads are only allowed for videos up to 3 hours')));
   assert.equal(isDurationLimitError('download api timeout'), false);
+  assert.equal(isDurationLimitError('YouTube is sending this video to us too slowly right now'), false);
 });
 
 test('InnerTube player replies give length even when the video is unplayable here', () => {

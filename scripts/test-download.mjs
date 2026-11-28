@@ -148,6 +148,33 @@ test('downloadViaRapid tags duration-limit rejections so callers skip RenderIO',
   }
 });
 
+test('RapidAPI 3-hour cap is a duration limit and does not fall through to the prepaid API', async () => {
+  process.env.YT_RAPIDAPI_KEY = process.env.YT_RAPIDAPI_KEY || 'test-rapid-key';
+  process.env.YT_DOWNLOAD_API_KEY = process.env.YT_DOWNLOAD_API_KEY || 'test-key-not-real';
+  const mod = await import('../lib/downloader.js?dur3h=' + Date.now());
+  assert.equal(mod.isDurationLimitError('Downloads are only allowed for videos up to 3 hours'), true);
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (u) => {
+    const url = String(u);
+    seen.push(url);
+    if (/rapidapi\.com/i.test(url)) {
+      return jsonResponse(400, { success: false, message: 'Downloads are only allowed for videos up to 3 hours' });
+    }
+    return jsonResponse(400, { error_code: 'insufficient_balance', message: 'Not enough balance', successfull: false });
+  };
+  try {
+    await assert.rejects(
+      () => mod.youtubeDownloader()('https://youtu.be/dQw4w9wgGcQ', 5000),
+      (e) => e?.durationLimit === true && /only allowed for videos up to 3 hours/i.test(e.message) && !e?.insufficientBalance,
+    );
+    assert.ok(seen.some((u) => /rapidapi\.com/i.test(u)), 'RapidAPI should be tried first');
+    assert.equal(seen.some((u) => /savenow\.to|video-download-api/i.test(u)), false, 'must not call the prepaid direct API');
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 
 test('downloadViaApi treats insufficient_balance as a fast skip and remembers it', async () => {
   _resetDownloadApiDownForTests();
